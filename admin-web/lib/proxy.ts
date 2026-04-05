@@ -13,7 +13,7 @@ export async function proxy(req: NextRequest) {
     req.nextUrl.pathname === "/unauthorized";
   if (isPublicPage) return res;
 
-  const session = await auth0.getSession(req, res);
+  const session = await auth0.getSession(req);
   if (!session) {
     const loginUrl = new URL("/auth/login", req.nextUrl.origin);
     loginUrl.searchParams.set("returnTo", req.nextUrl.pathname);

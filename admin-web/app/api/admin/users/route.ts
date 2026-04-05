@@ -10,7 +10,7 @@ export async function GET() {
     await connectDB();
     const mgmt = getMgmtClient();
 
-    const [{ data: auth0Users }, usageDocs, limitDocs, devUserIds] = await Promise.all([
+    const [auth0UsersPage, usageDocs, limitDocs, devUserIds] = await Promise.all([
       mgmt.users.list({ per_page: 100 }),
       UserUsage.aggregate([
         { $group: { _id: "$userId", totalCostUsd: { $sum: "$totalCostUsd" } } },
@@ -18,15 +18,16 @@ export async function GET() {
       UserLimit.find({}),
       getDevUserIds(),
     ]);
+    const auth0Users = (auth0UsersPage as any).data as any[];
 
     const usageMap = Object.fromEntries(usageDocs.map((u) => [u._id, u.totalCostUsd]));
     const limitMap = Object.fromEntries(limitDocs.map((l) => [l.userId, l]));
 
     // Only fetch roles for non-dev users (dev users are filtered out)
-    const visibleUsers = auth0Users.filter((u) => !devUserIds.has(u.user_id!));
+    const visibleUsers = auth0Users.filter((u) => !devUserIds.has(u.user_id));
     const rolesResults = await Promise.all(
       visibleUsers.map((u) =>
-        mgmt.users.roles.list(u.user_id!).then((p) => p.data.map((r) => r.name)).catch(() => [])
+        mgmt.users.roles.list(u.user_id).then((p) => ((p as any).data as any[]).map((r: any) => r.name)).catch(() => [])
       )
     );
 
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
   try {
     const { name, email, password, connection } = await req.json();
     const mgmt = getMgmtClient();
-    const { data: created } = await mgmt.users.create({
+    const created = await mgmt.users.create({
       connection: connection ?? process.env.AUTH0_DB_CONNECTION ?? "Username-Password-Authentication",
       name,
       email,

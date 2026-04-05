@@ -9,13 +9,13 @@ export async function GET() {
     await connectDB();
     const mgmt = getMgmtClient();
 
-    const [docs, { data: auth0Users }, devUserIds] = await Promise.all([
+    const [docs, auth0Users, devUserIds] = await Promise.all([
       UserUsage.find({}).lean(),
       mgmt.users.list({ per_page: 100 }),
       getDevUserIds(),
     ]);
 
-    const emailMap = Object.fromEntries(auth0Users.map((u) => [u.user_id, u.email]));
+    const emailMap = Object.fromEntries(((auth0Users as any).data as any[]).map((u: any) => [u.user_id, u.email]));
 
     type UsageRow = {
       userId: string; email: string; modelId: string;

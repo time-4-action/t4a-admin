@@ -6,8 +6,9 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
   const { id } = await params;
   const userId = decodeURIComponent(id);
   const mgmt = getMgmtClient();
-  const { data } = await mgmt.users.roles.list(userId);
-  return NextResponse.json((data ?? []).filter((r: any) => !isDevRole(r.name)));
+  const rolesPage = await mgmt.users.roles.list(userId);
+  const data = (rolesPage as any).data as any[];
+  return NextResponse.json(data.filter((r: any) => !isDevRole(r.name)));
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -18,7 +19,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   // Resolve role IDs to names to filter out the dev role
   const allRoles = assign?.length || remove?.length
-    ? await mgmt.roles.list().then((p) => p.data ?? [])
+    ? ((await mgmt.roles.list()) as any).data as any[]
     : [];
   const devRoleIds = new Set(allRoles.filter((r: any) => isDevRole(r.name)).map((r: any) => r.id));
 

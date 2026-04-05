@@ -7,10 +7,10 @@ import { isDevRole } from "@/lib/ai-role";
  */
 export async function getDevUserIds(): Promise<Set<string>> {
   const mgmt = getMgmtClient();
-  const { data: allRoles } = await mgmt.roles.list();
-  const devRole = (allRoles ?? []).find((r: any) => isDevRole(r.name));
+  const allRoles = ((await mgmt.roles.list()) as any).data as any[];
+  const devRole = allRoles.find((r: any) => isDevRole(r.name));
   if (!devRole) return new Set();
 
-  const { data: devUsers } = await mgmt.roles.users.list(devRole.id);
-  return new Set((devUsers ?? []).map((u: any) => u.user_id as string));
+  const devUsers = ((await mgmt.roles.users.list(devRole.id)) as any).data as any[];
+  return new Set(devUsers.map((u: any) => u.user_id as string));
 }

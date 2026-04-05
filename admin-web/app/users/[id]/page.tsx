@@ -44,11 +44,11 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
     mgmt.roles.list(),
   ]);
 
-  const currentRoles = (userRolesRes.data ?? [])
+  const currentRoles = ((userRolesRes as any).data as any[])
     .filter((r: any) => !isDevRole(r.name))
     .map((r: any) => ({ id: r.id as string, name: r.name as string }));
 
-  const allRoles = (allRolesRes.data ?? [])
+  const allRoles = ((allRolesRes as any).data as any[])
     .filter((r: any) => !isDevRole(r.name))
     .map((r: any) => ({ id: r.id as string, name: r.name as string, description: (r.description ?? "") as string }));
 

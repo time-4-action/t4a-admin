@@ -7,7 +7,7 @@ export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id:
     const { id } = await params;
     const mgmt = getMgmtClient();
     const roleId = decodeURIComponent(id);
-    const { data: role } = await mgmt.roles.get(roleId);
+    const role = await mgmt.roles.get(roleId);
     if (isDevRole((role as any).name)) {
       return NextResponse.json({ error: "This role cannot be modified." }, { status: 403 });
     }
@@ -26,14 +26,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const { name, description } = await req.json();
     const mgmt = getMgmtClient();
     const roleId = decodeURIComponent(id);
-    const { data: role } = await mgmt.roles.get(roleId);
+    const role = await mgmt.roles.get(roleId);
     if (isDevRole((role as any).name)) {
       return NextResponse.json({ error: "This role cannot be modified." }, { status: 403 });
     }
     if (name && isDevRole(name)) {
       return NextResponse.json({ error: "This role name is reserved." }, { status: 400 });
     }
-    const { data } = await mgmt.roles.update(roleId, { name, description });
+    const data = await mgmt.roles.update(roleId, { name, description });
     return NextResponse.json({ id: (data as any).id, name: (data as any).name, description: (data as any).description ?? "" });
   } catch (err: any) {
     console.error("[PATCH /api/admin/roles]", err);

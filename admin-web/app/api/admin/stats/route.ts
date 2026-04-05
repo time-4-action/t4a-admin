@@ -39,12 +39,13 @@ export async function GET() {
   let byUser: { userId: string; name: string; costUsd: number }[] = [];
   try {
     const mgmt = getMgmtClient();
-    const [{ data: auth0Users }, devUserIds] = await Promise.all([
+    const [auth0UsersPage, devUserIds] = await Promise.all([
       mgmt.users.list({ per_page: 100 }),
       getDevUserIds(),
     ]);
+    const auth0Users = (auth0UsersPage as any).data as any[];
 
-    const emailMap = Object.fromEntries(auth0Users.map((u) => [u.user_id, u.email]));
+    const emailMap = Object.fromEntries(auth0Users.map((u: any) => [u.user_id, u.email]));
 
     let devCost = 0;
     const regularUsers: { userId: string; name: string; costUsd: number }[] = [];
