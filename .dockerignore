@@ -1,0 +1,13 @@
+.next
+node_modules
+.git
+.claude
+docs
+admin-web
+.env.local
+.env*.local
+*.md
+*.cmd
+.dockerignore
+Dockerfile
+docker-compose.yaml
