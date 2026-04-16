@@ -3,21 +3,17 @@ setlocal enabledelayedexpansion
 
 set IMAGE=time4action/t4a-admin
 
-:: Parse tag argument
-set TAG=
-if "%~1"=="--latest" set TAG=latest
-if "%~1"=="--dev" set TAG=dev
-if "%TAG%"=="" (
-    for /f "tokens=1-6 delims=/:. " %%a in ("%date% %time%") do (
-        set TAG=%%c%%a%%b-%%d%%e%%f
-    )
-    :: Fallback: use PowerShell for reliable yyyymmdd-hhmmss
-    for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set TAG=%%i
-)
+:: Always generate a date tag
+for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set DATETAG=%%i
 
-echo [build] Image: %IMAGE%:%TAG%
+:: Parse optional alias tag
+set ALIASTAG=
+if "%~1"=="--latest" set ALIASTAG=latest
+if "%~1"=="--dev" set ALIASTAG=dev
+
 echo [build] Reading .env.local for NEXT_PUBLIC_ build args...
 
+:: Build with date tag
 powershell -NoProfile -Command ^
   "$env = @{};" ^
   "Get-Content '.env.local' | Where-Object { $_ -match '^\s*[A-Za-z]' } | ForEach-Object {" ^
@@ -30,7 +26,7 @@ powershell -NoProfile -Command ^
   "$aiRole    = $env['NEXT_PUBLIC_AI_ROLE_NAME'];" ^
   "$devRole   = $env['NEXT_PUBLIC_DEV_ROLE_NAME'];" ^
   "$eurUsd    = $env['NEXT_PUBLIC_EUR_USD_RATE'];" ^
-  "Write-Host '[build] Building %IMAGE%:%TAG%...';" ^
+  "Write-Host '[build] Building %IMAGE%:%DATETAG%...';" ^
   "docker build" ^
   "  --build-arg NEXT_PUBLIC_APP_NAME=$appName" ^
   "  --build-arg NEXT_PUBLIC_COMPANY_COLOR=$color" ^
@@ -38,8 +34,21 @@ powershell -NoProfile -Command ^
   "  --build-arg NEXT_PUBLIC_AI_ROLE_NAME=$aiRole" ^
   "  --build-arg NEXT_PUBLIC_DEV_ROLE_NAME=$devRole" ^
   "  --build-arg NEXT_PUBLIC_EUR_USD_RATE=$eurUsd" ^
-  "  -t %IMAGE%:%TAG% .;" ^
+  "  -t %IMAGE%:%DATETAG% .;" ^
   "if ($LASTEXITCODE -ne 0) { Write-Error 'Build failed'; exit 1 };" ^
-  "Write-Host '[build] Done: %IMAGE%:%TAG%'"
+  "Write-Host '[build] Done: %IMAGE%:%DATETAG%'"
+
+if %ERRORLEVEL% neq 0 exit /b 1
+
+:: Also tag with alias if specified
+if not "%ALIASTAG%"=="" (
+    echo [build] Tagging %IMAGE%:%DATETAG% as %IMAGE%:%ALIASTAG%...
+    docker tag %IMAGE%:%DATETAG% %IMAGE%:%ALIASTAG%
+    if %ERRORLEVEL% neq 0 (
+        echo [build] Tagging failed.
+        exit /b 1
+    )
+    echo [build] Done: %IMAGE%:%ALIASTAG%
+)
 
 endlocal

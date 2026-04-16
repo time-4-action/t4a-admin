@@ -117,13 +117,13 @@ docker push time4action/t4a-admin:latest
 On Windows, use the included scripts which read build args from `.env.local` automatically:
 
 ```cmd
-scripts\build.bat            # default tag: yyyymmdd-hhmmss
-scripts\build.bat --latest   # tag: latest
-scripts\build.bat --dev      # tag: dev
+scripts\build.bat            # builds :yyyymmdd-hhmmss
+scripts\build.bat --latest   # builds :yyyymmdd-hhmmss + tags :latest
+scripts\build.bat --dev      # builds :yyyymmdd-hhmmss + tags :dev
 
-scripts\push.bat             # push with same default tag
-scripts\push.bat --latest    # push :latest
-scripts\push.bat --dev       # push :dev
+scripts\push.bat             # pushes :yyyymmdd-hhmmss
+scripts\push.bat --latest    # pushes :yyyymmdd-hhmmss + :latest
+scripts\push.bat --dev       # pushes :yyyymmdd-hhmmss + :dev
 ```
 
 ## 6. Verification

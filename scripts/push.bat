@@ -3,22 +3,32 @@ setlocal enabledelayedexpansion
 
 set IMAGE=time4action/t4a-admin
 
-:: Parse tag argument
-set TAG=
-if "%~1"=="--latest" set TAG=latest
-if "%~1"=="--dev" set TAG=dev
-if "%TAG%"=="" (
-    for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set TAG=%%i
-)
+:: Always generate a date tag
+for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set DATETAG=%%i
 
-echo [push] Pushing %IMAGE%:%TAG%...
+:: Parse optional alias tag
+set ALIASTAG=
+if "%~1"=="--latest" set ALIASTAG=latest
+if "%~1"=="--dev" set ALIASTAG=dev
 
-docker push %IMAGE%:%TAG%
+:: Push date-tagged image
+echo [push] Pushing %IMAGE%:%DATETAG%...
+docker push %IMAGE%:%DATETAG%
 if %ERRORLEVEL% neq 0 (
-    echo [push] Push failed.
+    echo [push] Push failed for %IMAGE%:%DATETAG%.
     exit /b 1
 )
+echo [push] Done: %IMAGE%:%DATETAG%
 
-echo [push] Done: %IMAGE%:%TAG%
+:: Also push alias tag if specified
+if not "%ALIASTAG%"=="" (
+    echo [push] Pushing %IMAGE%:%ALIASTAG%...
+    docker push %IMAGE%:%ALIASTAG%
+    if %ERRORLEVEL% neq 0 (
+        echo [push] Push failed for %IMAGE%:%ALIASTAG%.
+        exit /b 1
+    )
+    echo [push] Done: %IMAGE%:%ALIASTAG%
+)
 
 endlocal
