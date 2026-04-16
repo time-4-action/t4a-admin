@@ -109,12 +109,22 @@ docker build \
   --build-arg NEXT_PUBLIC_APP_NAME="Admin" \
   --build-arg NEXT_PUBLIC_AI_ROLE_NAME="AI User" \
   --build-arg NEXT_PUBLIC_EUR_USD_RATE=0.92 \
-  -t etiamsi/t4a-admin:latest .
+  -t time4action/t4a-admin:latest .
 
-docker push etiamsi/t4a-admin:latest
+docker push time4action/t4a-admin:latest
 ```
 
-On Windows, use the included `build-and-push.cmd` script which reads build args from `.env.local` automatically.
+On Windows, use the included scripts which read build args from `.env.local` automatically:
+
+```cmd
+scripts\build.bat            # default tag: yyyymmdd-hhmmss
+scripts\build.bat --latest   # tag: latest
+scripts\build.bat --dev      # tag: dev
+
+scripts\push.bat             # push with same default tag
+scripts\push.bat --latest    # push :latest
+scripts\push.bat --dev       # push :dev
+```
 
 ## 6. Verification
 

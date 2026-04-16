@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: etiamsi/t4a-admin:latest
+    image: time4action/t4a-admin:latest
     ports:
       - "3005:3005"
     env_file:

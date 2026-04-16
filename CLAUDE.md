@@ -15,6 +15,9 @@ No linter or test runner is configured — there is no `lint` or `test` script i
 **Docker / production:**
 ```bash
 docker compose up --build   # Build and run on port 3005
+scripts\build.bat            # Build image (tag: yyyymmdd-hhmmss)
+scripts\build.bat --latest   # Build image (tag: latest)
+scripts\push.bat --latest    # Push image to time4action/t4a-admin
 ```
 
 ## Architecture Overview

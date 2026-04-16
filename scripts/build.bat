@@ -1,10 +1,22 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 
-set IMAGE=etiamsi/t4a-admin
-set TAG=latest
+set IMAGE=time4action/t4a-admin
 
-echo [build-and-push] Reading .env.local for NEXT_PUBLIC_ build args...
+:: Parse tag argument
+set TAG=
+if "%~1"=="--latest" set TAG=latest
+if "%~1"=="--dev" set TAG=dev
+if "%TAG%"=="" (
+    for /f "tokens=1-6 delims=/:. " %%a in ("%date% %time%") do (
+        set TAG=%%c%%a%%b-%%d%%e%%f
+    )
+    :: Fallback: use PowerShell for reliable yyyymmdd-hhmmss
+    for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set TAG=%%i
+)
+
+echo [build] Image: %IMAGE%:%TAG%
+echo [build] Reading .env.local for NEXT_PUBLIC_ build args...
 
 powershell -NoProfile -Command ^
   "$env = @{};" ^
@@ -16,19 +28,18 @@ powershell -NoProfile -Command ^
   "$color     = $env['NEXT_PUBLIC_COMPANY_COLOR'];" ^
   "$deepgram  = $env['NEXT_PUBLIC_DEEPGRAM_API_KEY'];" ^
   "$aiRole    = $env['NEXT_PUBLIC_AI_ROLE_NAME'];" ^
+  "$devRole   = $env['NEXT_PUBLIC_DEV_ROLE_NAME'];" ^
   "$eurUsd    = $env['NEXT_PUBLIC_EUR_USD_RATE'];" ^
-  "Write-Host \"[build-and-push] Building %IMAGE%:%TAG%...\";" ^
+  "Write-Host '[build] Building %IMAGE%:%TAG%...';" ^
   "docker build" ^
   "  --build-arg NEXT_PUBLIC_APP_NAME=$appName" ^
   "  --build-arg NEXT_PUBLIC_COMPANY_COLOR=$color" ^
   "  --build-arg NEXT_PUBLIC_DEEPGRAM_API_KEY=$deepgram" ^
   "  --build-arg NEXT_PUBLIC_AI_ROLE_NAME=$aiRole" ^
+  "  --build-arg NEXT_PUBLIC_DEV_ROLE_NAME=$devRole" ^
   "  --build-arg NEXT_PUBLIC_EUR_USD_RATE=$eurUsd" ^
   "  -t %IMAGE%:%TAG% .;" ^
   "if ($LASTEXITCODE -ne 0) { Write-Error 'Build failed'; exit 1 };" ^
-  "Write-Host \"[build-and-push] Pushing %IMAGE%:%TAG%...\";" ^
-  "docker push %IMAGE%:%TAG%;" ^
-  "if ($LASTEXITCODE -ne 0) { Write-Error 'Push failed'; exit 1 };" ^
-  "Write-Host \"[build-and-push] Done.\""
+  "Write-Host '[build] Done: %IMAGE%:%TAG%'"
 
 endlocal
