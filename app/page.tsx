@@ -9,16 +9,20 @@ import {
   Settings,
   ArrowUpRight,
   Bot,
+  Wrench,
+  Mail,
 } from "lucide-react";
 
 const cards = [
-  { href: "/users",        icon: Users,           title: "Users",        desc: "Manage accounts and profiles", accent: "text-violet-500", bg: "bg-violet-50" },
-  { href: "/roles",        icon: ShieldCheck,     title: "Roles",        desc: "Configure permission roles",   accent: "text-sky-500",    bg: "bg-sky-50" },
-  { href: "/roles/assign", icon: UserCog,         title: "Assign Roles", desc: "Grant roles to users",         accent: "text-indigo-500", bg: "bg-indigo-50" },
-  { href: "/ai/dashboard", icon: LayoutDashboard, title: "Dashboard",    desc: "AI usage overview and KPIs",   accent: "text-emerald-500",bg: "bg-emerald-50" },
-  { href: "/ai/usage",     icon: BarChart3,       title: "Usage",        desc: "Detailed logs and costs",      accent: "text-amber-500",  bg: "bg-amber-50" },
-  { href: "/ai/access",    icon: Bot,             title: "AI Access",    desc: "Manage AI access for users",   accent: "text-blue-500",   bg: "bg-blue-50" },
-  { href: "/settings",     icon: Settings,        title: "Settings",     desc: "App preferences",              accent: "text-slate-500",  bg: "bg-slate-100" },
+  { href: "/users",            icon: Users,           title: "Users",        desc: "Manage accounts and profiles", accent: "text-violet-500", bg: "bg-violet-50" },
+  { href: "/roles",            icon: ShieldCheck,     title: "Roles",        desc: "Configure permission roles",   accent: "text-sky-500",    bg: "bg-sky-50" },
+  { href: "/roles/assign",     icon: UserCog,         title: "Assign Roles", desc: "Grant roles to users",         accent: "text-indigo-500", bg: "bg-indigo-50" },
+  { href: "/ai/dashboard",     icon: LayoutDashboard, title: "Dashboard",    desc: "AI usage overview and KPIs",   accent: "text-emerald-500",bg: "bg-emerald-50" },
+  { href: "/ai/usage",         icon: BarChart3,       title: "Usage",        desc: "Detailed logs and costs",      accent: "text-amber-500",  bg: "bg-amber-50" },
+  { href: "/ai/access",        icon: Bot,             title: "AI Access",    desc: "Manage AI access for users",   accent: "text-blue-500",   bg: "bg-blue-50" },
+  { href: "/warranty",         icon: Wrench,          title: "Warranty",     desc: "Review and triage submissions",accent: "text-rose-500",   bg: "bg-rose-50" },
+  { href: "/warranty/settings",icon: Mail,            title: "Email Settings",desc:"Customize warranty emails",    accent: "text-teal-500",   bg: "bg-teal-50" },
+  { href: "/settings",         icon: Settings,        title: "Settings",     desc: "App preferences",              accent: "text-slate-500",  bg: "bg-slate-100" },
 ];
 
 const appName = process.env.NEXT_PUBLIC_APP_NAME ?? "Admin";
