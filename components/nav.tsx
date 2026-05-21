@@ -49,7 +49,7 @@ const sections: { label: string; links: { href: string; label: string; icon: Rea
   {
     label: "Warranty",
     links: [
-      { href: "/warranty",          label: "Submissions",    icon: Wrench, matchPrefix: true },
+      { href: "/warranty",          label: "Claims",         icon: Wrench, matchPrefix: true },
       { href: "/warranty/settings", label: "Email Settings", icon: Mail },
     ],
   },

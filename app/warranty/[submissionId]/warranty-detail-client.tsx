@@ -1,154 +1,791 @@
 "use client";
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { WarrantyStatusBadge } from "@/components/warranty-status-badge";
 import {
+  ASSIGNEES,
+  CUSTOMER_STATUSES,
+  CUSTOMER_STATUS_LABELS,
+  FACTORY_STATUSES,
+  FACTORY_STATUS_LABELS,
   WARRANTY_STATUSES,
   WARRANTY_STATUS_LABELS,
+  WARRANTY_SUGGESTIONS,
+  WARRANTY_SUGGESTION_LABELS,
+  WARRANTY_TYPES,
+  WARRANTY_TYPE_LABELS,
+  type Assignee,
+  type ClaimNote,
+  type CustomerStatus,
+  type FactoryStatus,
   type WarrantyStatus,
+  type WarrantySubmission,
+  type WarrantySuggestion,
+  type WarrantyType,
 } from "@/types/warranty";
-import { Check, Loader2, Mail, ShieldCheck, Activity } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Activity,
+  Check,
+  Loader2,
+  Mail,
+  MapPin,
+  MessageSquare,
+  Package,
+  Receipt,
+  Send,
+  Trash2,
+  User,
+  ExternalLink,
+  Image as ImageIcon,
+  CheckCircle2,
+  Circle,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
-function SidebarCard({
-  icon: Icon,
-  title,
-  children,
-}: {
-  icon: React.ElementType;
-  title: string;
-  children: React.ReactNode;
-}) {
+const IMAGE_EXTS = /\.(jpe?g|png|gif|webp|avif|heic|heif)$/i;
+const isImage = (url: string) => IMAGE_EXTS.test(url.split("?")[0] ?? "");
+
+function fmtDate(value: string): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(d);
+}
+
+function fmtRelative(value: string): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  const diff = Date.now() - d.getTime();
+  const sec = Math.round(diff / 1000);
+  if (sec < 60) return "just now";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+  }).format(d);
+}
+
+function initials(name: string): string {
   return (
-    <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
-      <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border/50 bg-muted/30">
-        <div className="w-5 h-5 rounded-md bg-background border border-border/60 flex items-center justify-center shadow-sm">
-          <Icon className="w-3 h-3 text-muted-foreground" />
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() ?? "")
+      .join("") || "?"
+  );
+}
+
+// ============================================================================
+
+export function ClaimDetailClient({
+  initialDoc,
+  publicUrl,
+  adminLabel,
+}: {
+  initialDoc: WarrantySubmission;
+  publicUrl: string;
+  adminLabel: string;
+}) {
+  const [doc, setDoc] = useState<WarrantySubmission>(initialDoc);
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="px-4 md:px-8 py-6 max-w-6xl mx-auto space-y-6">
+        <WorkflowCard
+          submissionId={doc.submissionId}
+          doc={doc}
+          onUpdate={setDoc}
+        />
+
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
+          <div className="space-y-6 min-w-0">
+            <NotesCard
+              submissionId={doc.submissionId}
+              notes={doc.notes}
+              adminLabel={adminLabel}
+              onUpdate={setDoc}
+            />
+
+            <ProblemCard description={doc.problemDescription} />
+
+            <UploadsCard fileUrls={doc.fileUrls} />
+          </div>
+
+          <aside className="space-y-4">
+            <ContactCard doc={doc} publicUrl={publicUrl} />
+            <PurchaseCard doc={doc} />
+            <ProductCard doc={doc} />
+          </aside>
         </div>
-        <span className="text-[11px] font-semibold text-foreground">{title}</span>
       </div>
-      <div className="p-4">{children}</div>
     </div>
   );
 }
 
-export function WarrantyStatusEditor({
+// ============================================================================
+// Workflow card (pipeline + 5 dropdowns)
+// ============================================================================
+
+function WorkflowCard({
   submissionId,
-  initialStatus,
-  statusUpdatedAt,
-  email,
+  doc,
+  onUpdate,
 }: {
   submissionId: string;
-  initialStatus: WarrantyStatus;
-  statusUpdatedAt: string | null;
-  email: string;
+  doc: WarrantySubmission;
+  onUpdate: (next: WarrantySubmission) => void;
 }) {
   const router = useRouter();
-  const [status, setStatus] = useState<WarrantyStatus>(initialStatus);
-  const [originalStatus, setOriginalStatus] = useState<WarrantyStatus>(initialStatus);
-  const [lastUpdated, setLastUpdated] = useState<string | null>(statusUpdatedAt);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [savingField, setSavingField] = useState<string | null>(null);
+  const [savedFlash, setSavedFlash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
 
-  const dirty = status !== originalStatus;
-
-  async function save() {
-    setSaving(true);
+  async function patch(field: string, body: Record<string, unknown>) {
+    setSavingField(field);
     setError(null);
     const res = await fetch(
       `/api/warranty/submissions/${encodeURIComponent(submissionId)}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(body),
       },
     );
-    setSaving(false);
+    setSavingField(null);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      setError(data?.error ?? "Failed to update status");
+      setError(data?.error ?? "Couldn't save");
       return;
     }
-    const data = await res.json();
-    setOriginalStatus(status);
-    setLastUpdated(data?.statusUpdatedAt ?? new Date().toISOString());
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
-    router.refresh();
+    const updated = (await res.json()) as WarrantySubmission;
+    onUpdate(updated);
+    setSavedFlash(field);
+    setTimeout(() => setSavedFlash((f) => (f === field ? null : f)), 1500);
+    startTransition(() => router.refresh());
   }
 
+  const setStatus = (s: WarrantyStatus) => patch("status", { status: s });
+  const setAssignee = (v: Assignee | "") =>
+    patch("assignee", { assignee: v === "" ? null : v });
+  const setWarrantyType = (v: WarrantyType | "") =>
+    patch("warrantyType", { warrantyType: v === "" ? null : v });
+  const setSuggestion = (v: WarrantySuggestion | "") =>
+    patch("suggestion", { suggestion: v === "" ? null : v });
+  const setFactoryStatus = (v: FactoryStatus | "") =>
+    patch("factoryStatus", { factoryStatus: v === "" ? null : v });
+  const setCustomerStatus = (v: CustomerStatus | "") =>
+    patch("customerStatus", { customerStatus: v === "" ? null : v });
+
   return (
-    <div className="p-4 space-y-3">
-      <SidebarCard icon={Activity} title="Status">
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] text-muted-foreground">Current</span>
-            <WarrantyStatusBadge status={originalStatus} />
+    <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
+      <div className="px-5 py-3 border-b border-border/50 bg-muted/30 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-5 h-5 rounded-md bg-background border border-border/60 flex items-center justify-center">
+            <Activity className="w-3 h-3 text-muted-foreground" />
           </div>
-          <div className="space-y-1.5">
-            <label className="text-[11px] font-medium text-muted-foreground">Change to</label>
-            <Select value={status} onValueChange={(v) => setStatus(v as WarrantyStatus)}>
+          <span className="text-[12px] font-semibold text-foreground">Workflow</span>
+        </div>
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          {savingField && (
+            <span className="flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" /> Saving…
+            </span>
+          )}
+          {savedFlash && !savingField && (
+            <span className="flex items-center gap-1 text-emerald-600">
+              <Check className="w-3 h-3" /> Saved
+            </span>
+          )}
+          {error && <span className="text-destructive">{error}</span>}
+        </div>
+      </div>
+
+      <div className="p-5 space-y-5">
+        <StatusPipeline
+          current={doc.status}
+          saving={savingField === "status"}
+          onChange={setStatus}
+        />
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <WorkflowField label="Assigned to" saving={savingField === "assignee"}>
+            <Select
+              value={doc.assignee ?? ""}
+              onValueChange={(v) => setAssignee(v as Assignee | "")}
+            >
               <SelectTrigger className="h-8 text-[13px] w-full">
-                <SelectValue />
+                <SelectValue placeholder="Unassigned" />
               </SelectTrigger>
               <SelectContent>
-                {WARRANTY_STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {WARRANTY_STATUS_LABELS[s]}
+                <SelectItem value="">Unassigned</SelectItem>
+                {ASSIGNEES.map((a) => (
+                  <SelectItem key={a} value={a}>
+                    {a}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          {error && <p className="text-[11px] text-destructive">{error}</p>}
-          {lastUpdated && (
-            <p className="text-[10px] text-muted-foreground">
-              Last changed {new Date(lastUpdated).toLocaleString()}
-            </p>
-          )}
-          <div className="flex justify-end">
-            <Button
-              size="sm"
-              className={cn(
-                "h-7 text-xs px-3 transition-all duration-200",
-                saved && "bg-emerald-600 hover:bg-emerald-600 border-emerald-600",
-              )}
-              onClick={save}
-              disabled={!dirty || saving || saved}
+          </WorkflowField>
+
+          <WorkflowField label="Warranty type" saving={savingField === "warrantyType"}>
+            <Select
+              value={doc.warrantyType ?? ""}
+              onValueChange={(v) => setWarrantyType(v as WarrantyType | "")}
             >
-              {saved ? (
-                <span className="flex items-center gap-1"><Check className="w-3 h-3" /> Saved</span>
-              ) : saving ? (
-                <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Saving…</span>
-              ) : "Save"}
-            </Button>
+              <SelectTrigger className="h-8 text-[13px] w-full">
+                <SelectValue placeholder="Not set" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Not set</SelectItem>
+                {WARRANTY_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {WARRANTY_TYPE_LABELS[t]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </WorkflowField>
+
+          <WorkflowField label="Suggestion" saving={savingField === "suggestion"}>
+            <Select
+              value={doc.suggestion ?? ""}
+              onValueChange={(v) => setSuggestion(v as WarrantySuggestion | "")}
+            >
+              <SelectTrigger className="h-8 text-[13px] w-full">
+                <SelectValue placeholder="Not set" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Not set</SelectItem>
+                {WARRANTY_SUGGESTIONS.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {WARRANTY_SUGGESTION_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </WorkflowField>
+
+          <WorkflowField label="Factory" saving={savingField === "factoryStatus"}>
+            <Select
+              value={doc.factoryStatus ?? ""}
+              onValueChange={(v) => setFactoryStatus(v as FactoryStatus | "")}
+            >
+              <SelectTrigger className="h-8 text-[13px] w-full">
+                <SelectValue placeholder="Not set" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Not set</SelectItem>
+                {FACTORY_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {FACTORY_STATUS_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </WorkflowField>
+
+          <WorkflowField label="Customer" saving={savingField === "customerStatus"}>
+            <Select
+              value={doc.customerStatus ?? ""}
+              onValueChange={(v) => setCustomerStatus(v as CustomerStatus | "")}
+            >
+              <SelectTrigger className="h-8 text-[13px] w-full">
+                <SelectValue placeholder="Not set" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Not set</SelectItem>
+                {CUSTOMER_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {CUSTOMER_STATUS_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </WorkflowField>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WorkflowField({
+  label,
+  saving,
+  children,
+}: {
+  label: string;
+  saving: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {label}
+        </label>
+        {saving && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function StatusPipeline({
+  current,
+  saving,
+  onChange,
+}: {
+  current: WarrantyStatus;
+  saving: boolean;
+  onChange: (s: WarrantyStatus) => void;
+}) {
+  const idx = WARRANTY_STATUSES.indexOf(current);
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+        Pipeline · click a stage to move the claim
+      </p>
+      <div className="grid grid-cols-5 gap-1.5">
+        {WARRANTY_STATUSES.map((s, i) => {
+          const past = i < idx;
+          const active = i === idx;
+          const Icon = past ? CheckCircle2 : Circle;
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => !active && onChange(s)}
+              disabled={saving || active}
+              className={cn(
+                "group relative rounded-xl border px-2.5 py-2 text-left transition-all",
+                active
+                  ? "border-foreground bg-foreground text-background shadow-sm"
+                  : past
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:border-emerald-700/50 dark:text-emerald-300"
+                  : "border-border bg-background text-muted-foreground hover:border-foreground/40 hover:text-foreground",
+                saving && "opacity-60 cursor-not-allowed",
+              )}
+            >
+              <div className="flex items-center gap-1.5">
+                <Icon
+                  className={cn(
+                    "w-3.5 h-3.5 shrink-0",
+                    active ? "text-background" : past ? "text-emerald-600" : "",
+                  )}
+                />
+                <span className="text-[10px] font-bold tabular-nums">
+                  {i + 1}
+                </span>
+              </div>
+              <p className={cn("text-[11px] font-semibold mt-1 truncate", active && "text-background")}>
+                {WARRANTY_STATUS_LABELS[s]}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Notes timeline
+// ============================================================================
+
+function NotesCard({
+  submissionId,
+  notes,
+  adminLabel,
+  onUpdate,
+}: {
+  submissionId: string;
+  notes: ClaimNote[];
+  adminLabel: string;
+  onUpdate: (next: WarrantySubmission) => void;
+}) {
+  const router = useRouter();
+  const [draft, setDraft] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function post() {
+    const text = draft.trim();
+    if (!text) return;
+    setPosting(true);
+    setError(null);
+    const res = await fetch(
+      `/api/warranty/submissions/${encodeURIComponent(submissionId)}/notes`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      },
+    );
+    setPosting(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setError(data?.error ?? "Couldn't post note");
+      return;
+    }
+    const payload = (await res.json()) as { doc: WarrantySubmission };
+    onUpdate(payload.doc);
+    setDraft("");
+    router.refresh();
+  }
+
+  async function remove(noteId: string) {
+    setDeletingId(noteId);
+    const res = await fetch(
+      `/api/warranty/submissions/${encodeURIComponent(submissionId)}/notes/${encodeURIComponent(noteId)}`,
+      { method: "DELETE" },
+    );
+    setDeletingId(null);
+    if (!res.ok) return;
+    const payload = (await res.json()) as { doc: WarrantySubmission };
+    onUpdate(payload.doc);
+    router.refresh();
+  }
+
+  return (
+    <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
+      <div className="px-5 py-3 border-b border-border/50 bg-muted/30 flex items-center gap-2.5">
+        <div className="w-5 h-5 rounded-md bg-background border border-border/60 flex items-center justify-center">
+          <MessageSquare className="w-3 h-3 text-muted-foreground" />
+        </div>
+        <span className="text-[12px] font-semibold text-foreground">Internal notes</span>
+        {notes.length > 0 && (
+          <span className="text-[10px] font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
+            {notes.length}
+          </span>
+        )}
+      </div>
+
+      <div className="p-5 space-y-4">
+        <div className="flex gap-3">
+          <div className="w-7 h-7 rounded-full bg-foreground text-background flex items-center justify-center text-[10px] font-bold shrink-0">
+            {initials(adminLabel)}
+          </div>
+          <div className="flex-1 min-w-0 space-y-2">
+            <textarea
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                if (error) setError(null);
+              }}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  post();
+                }
+              }}
+              placeholder="Add a note. Visible only to admins."
+              rows={3}
+              className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-[13px] shadow-xs outline-none resize-y focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            />
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] text-muted-foreground">
+                Posting as <strong className="text-foreground">{adminLabel}</strong> · ⌘/Ctrl+Enter to post
+              </p>
+              {error && (
+                <p className="text-[11px] text-destructive">{error}</p>
+              )}
+              <Button
+                size="sm"
+                className="h-7 text-xs px-3 gap-1.5"
+                onClick={post}
+                disabled={!draft.trim() || posting}
+              >
+                {posting ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Send className="w-3 h-3" />
+                )}
+                Post note
+              </Button>
+            </div>
           </div>
         </div>
-      </SidebarCard>
 
-      <SidebarCard icon={Mail} title="Contact">
-        <div className="space-y-2">
-          <a
-            href={`mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(`Re: warranty claim #${submissionId.slice(0, 8)}`)}`}
-            className="block w-full text-[12px] text-foreground hover:text-foreground bg-muted/60 hover:bg-muted px-3 py-2 rounded-lg border border-border/60 transition-colors truncate"
-          >
-            {email}
-          </a>
-          <p className="text-[10px] text-muted-foreground">
-            Opens your mail client. The customer receives no automated reply from this view.
+        {notes.length === 0 ? (
+          <p className="text-center text-[12px] text-muted-foreground py-6">
+            No notes yet. Use this space for diagnostic notes, repair plans, and customer
+            communication summaries.
           </p>
-        </div>
-      </SidebarCard>
-
-      <SidebarCard icon={ShieldCheck} title="About this view">
-        <p className="text-[11px] text-muted-foreground leading-relaxed">
-          Data is pulled live from the warranty service. Editing status updates Mongo; uploads
-          link to the original S3 objects.
-        </p>
-      </SidebarCard>
+        ) : (
+          <div className="space-y-3 pt-2 border-t border-border/40">
+            {notes.map((n) => (
+              <div key={n.id} className="flex gap-3 group">
+                <div className="w-7 h-7 rounded-full bg-muted border border-border/60 flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">
+                  {initials(n.authorName || "?")}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="text-[12px] font-semibold text-foreground">
+                      {n.authorName || "Admin"}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground" title={n.createdAt}>
+                      {fmtRelative(n.createdAt)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => remove(n.id)}
+                      disabled={deletingId === n.id}
+                      className="opacity-0 group-hover:opacity-100 text-[10px] text-muted-foreground hover:text-destructive transition-all flex items-center gap-1 ml-auto"
+                      title="Delete this note"
+                    >
+                      {deletingId === n.id ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-3 h-3" />
+                      )}
+                    </button>
+                  </div>
+                  <p className="text-[13px] text-foreground whitespace-pre-wrap break-words leading-relaxed mt-0.5">
+                    {n.text}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+// ============================================================================
+// Problem description + Uploads + Detail sidebars
+// ============================================================================
+
+function ProblemCard({ description }: { description: string }) {
+  return (
+    <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
+      <div className="px-5 py-3 border-b border-border/50 bg-muted/30 flex items-center gap-2.5">
+        <div className="w-5 h-5 rounded-md bg-background border border-border/60 flex items-center justify-center">
+          <Receipt className="w-3 h-3 text-muted-foreground" />
+        </div>
+        <span className="text-[12px] font-semibold text-foreground">
+          Problem as described by the customer
+        </span>
+      </div>
+      <div className="p-5">
+        <p className="text-[13px] leading-relaxed text-foreground whitespace-pre-wrap break-words">
+          {description?.trim() || "—"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function UploadsCard({
+  fileUrls,
+}: {
+  fileUrls: WarrantySubmission["fileUrls"];
+}) {
+  const uploads: [string, string][] = [
+    ["Invoice / proof of purchase", fileUrls.invoice],
+    ["Serial number photo", fileUrls.serial],
+    ["Full product photo", fileUrls.full],
+    ["Closeup photo", fileUrls.closeup],
+  ];
+  return (
+    <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
+      <div className="px-5 py-3 border-b border-border/50 bg-muted/30 flex items-center gap-2.5">
+        <div className="w-5 h-5 rounded-md bg-background border border-border/60 flex items-center justify-center">
+          <ImageIcon className="w-3 h-3 text-muted-foreground" />
+        </div>
+        <span className="text-[12px] font-semibold text-foreground">
+          Customer uploads
+        </span>
+      </div>
+      <div className="p-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+        {uploads.map(([label, url]) => (
+          <UploadThumb key={label} label={label} url={url} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function UploadThumb({ label, url }: { label: string; url: string }) {
+  if (!url) {
+    return (
+      <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 p-3 text-[11px] text-muted-foreground text-center">
+        <p className="font-medium text-foreground/70 mb-1 truncate">{label}</p>
+        <span>—</span>
+      </div>
+    );
+  }
+  const image = isImage(url);
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group block rounded-xl border border-border/60 bg-background overflow-hidden hover:border-foreground/30 transition-colors shadow-sm"
+    >
+      <div className="aspect-square bg-muted/40 flex items-center justify-center overflow-hidden">
+        {image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={url}
+            alt={label}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+          />
+        ) : (
+          <div className="flex flex-col items-center gap-1 text-muted-foreground">
+            <ExternalLink className="w-5 h-5" />
+            <span className="text-[10px] uppercase tracking-wider">File</span>
+          </div>
+        )}
+      </div>
+      <div className="px-3 py-2">
+        <p className="text-[11px] font-medium text-foreground truncate">{label}</p>
+        <p className="text-[10px] text-muted-foreground truncate group-hover:text-foreground transition-colors">
+          {image ? "Click to enlarge" : "Open file"}
+        </p>
+      </div>
+    </a>
+  );
+}
+
+function MiniCard({
+  icon: Icon,
+  title,
+  rows,
+  footer,
+}: {
+  icon: React.ElementType;
+  title: string;
+  rows: { label: string; value: React.ReactNode }[];
+  footer?: React.ReactNode;
+}) {
+  return (
+    <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-border/50 bg-muted/30 flex items-center gap-2">
+        <Icon className="w-3 h-3 text-muted-foreground" />
+        <span className="text-[11px] font-semibold text-foreground">{title}</span>
+      </div>
+      <div className="p-4 space-y-2.5">
+        {rows.map(({ label, value }) => (
+          <div key={label} className="grid grid-cols-[110px_1fr] gap-3">
+            <span className="text-[11px] text-muted-foreground">{label}</span>
+            <span className="text-[12px] text-foreground break-words">
+              {value || <span className="text-muted-foreground">—</span>}
+            </span>
+          </div>
+        ))}
+        {footer}
+      </div>
+    </div>
+  );
+}
+
+function ContactCard({
+  doc,
+  publicUrl,
+}: {
+  doc: WarrantySubmission;
+  publicUrl: string;
+}) {
+  const fullName = [doc.name, doc.surname].filter(Boolean).join(" ").trim();
+  return (
+    <MiniCard
+      icon={User}
+      title="Customer"
+      rows={[
+        { label: "Name", value: fullName },
+        { label: "Company", value: doc.company },
+        { label: "Type", value: doc.typeOfPartner },
+        {
+          label: "Email",
+          value: doc.email ? (
+            <a
+              href={`mailto:${encodeURIComponent(doc.email)}?subject=${encodeURIComponent(`Re: warranty claim #${doc.submissionId.slice(0, 8)}`)}`}
+              className="text-foreground hover:text-foreground hover:underline underline-offset-2 inline-flex items-center gap-1 break-all"
+            >
+              <Mail className="w-3 h-3 shrink-0" />
+              {doc.email}
+            </a>
+          ) : (
+            ""
+          ),
+        },
+        { label: "Phone", value: doc.phone },
+        {
+          label: "Address",
+          value: doc.address ? (
+            <span className="inline-flex items-start gap-1">
+              <MapPin className="w-3 h-3 shrink-0 mt-0.5 text-muted-foreground" />
+              {doc.address}
+            </span>
+          ) : (
+            ""
+          ),
+        },
+      ]}
+      footer={
+        <a
+          href={publicUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1 inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ExternalLink className="w-3 h-3" />
+          Customer-facing claim page
+        </a>
+      }
+    />
+  );
+}
+
+function PurchaseCard({ doc }: { doc: WarrantySubmission }) {
+  return (
+    <MiniCard
+      icon={Receipt}
+      title="Purchase"
+      rows={[
+        { label: "Invoice", value: doc.invoiceNumber },
+        { label: "Issued by", value: doc.invoiceIssuedBy },
+        { label: "Purchased", value: fmtDate(doc.dateOfPurchase) },
+        { label: "Country", value: doc.countryOfPurchase },
+      ]}
+    />
+  );
+}
+
+function ProductCard({ doc }: { doc: WarrantySubmission }) {
+  return (
+    <MiniCard
+      icon={Package}
+      title="Product"
+      rows={[
+        { label: "Product", value: doc.productName },
+        { label: "Category", value: doc.productCategory },
+        { label: "SKU", value: doc.sku ? <span className="font-mono">{doc.sku}</span> : "" },
+        { label: "EAN", value: doc.ean ? <span className="font-mono">{doc.ean}</span> : "" },
+        {
+          label: "Serial",
+          value: doc.serialNumber ? <span className="font-mono break-all">{doc.serialNumber}</span> : "",
+        },
+        { label: "Failed", value: fmtDate(doc.dateOfFailure) },
+        { label: "Days used", value: doc.daysOfUse },
+      ]}
+    />
   );
 }

@@ -1,20 +1,48 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Input } from "@/components/ui/input";
-import { WarrantyStatusBadge } from "@/components/warranty-status-badge";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { WarrantyStatusBadge } from "@/components/warranty-status-badge";
+import { WarrantyKanban } from "@/components/warranty-kanban";
+import {
+  ASSIGNEES,
   WARRANTY_STATUSES,
   WARRANTY_STATUS_LABELS,
+  WARRANTY_TYPE_LABELS,
+  type Assignee,
   type ListWarrantyResult,
   type WarrantyStatus,
   type WarrantySubmission,
 } from "@/types/warranty";
-import { Search, ShieldCheck, ChevronRight, Settings } from "lucide-react";
+import {
+  Search,
+  ShieldCheck,
+  ChevronRight,
+  Settings,
+  LayoutGrid,
+  List,
+  MessageSquare,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type StatusFilter = "all" | WarrantyStatus;
+type AssigneeFilter = "all" | "unassigned" | Assignee;
+type ViewMode = "table" | "board";
 
 const STATUS_FILTERS: StatusFilter[] = ["all", ...WARRANTY_STATUSES];
 
@@ -32,20 +60,22 @@ function fmtSubmitted(value: string): string {
   }).format(d);
 }
 
-export default function WarrantyListPage() {
+export default function ClaimsPage() {
   const [items, setItems] = useState<WarrantySubmission[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
+  const [assignee, setAssignee] = useState<AssigneeFilter>("all");
+  const [view, setView] = useState<ViewMode>("table");
   const [counts, setCounts] = useState<Record<StatusFilter, number>>({
     all: 0,
-    new: 0,
+    open: 0,
     in_review: 0,
-    approved: 0,
-    rejected: 0,
-    shipped: 0,
+    decided: 0,
+    to_send_new_product: 0,
+    finished: 0,
   });
 
   useEffect(() => {
@@ -54,14 +84,15 @@ export default function WarrantyListPage() {
     setError(null);
     const qs = new URLSearchParams();
     if (status !== "all") qs.set("status", status);
+    if (assignee !== "all") qs.set("assignee", assignee);
     if (search.trim()) qs.set("q", search.trim());
-    qs.set("limit", "200");
+    qs.set("limit", view === "board" ? "500" : "200");
     fetch(`/api/warranty/submissions?${qs.toString()}`)
       .then(async (r) => {
         const data = (await r.json()) as ListWarrantyResult | { error: string };
         if (cancelled) return;
         if (!r.ok || "error" in data) {
-          setError("error" in data ? data.error : "Failed to load");
+          setError("error" in data ? data.error : "Couldn't load claims");
           setItems([]);
           setTotal(0);
         } else {
@@ -71,7 +102,7 @@ export default function WarrantyListPage() {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load");
+        setError(err instanceof Error ? err.message : "Couldn't load claims");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -79,15 +110,14 @@ export default function WarrantyListPage() {
     return () => {
       cancelled = true;
     };
-  }, [status, search]);
+  }, [status, assignee, search, view]);
 
-  // Background fetch for status counts (independent of current filter).
   useEffect(() => {
     let cancelled = false;
     Promise.all(
       STATUS_FILTERS.map((s) =>
         fetch(
-          `/api/warranty/submissions?limit=1${s === "all" ? "" : `&status=${s}`}`,
+          `/api/warranty/submissions?limit=1${s === "all" ? "" : `&status=${s}`}${assignee !== "all" ? `&assignee=${assignee}` : ""}`,
         )
           .then((r) => (r.ok ? r.json() : { total: 0 }))
           .then((d: { total?: number }) => ({ s, total: d.total ?? 0 })),
@@ -102,14 +132,16 @@ export default function WarrantyListPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items.length]);
+  }, [items.length, assignee]);
+
+  const filtered = items;
 
   return (
     <div className="flex flex-col h-full">
       <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="h-14 flex items-center justify-between px-4 md:px-8">
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
-            <h1 className="text-sm font-semibold text-foreground shrink-0">Warranty submissions</h1>
+            <h1 className="text-sm font-semibold text-foreground shrink-0">Warranty claims</h1>
             {total > 0 && (
               <span className="text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
                 {total}
@@ -117,13 +149,43 @@ export default function WarrantyListPage() {
             )}
           </div>
           <div className="flex items-center gap-2">
+            {/* View toggle */}
+            <div className="hidden md:flex items-center rounded-md bg-muted p-0.5">
+              <button
+                onClick={() => setView("table")}
+                className={cn(
+                  "flex items-center gap-1.5 h-7 px-2.5 rounded text-[11px] font-medium transition-colors",
+                  view === "table"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+                title="Table view"
+              >
+                <List className="w-3 h-3" />
+                Table
+              </button>
+              <button
+                onClick={() => setView("board")}
+                className={cn(
+                  "flex items-center gap-1.5 h-7 px-2.5 rounded text-[11px] font-medium transition-colors",
+                  view === "board"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+                title="Board view"
+              >
+                <LayoutGrid className="w-3 h-3" />
+                Board
+              </button>
+            </div>
+
             <div className="relative hidden sm:block">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input
                 placeholder="Search claims…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-8 h-8 w-44 md:w-60 text-xs bg-background"
+                className="pl-8 h-8 w-40 md:w-56 text-xs bg-background"
               />
             </div>
             <Link
@@ -135,8 +197,9 @@ export default function WarrantyListPage() {
             </Link>
           </div>
         </div>
-        <div className="flex items-center gap-2 px-4 md:px-8 pb-3">
-          <div className="relative sm:hidden flex-1">
+        <div className="flex items-center gap-2 px-4 md:px-8 pb-3 flex-wrap">
+          {/* Mobile search */}
+          <div className="relative sm:hidden flex-1 basis-full">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
             <Input
               placeholder="Search claims…"
@@ -145,7 +208,9 @@ export default function WarrantyListPage() {
               className="pl-8 h-8 text-xs bg-background w-full"
             />
           </div>
-          <div className="flex items-center gap-1 overflow-x-auto sm:flex-none">
+
+          {/* Status filter pills */}
+          <div className="flex items-center gap-1 overflow-x-auto flex-1 min-w-0">
             {STATUS_FILTERS.map((s) => (
               <button
                 key={s}
@@ -161,6 +226,25 @@ export default function WarrantyListPage() {
               </button>
             ))}
           </div>
+
+          {/* Assignee filter */}
+          <Select
+            value={assignee}
+            onValueChange={(v) => setAssignee(v as AssigneeFilter)}
+          >
+            <SelectTrigger className="h-8 text-[11px] w-[140px] shrink-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All assignees</SelectItem>
+              <SelectItem value="unassigned">Unassigned</SelectItem>
+              {ASSIGNEES.map((a) => (
+                <SelectItem key={a} value={a}>
+                  {a}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </header>
 
@@ -170,104 +254,188 @@ export default function WarrantyListPage() {
             {error}
           </div>
         )}
-        <div className="bg-background border border-border rounded-xl overflow-hidden overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent border-b border-border">
-                <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9 pl-5">Submitted</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Claim</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Customer</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Product</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Serial</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Status</TableHead>
-                <TableHead className="h-9 w-[40px]" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading
-                ? Array.from({ length: 6 }).map((_, i) => (
-                    <TableRow key={i} className="border-b border-border/60">
-                      <TableCell className="pl-5 py-3">
-                        <div className="h-3 w-24 rounded skeleton" style={{ animationDelay: `${i * 80}ms` }} />
-                      </TableCell>
-                      <TableCell><div className="h-3 w-20 rounded skeleton" style={{ animationDelay: `${i * 80 + 20}ms` }} /></TableCell>
-                      <TableCell>
-                        <div className="space-y-1.5">
-                          <div className="h-3 w-28 rounded skeleton" style={{ animationDelay: `${i * 80 + 40}ms` }} />
-                          <div className="h-2.5 w-36 rounded skeleton" style={{ animationDelay: `${i * 80 + 60}ms` }} />
-                        </div>
-                      </TableCell>
-                      <TableCell><div className="h-3 w-32 rounded skeleton" style={{ animationDelay: `${i * 80 + 50}ms` }} /></TableCell>
-                      <TableCell><div className="h-3 w-20 rounded skeleton" style={{ animationDelay: `${i * 80 + 70}ms` }} /></TableCell>
-                      <TableCell><div className="h-5 w-20 rounded-full skeleton" style={{ animationDelay: `${i * 80 + 90}ms` }} /></TableCell>
-                      <TableCell />
-                    </TableRow>
-                  ))
-                : items.map((item) => {
-                    const fullName = joinName(item.name, item.surname);
-                    const shortId = item.submissionId.slice(0, 8);
-                    return (
-                      <TableRow
-                        key={item.submissionId}
-                        className="border-b border-border/60 hover:bg-muted/30 transition-colors"
-                      >
-                        <TableCell className="pl-5 py-3 text-[12px] text-muted-foreground tabular-nums whitespace-nowrap">
-                          {fmtSubmitted(item.submittedAt)}
-                        </TableCell>
-                        <TableCell className="text-[12px] font-mono text-muted-foreground">
-                          #{shortId}
-                        </TableCell>
-                        <TableCell>
-                          <div className="min-w-0">
-                            <Link
-                              href={`/warranty/${encodeURIComponent(item.submissionId)}`}
-                              className="text-[13px] font-medium text-foreground hover:underline block truncate leading-tight"
-                            >
-                              {fullName || "—"}
-                            </Link>
-                            <span className="text-[11px] text-muted-foreground block truncate leading-tight">
-                              {item.email}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-[13px] text-foreground">
-                          <span className="truncate block max-w-[260px]">{item.productName || "—"}</span>
-                          {item.productCategory && (
-                            <span className="text-[11px] text-muted-foreground truncate block max-w-[260px]">
-                              {item.productCategory}
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-[12px] font-mono text-muted-foreground truncate max-w-[140px]">
-                          {item.serialNumber || "—"}
-                        </TableCell>
-                        <TableCell>
-                          <WarrantyStatusBadge status={item.status} />
-                        </TableCell>
-                        <TableCell className="pr-4">
-                          <Link
-                            href={`/warranty/${encodeURIComponent(item.submissionId)}`}
-                            className="flex items-center justify-end text-muted-foreground hover:text-foreground transition-colors"
-                            title="Open"
-                          >
-                            <ChevronRight className="w-4 h-4" />
-                          </Link>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-              {!loading && items.length === 0 && !error && (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-[13px] text-muted-foreground py-16">
-                    <ShieldCheck className="w-5 h-5 mx-auto mb-2 text-muted-foreground/50" />
-                    No submissions match your filters.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
+
+        {view === "board" ? (
+          loading ? (
+            <BoardSkeleton />
+          ) : (
+            <WarrantyKanban
+              items={filtered}
+              onPersisted={(updated) =>
+                setItems((prev) =>
+                  prev.map((p) =>
+                    p.submissionId === updated.submissionId ? updated : p,
+                  ),
+                )
+              }
+            />
+          )
+        ) : (
+          <ClaimsTable items={filtered} loading={loading} />
+        )}
       </div>
+    </div>
+  );
+}
+
+function ClaimsTable({
+  items,
+  loading,
+}: {
+  items: WarrantySubmission[];
+  loading: boolean;
+}) {
+  return (
+    <div className="bg-background border border-border rounded-xl overflow-hidden overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent border-b border-border">
+            <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9 pl-5">Received</TableHead>
+            <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Claim</TableHead>
+            <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Customer</TableHead>
+            <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Product</TableHead>
+            <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Assignee</TableHead>
+            <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Type</TableHead>
+            <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Status</TableHead>
+            <TableHead className="h-9 w-[40px]" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {loading
+            ? Array.from({ length: 8 }).map((_, i) => (
+                <TableRow key={i} className="border-b border-border/60">
+                  <TableCell className="pl-5 py-3">
+                    <div className="h-3 w-24 rounded skeleton" style={{ animationDelay: `${i * 80}ms` }} />
+                  </TableCell>
+                  <TableCell><div className="h-3 w-20 rounded skeleton" style={{ animationDelay: `${i * 80 + 20}ms` }} /></TableCell>
+                  <TableCell>
+                    <div className="space-y-1.5">
+                      <div className="h-3 w-28 rounded skeleton" style={{ animationDelay: `${i * 80 + 40}ms` }} />
+                      <div className="h-2.5 w-36 rounded skeleton" style={{ animationDelay: `${i * 80 + 60}ms` }} />
+                    </div>
+                  </TableCell>
+                  <TableCell><div className="h-3 w-32 rounded skeleton" style={{ animationDelay: `${i * 80 + 50}ms` }} /></TableCell>
+                  <TableCell><div className="h-3 w-16 rounded skeleton" style={{ animationDelay: `${i * 80 + 70}ms` }} /></TableCell>
+                  <TableCell><div className="h-3 w-16 rounded skeleton" style={{ animationDelay: `${i * 80 + 80}ms` }} /></TableCell>
+                  <TableCell><div className="h-5 w-20 rounded-full skeleton" style={{ animationDelay: `${i * 80 + 90}ms` }} /></TableCell>
+                  <TableCell />
+                </TableRow>
+              ))
+            : items.map((item) => <ClaimRow key={item.submissionId} item={item} />)}
+          {!loading && items.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={8} className="text-center text-[13px] text-muted-foreground py-16">
+                <ShieldCheck className="w-5 h-5 mx-auto mb-2 text-muted-foreground/50" />
+                No claims match your filters.
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function ClaimRow({ item }: { item: WarrantySubmission }) {
+  const fullName = joinName(item.name, item.surname);
+  const shortId = item.submissionId.slice(0, 8);
+  const href = `/warranty/${encodeURIComponent(item.submissionId)}`;
+  return (
+    <TableRow className="border-b border-border/60 hover:bg-muted/30 transition-colors group">
+      <TableCell className="pl-5 py-3 text-[12px] text-muted-foreground tabular-nums whitespace-nowrap">
+        <Link href={href} className="block">{fmtSubmitted(item.submittedAt)}</Link>
+      </TableCell>
+      <TableCell className="text-[12px] font-mono text-muted-foreground">
+        <Link href={href} className="hover:text-foreground transition-colors flex items-center gap-1.5">
+          #{shortId}
+          {item.notes.length > 0 && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+              <MessageSquare className="w-2.5 h-2.5" />
+              {item.notes.length}
+            </span>
+          )}
+        </Link>
+      </TableCell>
+      <TableCell>
+        <Link href={href} className="min-w-0 block">
+          <div className="text-[13px] font-medium text-foreground group-hover:underline truncate leading-tight">
+            {fullName || "—"}
+          </div>
+          <span className="text-[11px] text-muted-foreground block truncate leading-tight">
+            {item.email}
+          </span>
+        </Link>
+      </TableCell>
+      <TableCell>
+        <Link href={href} className="block">
+          <span className="text-[13px] text-foreground truncate block max-w-[240px]">{item.productName || "—"}</span>
+          {item.serialNumber && (
+            <span className="text-[10px] font-mono text-muted-foreground truncate block max-w-[240px]">
+              {item.serialNumber}
+            </span>
+          )}
+        </Link>
+      </TableCell>
+      <TableCell className="text-[12px] text-foreground whitespace-nowrap">
+        {item.assignee ? (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-5 h-5 rounded-full bg-muted border border-border/60 flex items-center justify-center text-[9px] font-bold">
+              {item.assignee[0]}
+            </span>
+            {item.assignee}
+          </span>
+        ) : (
+          <span className="text-[11px] text-muted-foreground italic">Unassigned</span>
+        )}
+      </TableCell>
+      <TableCell className="text-[12px] text-foreground whitespace-nowrap">
+        {item.warrantyType ? (
+          <span className="text-[11px] font-medium text-foreground">
+            {WARRANTY_TYPE_LABELS[item.warrantyType]}
+          </span>
+        ) : (
+          <span className="text-[11px] text-muted-foreground">—</span>
+        )}
+      </TableCell>
+      <TableCell>
+        <WarrantyStatusBadge status={item.status} />
+      </TableCell>
+      <TableCell className="pr-4">
+        <Link
+          href={href}
+          className="flex items-center justify-end text-muted-foreground hover:text-foreground transition-colors"
+          title="Open"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </Link>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function BoardSkeleton() {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3 min-h-[60vh]">
+      {WARRANTY_STATUSES.map((s, ci) => {
+        const cards = 2 + (ci % 3);
+        return (
+          <div key={s} className="flex flex-col">
+            <div className="rounded-t-xl border-2 border-b-0 border-border bg-muted/40 px-3 py-2 flex items-center justify-between">
+              <div className="h-3 w-20 skeleton rounded" />
+              <div className="h-3 w-6 skeleton rounded-full" />
+            </div>
+            <div className="flex-1 rounded-b-xl border-2 border-t-0 border-border bg-muted/30 px-2 py-2 space-y-2">
+              {Array.from({ length: cards }).map((_, i) => (
+                <div key={i} className="rounded-lg border border-border bg-background p-2.5 space-y-1.5">
+                  <div className="h-2.5 w-16 skeleton rounded" style={{ animationDelay: `${i * 40}ms` }} />
+                  <div className="h-3 w-28 skeleton rounded" style={{ animationDelay: `${i * 40 + 30}ms` }} />
+                  <div className="h-2.5 w-20 skeleton rounded" style={{ animationDelay: `${i * 40 + 60}ms` }} />
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -12,7 +12,7 @@ import {
 } from "@/types/warranty";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Check, Loader2, Mail, Users, X, Plus, AlertCircle, FileText, Megaphone } from "lucide-react";
+import { ArrowLeft, Check, Loader2, Mail, Users, X, Plus, AlertCircle, Megaphone } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 function emailValid(v: string): boolean {
@@ -273,7 +273,7 @@ export default function WarrantySettingsPage() {
           className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="w-3 h-3" />
-          Submissions
+          Claims
         </Link>
         <span className="mx-2 text-border/60 select-none text-xs">/</span>
         <h1 className="text-sm font-semibold text-foreground">Email settings</h1>
@@ -442,16 +442,6 @@ export default function WarrantySettingsPage() {
               </Field>
             </SectionCard>
 
-            <SectionCard
-              icon={FileText}
-              title="What this changes"
-              description="Settings save to Mongo and take effect on the next submission. Google Sheets always logs every field, regardless of the toggles above."
-            >
-              <p className="text-[12px] text-muted-foreground leading-relaxed">
-                Use the subject tokens to keep your inbox searchable. <code className="px-1 py-0.5 rounded bg-muted text-[11px]">{`{{productName}}`}</code> and{" "}
-                <code className="px-1 py-0.5 rounded bg-muted text-[11px]">{`{{submissionId}}`}</code> are the most useful for triage.
-              </p>
-            </SectionCard>
           </>
         )}
       </div>
