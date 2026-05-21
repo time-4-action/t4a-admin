@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -29,7 +29,7 @@ function fmtDate(value: string): string {
   if (!value) return "";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat("en-GB", {
     month: "short",
     day: "numeric",
   }).format(d);
@@ -52,7 +52,7 @@ export function WarrantyKanban({
   );
 
   // Sync local state when prop changes (filter / refetch).
-  useMemo(() => {
+  useEffect(() => {
     setLocal(items);
   }, [items]);
 

@@ -54,7 +54,7 @@ function fmtSubmitted(value: string): string {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat("en-GB", {
     dateStyle: "short",
     timeStyle: "short",
   }).format(d);

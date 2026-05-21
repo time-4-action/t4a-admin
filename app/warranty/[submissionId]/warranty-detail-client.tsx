@@ -1,5 +1,5 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   ASSIGNEES,
@@ -52,18 +52,21 @@ import { cn } from "@/lib/utils";
 const IMAGE_EXTS = /\.(jpe?g|png|gif|webp|avif|heic|heif)$/i;
 const isImage = (url: string) => IMAGE_EXTS.test(url.split("?")[0] ?? "");
 
-function fmtDate(value: string): string {
+// Sentinel passed to Radix Select to mean "clear / not set". Radix forbids "".
+const NONE = "__none__";
+
+function fmtDateGB(value: string): string {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(d);
+  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(d);
 }
 
-function fmtRelative(value: string): string {
+function relativeFrom(now: number, value: string): string {
   if (!value) return "";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  const diff = Date.now() - d.getTime();
+  const diff = now - d.getTime();
   const sec = Math.round(diff / 1000);
   if (sec < 60) return "just now";
   const min = Math.round(sec / 60);
@@ -72,9 +75,27 @@ function fmtRelative(value: string): string {
   if (hr < 24) return `${hr}h ago`;
   const day = Math.round(hr / 24);
   if (day < 30) return `${day}d ago`;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-  }).format(d);
+  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(d);
+}
+
+/**
+ * Renders the absolute date during SSR + first paint, then swaps to the
+ * relative form after mount. Avoids the hydration mismatch that comes from
+ * Date.now() differing between server render and client hydration.
+ */
+function RelativeTime({ value }: { value: string }) {
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  const fallback = fmtDateGB(value);
+  return (
+    <span title={value} suppressHydrationWarning>
+      {now == null ? fallback : relativeFrom(now, value)}
+    </span>
+  );
 }
 
 function initials(name: string): string {
@@ -224,14 +245,14 @@ function WorkflowCard({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <WorkflowField label="Assigned to" saving={savingField === "assignee"}>
             <Select
-              value={doc.assignee ?? ""}
-              onValueChange={(v) => setAssignee(v as Assignee | "")}
+              value={doc.assignee ?? NONE}
+              onValueChange={(v) => setAssignee(v === NONE ? "" : (v as Assignee))}
             >
               <SelectTrigger className="h-8 text-[13px] w-full">
                 <SelectValue placeholder="Unassigned" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Unassigned</SelectItem>
+                <SelectItem value={NONE}>Unassigned</SelectItem>
                 {ASSIGNEES.map((a) => (
                   <SelectItem key={a} value={a}>
                     {a}
@@ -243,14 +264,14 @@ function WorkflowCard({
 
           <WorkflowField label="Warranty type" saving={savingField === "warrantyType"}>
             <Select
-              value={doc.warrantyType ?? ""}
-              onValueChange={(v) => setWarrantyType(v as WarrantyType | "")}
+              value={doc.warrantyType ?? NONE}
+              onValueChange={(v) => setWarrantyType(v === NONE ? "" : (v as WarrantyType))}
             >
               <SelectTrigger className="h-8 text-[13px] w-full">
                 <SelectValue placeholder="Not set" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Not set</SelectItem>
+                <SelectItem value={NONE}>Not set</SelectItem>
                 {WARRANTY_TYPES.map((t) => (
                   <SelectItem key={t} value={t}>
                     {WARRANTY_TYPE_LABELS[t]}
@@ -262,14 +283,14 @@ function WorkflowCard({
 
           <WorkflowField label="Suggestion" saving={savingField === "suggestion"}>
             <Select
-              value={doc.suggestion ?? ""}
-              onValueChange={(v) => setSuggestion(v as WarrantySuggestion | "")}
+              value={doc.suggestion ?? NONE}
+              onValueChange={(v) => setSuggestion(v === NONE ? "" : (v as WarrantySuggestion))}
             >
               <SelectTrigger className="h-8 text-[13px] w-full">
                 <SelectValue placeholder="Not set" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Not set</SelectItem>
+                <SelectItem value={NONE}>Not set</SelectItem>
                 {WARRANTY_SUGGESTIONS.map((s) => (
                   <SelectItem key={s} value={s}>
                     {WARRANTY_SUGGESTION_LABELS[s]}
@@ -281,14 +302,14 @@ function WorkflowCard({
 
           <WorkflowField label="Factory" saving={savingField === "factoryStatus"}>
             <Select
-              value={doc.factoryStatus ?? ""}
-              onValueChange={(v) => setFactoryStatus(v as FactoryStatus | "")}
+              value={doc.factoryStatus ?? NONE}
+              onValueChange={(v) => setFactoryStatus(v === NONE ? "" : (v as FactoryStatus))}
             >
               <SelectTrigger className="h-8 text-[13px] w-full">
                 <SelectValue placeholder="Not set" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Not set</SelectItem>
+                <SelectItem value={NONE}>Not set</SelectItem>
                 {FACTORY_STATUSES.map((s) => (
                   <SelectItem key={s} value={s}>
                     {FACTORY_STATUS_LABELS[s]}
@@ -300,14 +321,14 @@ function WorkflowCard({
 
           <WorkflowField label="Customer" saving={savingField === "customerStatus"}>
             <Select
-              value={doc.customerStatus ?? ""}
-              onValueChange={(v) => setCustomerStatus(v as CustomerStatus | "")}
+              value={doc.customerStatus ?? NONE}
+              onValueChange={(v) => setCustomerStatus(v === NONE ? "" : (v as CustomerStatus))}
             >
               <SelectTrigger className="h-8 text-[13px] w-full">
                 <SelectValue placeholder="Not set" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Not set</SelectItem>
+                <SelectItem value={NONE}>Not set</SelectItem>
                 {CUSTOMER_STATUSES.map((s) => (
                   <SelectItem key={s} value={s}>
                     {CUSTOMER_STATUS_LABELS[s]}
@@ -538,8 +559,8 @@ function NotesCard({
                     <span className="text-[12px] font-semibold text-foreground">
                       {n.authorName || "Admin"}
                     </span>
-                    <span className="text-[10px] text-muted-foreground" title={n.createdAt}>
-                      {fmtRelative(n.createdAt)}
+                    <span className="text-[10px] text-muted-foreground">
+                      <RelativeTime value={n.createdAt} />
                     </span>
                     <button
                       type="button"
@@ -762,7 +783,7 @@ function PurchaseCard({ doc }: { doc: WarrantySubmission }) {
       rows={[
         { label: "Invoice", value: doc.invoiceNumber },
         { label: "Issued by", value: doc.invoiceIssuedBy },
-        { label: "Purchased", value: fmtDate(doc.dateOfPurchase) },
+        { label: "Purchased", value: fmtDateGB(doc.dateOfPurchase) },
         { label: "Country", value: doc.countryOfPurchase },
       ]}
     />
@@ -783,7 +804,7 @@ function ProductCard({ doc }: { doc: WarrantySubmission }) {
           label: "Serial",
           value: doc.serialNumber ? <span className="font-mono break-all">{doc.serialNumber}</span> : "",
         },
-        { label: "Failed", value: fmtDate(doc.dateOfFailure) },
+        { label: "Failed", value: fmtDateGB(doc.dateOfFailure) },
         { label: "Days used", value: doc.daysOfUse },
       ]}
     />
