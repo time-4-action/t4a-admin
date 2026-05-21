@@ -14,8 +14,10 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import {
+  ASSIGNEES,
   WARRANTY_STATUSES,
   WARRANTY_STATUS_LABELS,
+  type Assignee,
   type WarrantyStatus,
   type WarrantySubmission,
 } from "@/types/warranty";
@@ -24,6 +26,9 @@ import { User, Hash, Wrench, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const MAX_PER_COLUMN = 80;
+const UNASSIGNED = "__unassigned__";
+
+export type BoardGrouping = "status" | "assignee";
 
 function fmtDate(value: string): string {
   if (!value) return "";
@@ -35,11 +40,63 @@ function fmtDate(value: string): string {
   }).format(d);
 }
 
+type Column = {
+  id: string;
+  label: string;
+  headerClass: string;
+};
+
+const STATUS_COLUMNS: Column[] = WARRANTY_STATUSES.map((s) => ({
+  id: s,
+  label: WARRANTY_STATUS_LABELS[s],
+  headerClass: STATUS_COLUMN_HEADER[s],
+}));
+
+const ASSIGNEE_COLUMNS: Column[] = [
+  {
+    id: UNASSIGNED,
+    label: "Unassigned",
+    headerClass:
+      "border-slate-300 bg-slate-50/60 dark:bg-slate-800/30 dark:border-slate-700",
+  },
+  ...ASSIGNEES.map((a) => ({
+    id: a,
+    label: a,
+    headerClass:
+      "border-indigo-300 bg-indigo-50/60 dark:bg-indigo-950/30 dark:border-indigo-700",
+  })),
+];
+
+function bucketFor(grouping: BoardGrouping, item: WarrantySubmission): string {
+  return grouping === "status" ? item.status : item.assignee ?? UNASSIGNED;
+}
+
+function applyOptimistic(
+  grouping: BoardGrouping,
+  item: WarrantySubmission,
+  targetColumn: string,
+): WarrantySubmission {
+  if (grouping === "status") {
+    return { ...item, status: targetColumn as WarrantyStatus };
+  }
+  return {
+    ...item,
+    assignee: targetColumn === UNASSIGNED ? null : (targetColumn as Assignee),
+  };
+}
+
+function patchBody(grouping: BoardGrouping, targetColumn: string) {
+  if (grouping === "status") return { status: targetColumn };
+  return { assignee: targetColumn === UNASSIGNED ? null : targetColumn };
+}
+
 export function WarrantyKanban({
   items,
+  grouping,
   onPersisted,
 }: {
   items: WarrantySubmission[];
+  grouping: BoardGrouping;
   onPersisted?: (updated: WarrantySubmission) => void;
 }) {
   const router = useRouter();
@@ -51,22 +108,23 @@ export function WarrantyKanban({
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
 
-  // Sync local state when prop changes (filter / refetch).
   useEffect(() => {
     setLocal(items);
   }, [items]);
 
+  const columns = grouping === "status" ? STATUS_COLUMNS : ASSIGNEE_COLUMNS;
+
   const grouped = useMemo(() => {
-    const m: Record<WarrantyStatus, WarrantySubmission[]> = {
-      open: [],
-      in_review: [],
-      decided: [],
-      to_send_new_product: [],
-      finished: [],
-    };
-    for (const it of local) m[it.status]?.push(it);
+    const m = new Map<string, WarrantySubmission[]>();
+    for (const c of columns) m.set(c.id, []);
+    for (const it of local) {
+      const k = bucketFor(grouping, it);
+      const arr = m.get(k) ?? m.get(UNASSIGNED) ?? [];
+      arr.push(it);
+      if (!m.has(k)) m.set(UNASSIGNED, arr);
+    }
     return m;
-  }, [local]);
+  }, [local, columns, grouping]);
 
   function handleDragStart(e: DragStartEvent) {
     const id = String(e.active.id);
@@ -78,15 +136,18 @@ export function WarrantyKanban({
     const { active, over } = e;
     if (!over) return;
     const id = String(active.id);
-    const target = String(over.id) as WarrantyStatus;
-    if (!(WARRANTY_STATUSES as string[]).includes(target)) return;
+    const target = String(over.id);
+    const validCol = columns.some((c) => c.id === target);
+    if (!validCol) return;
 
     const card = local.find((i) => i.submissionId === id);
-    if (!card || card.status === target) return;
+    if (!card) return;
+    if (bucketFor(grouping, card) === target) return;
 
-    // Optimistic
     setLocal((prev) =>
-      prev.map((i) => (i.submissionId === id ? { ...i, status: target } : i)),
+      prev.map((i) =>
+        i.submissionId === id ? applyOptimistic(grouping, i, target) : i,
+      ),
     );
     setSavingId(id);
 
@@ -95,18 +156,13 @@ export function WarrantyKanban({
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: target }),
+        body: JSON.stringify(patchBody(grouping, target)),
       },
     );
     setSavingId(null);
 
     if (!res.ok) {
-      // Rollback
-      setLocal((prev) =>
-        prev.map((i) =>
-          i.submissionId === id ? { ...i, status: card.status } : i,
-        ),
-      );
+      setLocal((prev) => prev.map((i) => (i.submissionId === id ? card : i)));
       return;
     }
     const updated = (await res.json()) as WarrantySubmission;
@@ -114,22 +170,32 @@ export function WarrantyKanban({
     router.refresh();
   }
 
+  const colCount = columns.length;
+  const gridCols =
+    colCount <= 5
+      ? "grid-cols-1 md:grid-cols-3 lg:grid-cols-5"
+      : "grid-cols-2 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8";
+
   return (
     <DndContext
       sensors={sensors}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3 min-h-[60vh]">
-        {WARRANTY_STATUSES.map((s) => (
-          <KanbanColumn
-            key={s}
-            status={s}
-            items={grouped[s].slice(0, MAX_PER_COLUMN)}
-            overflow={Math.max(0, grouped[s].length - MAX_PER_COLUMN)}
-            savingId={savingId}
-          />
-        ))}
+      <div className={cn("grid gap-3 min-h-[60vh]", gridCols)}>
+        {columns.map((col) => {
+          const items = grouped.get(col.id) ?? [];
+          return (
+            <KanbanColumn
+              key={col.id}
+              column={col}
+              items={items.slice(0, MAX_PER_COLUMN)}
+              overflow={Math.max(0, items.length - MAX_PER_COLUMN)}
+              savingId={savingId}
+              grouping={grouping}
+            />
+          );
+        })}
       </div>
       <DragOverlay>
         {dragging && <ClaimCard claim={dragging} dragOverlay />}
@@ -139,27 +205,29 @@ export function WarrantyKanban({
 }
 
 function KanbanColumn({
-  status,
+  column,
   items,
   overflow,
   savingId,
+  grouping,
 }: {
-  status: WarrantyStatus;
+  column: Column;
   items: WarrantySubmission[];
   overflow: number;
   savingId: string | null;
+  grouping: BoardGrouping;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status });
+  const { setNodeRef, isOver } = useDroppable({ id: column.id });
   return (
     <div className="flex flex-col min-h-0">
       <div
         className={cn(
           "rounded-t-xl border-2 border-b-0 px-3 py-2 flex items-center justify-between gap-2",
-          STATUS_COLUMN_HEADER[status],
+          column.headerClass,
         )}
       >
         <p className="text-[11px] font-bold uppercase tracking-wider text-foreground truncate">
-          {WARRANTY_STATUS_LABELS[status]}
+          {column.label}
         </p>
         <span className="text-[10px] font-semibold text-muted-foreground bg-background border border-border/60 px-1.5 py-0.5 rounded-full">
           {items.length + overflow}
@@ -169,7 +237,7 @@ function KanbanColumn({
         ref={setNodeRef}
         className={cn(
           "flex-1 rounded-b-xl border-2 border-t-0 px-2 py-2 space-y-2 transition-colors",
-          STATUS_COLUMN_HEADER[status],
+          column.headerClass,
           isOver ? "ring-2 ring-foreground/30 ring-offset-1 ring-offset-background" : "",
         )}
       >
@@ -183,6 +251,7 @@ function KanbanColumn({
             key={claim.submissionId}
             claim={claim}
             saving={savingId === claim.submissionId}
+            grouping={grouping}
           />
         ))}
         {overflow > 0 && (
@@ -198,9 +267,11 @@ function KanbanColumn({
 function DraggableCard({
   claim,
   saving,
+  grouping,
 }: {
   claim: WarrantySubmission;
   saving: boolean;
+  grouping: BoardGrouping;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: claim.submissionId,
@@ -217,7 +288,7 @@ function DraggableCard({
         saving && "opacity-60",
       )}
     >
-      <ClaimCard claim={claim} saving={saving} />
+      <ClaimCard claim={claim} saving={saving} hideAssignee={grouping === "assignee"} />
     </div>
   );
 }
@@ -226,10 +297,12 @@ function ClaimCard({
   claim,
   dragOverlay,
   saving,
+  hideAssignee,
 }: {
   claim: WarrantySubmission;
   dragOverlay?: boolean;
   saving?: boolean;
+  hideAssignee?: boolean;
 }) {
   const fullName = [claim.name, claim.surname].filter(Boolean).join(" ").trim();
   const shortId = claim.submissionId.slice(0, 8);
@@ -264,21 +337,27 @@ function ClaimCard({
         </p>
       )}
       <div className="flex items-center justify-between gap-2 mt-2 pt-1.5 border-t border-border/40">
-        <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-          {claim.assignee ? (
-            <>
-              <span className="w-4 h-4 rounded-full bg-muted border border-border/60 flex items-center justify-center text-[8px] font-bold">
-                {claim.assignee[0]}
-              </span>
-              {claim.assignee}
-            </>
-          ) : (
-            <>
-              <User className="w-2.5 h-2.5" />
-              Unassigned
-            </>
-          )}
-        </span>
+        {hideAssignee ? (
+          <span className="text-[10px] text-muted-foreground">
+            {WARRANTY_STATUS_LABELS[claim.status]}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+            {claim.assignee ? (
+              <>
+                <span className="w-4 h-4 rounded-full bg-muted border border-border/60 flex items-center justify-center text-[8px] font-bold">
+                  {claim.assignee[0]}
+                </span>
+                {claim.assignee}
+              </>
+            ) : (
+              <>
+                <User className="w-2.5 h-2.5" />
+                Unassigned
+              </>
+            )}
+          </span>
+        )}
         <span className="text-[10px] text-muted-foreground tabular-nums">
           {fmtDate(claim.submittedAt)}
         </span>
@@ -288,10 +367,10 @@ function ClaimCard({
           {claim.notes.length}
         </span>
       )}
-      {claim.warrantyType && claim.warrantyType !== "open" && (
-        <span className="absolute -bottom-1.5 left-2 inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-foreground text-background">
+      {claim.warrantyType === "denied" && (
+        <span className="absolute -bottom-1.5 left-2 inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground">
           <Wrench className="w-2 h-2" />
-          {claim.warrantyType.replace("_", " ")}
+          Denied
         </span>
       )}
     </div>

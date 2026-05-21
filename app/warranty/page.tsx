@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { WarrantyStatusBadge } from "@/components/warranty-status-badge";
-import { WarrantyKanban } from "@/components/warranty-kanban";
+import { WarrantyKanban, type BoardGrouping } from "@/components/warranty-kanban";
 import {
   ASSIGNEES,
   WARRANTY_STATUSES,
@@ -37,12 +37,15 @@ import {
   LayoutGrid,
   List,
   MessageSquare,
+  Loader2,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type StatusFilter = "all" | WarrantyStatus;
 type AssigneeFilter = "all" | "unassigned" | Assignee;
-type ViewMode = "table" | "board";
+type ViewMode = "table" | "status_board" | "assignee_board";
+const ASSIGNEE_NONE = "__none__";
 
 const STATUS_FILTERS: StatusFilter[] = ["all", ...WARRANTY_STATUSES];
 
@@ -86,7 +89,7 @@ export default function ClaimsPage() {
     if (status !== "all") qs.set("status", status);
     if (assignee !== "all") qs.set("assignee", assignee);
     if (search.trim()) qs.set("q", search.trim());
-    qs.set("limit", view === "board" ? "500" : "200");
+    qs.set("limit", view === "table" ? "200" : "500");
     fetch(`/api/warranty/submissions?${qs.toString()}`)
       .then(async (r) => {
         const data = (await r.json()) as ListWarrantyResult | { error: string };
@@ -151,32 +154,27 @@ export default function ClaimsPage() {
           <div className="flex items-center gap-2">
             {/* View toggle */}
             <div className="hidden md:flex items-center rounded-md bg-muted p-0.5">
-              <button
+              <ViewToggleButton
+                active={view === "table"}
                 onClick={() => setView("table")}
-                className={cn(
-                  "flex items-center gap-1.5 h-7 px-2.5 rounded text-[11px] font-medium transition-colors",
-                  view === "table"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
                 title="Table view"
-              >
-                <List className="w-3 h-3" />
-                Table
-              </button>
-              <button
-                onClick={() => setView("board")}
-                className={cn(
-                  "flex items-center gap-1.5 h-7 px-2.5 rounded text-[11px] font-medium transition-colors",
-                  view === "board"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-                title="Board view"
-              >
-                <LayoutGrid className="w-3 h-3" />
-                Board
-              </button>
+                icon={<List className="w-3 h-3" />}
+                label="Table"
+              />
+              <ViewToggleButton
+                active={view === "status_board"}
+                onClick={() => setView("status_board")}
+                title="By status — drag claims through the pipeline"
+                icon={<LayoutGrid className="w-3 h-3" />}
+                label="By status"
+              />
+              <ViewToggleButton
+                active={view === "assignee_board"}
+                onClick={() => setView("assignee_board")}
+                title="By assignee — drag claims onto a person"
+                icon={<Users className="w-3 h-3" />}
+                label="By assignee"
+              />
             </div>
 
             <div className="relative hidden sm:block">
@@ -255,12 +253,13 @@ export default function ClaimsPage() {
           </div>
         )}
 
-        {view === "board" ? (
+        {view !== "table" ? (
           loading ? (
-            <BoardSkeleton />
+            <BoardSkeleton wide={view === "assignee_board"} />
           ) : (
             <WarrantyKanban
               items={filtered}
+              grouping={(view === "assignee_board" ? "assignee" : "status") as BoardGrouping}
               onPersisted={(updated) =>
                 setItems((prev) =>
                   prev.map((p) =>
@@ -271,19 +270,61 @@ export default function ClaimsPage() {
             />
           )
         ) : (
-          <ClaimsTable items={filtered} loading={loading} />
+          <ClaimsTable
+            items={filtered}
+            loading={loading}
+            onAssigneeChange={(updated) =>
+              setItems((prev) =>
+                prev.map((p) =>
+                  p.submissionId === updated.submissionId ? updated : p,
+                ),
+              )
+            }
+          />
         )}
       </div>
     </div>
   );
 }
 
+function ViewToggleButton({
+  active,
+  onClick,
+  title,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={cn(
+        "flex items-center gap-1.5 h-7 px-2.5 rounded text-[11px] font-medium transition-colors",
+        active
+          ? "bg-background text-foreground shadow-sm"
+          : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
 function ClaimsTable({
   items,
   loading,
+  onAssigneeChange,
 }: {
   items: WarrantySubmission[];
   loading: boolean;
+  onAssigneeChange: (updated: WarrantySubmission) => void;
 }) {
   return (
     <div className="bg-background border border-border rounded-xl overflow-hidden overflow-x-auto">
@@ -321,7 +362,13 @@ function ClaimsTable({
                   <TableCell />
                 </TableRow>
               ))
-            : items.map((item) => <ClaimRow key={item.submissionId} item={item} />)}
+            : items.map((item) => (
+                <ClaimRow
+                  key={item.submissionId}
+                  item={item}
+                  onAssigneeChange={onAssigneeChange}
+                />
+              ))}
           {!loading && items.length === 0 && (
             <TableRow>
               <TableCell colSpan={8} className="text-center text-[13px] text-muted-foreground py-16">
@@ -336,7 +383,13 @@ function ClaimsTable({
   );
 }
 
-function ClaimRow({ item }: { item: WarrantySubmission }) {
+function ClaimRow({
+  item,
+  onAssigneeChange,
+}: {
+  item: WarrantySubmission;
+  onAssigneeChange: (updated: WarrantySubmission) => void;
+}) {
   const fullName = joinName(item.name, item.surname);
   const shortId = item.submissionId.slice(0, 8);
   const href = `/warranty/${encodeURIComponent(item.submissionId)}`;
@@ -376,21 +429,19 @@ function ClaimRow({ item }: { item: WarrantySubmission }) {
           )}
         </Link>
       </TableCell>
-      <TableCell className="text-[12px] text-foreground whitespace-nowrap">
-        {item.assignee ? (
-          <span className="inline-flex items-center gap-1.5">
-            <span className="w-5 h-5 rounded-full bg-muted border border-border/60 flex items-center justify-center text-[9px] font-bold">
-              {item.assignee[0]}
-            </span>
-            {item.assignee}
-          </span>
-        ) : (
-          <span className="text-[11px] text-muted-foreground italic">Unassigned</span>
-        )}
+      <TableCell>
+        <InlineAssigneePicker item={item} onChange={onAssigneeChange} />
       </TableCell>
       <TableCell className="text-[12px] text-foreground whitespace-nowrap">
         {item.warrantyType ? (
-          <span className="text-[11px] font-medium text-foreground">
+          <span
+            className={cn(
+              "text-[11px] font-medium",
+              item.warrantyType === "denied"
+                ? "text-destructive"
+                : "text-foreground",
+            )}
+          >
             {WARRANTY_TYPE_LABELS[item.warrantyType]}
           </span>
         ) : (
@@ -413,13 +464,92 @@ function ClaimRow({ item }: { item: WarrantySubmission }) {
   );
 }
 
-function BoardSkeleton() {
+function InlineAssigneePicker({
+  item,
+  onChange,
+}: {
+  item: WarrantySubmission;
+  onChange: (updated: WarrantySubmission) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(false);
+
+  async function save(next: Assignee | null) {
+    setSaving(true);
+    setError(false);
+    const res = await fetch(
+      `/api/warranty/submissions/${encodeURIComponent(item.submissionId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignee: next }),
+      },
+    );
+    setSaving(false);
+    if (!res.ok) {
+      setError(true);
+      setTimeout(() => setError(false), 2500);
+      return;
+    }
+    const updated = (await res.json()) as WarrantySubmission;
+    onChange(updated);
+  }
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3 min-h-[60vh]">
-      {WARRANTY_STATUSES.map((s, ci) => {
+    <Select
+      value={item.assignee ?? ASSIGNEE_NONE}
+      onValueChange={(v) => save(v === ASSIGNEE_NONE ? null : (v as Assignee))}
+      disabled={saving}
+    >
+      <SelectTrigger
+        className={cn(
+          "h-7 w-[140px] text-[12px] gap-1.5 px-2",
+          error && "border-destructive ring-destructive/30",
+        )}
+      >
+        {saving ? (
+          <span className="flex items-center gap-1.5 text-muted-foreground">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Saving…
+          </span>
+        ) : item.assignee ? (
+          <span className="flex items-center gap-1.5">
+            <span className="w-4 h-4 rounded-full bg-muted border border-border/60 flex items-center justify-center text-[9px] font-bold">
+              {item.assignee[0]}
+            </span>
+            {item.assignee}
+          </span>
+        ) : (
+          <span className="text-muted-foreground italic">Unassigned</span>
+        )}
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ASSIGNEE_NONE}>Unassigned</SelectItem>
+        {ASSIGNEES.map((a) => (
+          <SelectItem key={a} value={a}>
+            {a}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function BoardSkeleton({ wide = false }: { wide?: boolean }) {
+  const columns = wide ? 8 : WARRANTY_STATUSES.length;
+  return (
+    <div
+      className={cn(
+        "grid gap-3 min-h-[60vh]",
+        wide
+          ? "grid-cols-2 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8"
+          : "grid-cols-1 md:grid-cols-3 lg:grid-cols-5",
+      )}
+    >
+      {Array.from({ length: columns }).map((_, ci) => {
         const cards = 2 + (ci % 3);
         return (
-          <div key={s} className="flex flex-col">
+          <div key={ci} className="flex flex-col">
             <div className="rounded-t-xl border-2 border-b-0 border-border bg-muted/40 px-3 py-2 flex items-center justify-between">
               <div className="h-3 w-20 skeleton rounded" />
               <div className="h-3 w-6 skeleton rounded-full" />
