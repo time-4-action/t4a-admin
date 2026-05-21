@@ -391,7 +391,7 @@ function StatusPipeline({
         {denied && (
           <span className="text-[10px] font-semibold uppercase tracking-wider text-destructive flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-destructive" />
-            Denial path
+            Rejection path
           </span>
         )}
       </div>
@@ -403,7 +403,7 @@ function StatusPipeline({
           const isDeniedStage = denied && s === "decided";
           const isSkippedStage = denied && s === "to_send_new_product";
           const label = isDeniedStage
-            ? "Denied"
+            ? "Rejected"
             : WARRANTY_STATUS_LABELS[s];
           return (
             <button
@@ -455,7 +455,7 @@ function StatusPipeline({
       </div>
       {denied && (
         <p className="text-[10px] text-muted-foreground mt-2 leading-relaxed">
-          This claim is on the denial path. Change <strong className="text-foreground">Warranty type</strong> below if that&apos;s no longer correct.
+          This claim is on the rejection path. Change <strong className="text-foreground">Warranty type</strong> below if that&apos;s no longer correct.
         </p>
       )}
     </div>

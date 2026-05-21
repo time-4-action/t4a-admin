@@ -370,7 +370,7 @@ function ClaimCard({
       {claim.warrantyType === "denied" && (
         <span className="absolute -bottom-1.5 left-2 inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground">
           <Wrench className="w-2 h-2" />
-          Denied
+          Rejected
         </span>
       )}
     </div>
