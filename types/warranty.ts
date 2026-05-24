@@ -367,3 +367,18 @@ export type ListWarrantyResult = {
   total: number;
   items: WarrantySubmission[];
 };
+
+// ----------------------------------------------------------------------------
+// Virtual "Rejected" bucket
+// ----------------------------------------------------------------------------
+// A claim is considered Rejected (in the UI sense) when its warrantyType is
+// "denied" — regardless of the underlying workflow status. The pipeline,
+// kanban, and filter pills all treat this as a sibling of the real statuses
+// even though the backend doesn't have a discrete "rejected" status.
+
+export const REJECTED_KEY = "rejected" as const;
+export type RejectedKey = typeof REJECTED_KEY;
+
+export function isRejected(item: Pick<WarrantySubmission, "warrantyType">): boolean {
+  return item.warrantyType === "denied";
+}

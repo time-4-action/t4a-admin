@@ -199,7 +199,10 @@ function WorkflowCard({
     startTransition(() => router.refresh());
   }
 
-  const setStatus = (s: WarrantyStatus) => patch("status", { status: s });
+  const updatePipeline = (body: {
+    status?: WarrantyStatus;
+    warrantyType?: WarrantyType | null;
+  }) => patch("status", body);
   const setAssignee = (v: Assignee | "") =>
     patch("assignee", { assignee: v === "" ? null : v });
   const setWarrantyType = (v: WarrantyType | "") =>
@@ -240,7 +243,7 @@ function WorkflowCard({
           current={doc.status}
           warrantyType={doc.warrantyType}
           saving={savingField === "status"}
-          onChange={setStatus}
+          onChange={updatePipeline}
         />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -375,13 +378,48 @@ function StatusPipeline({
   current: WarrantyStatus;
   warrantyType: WarrantySubmission["warrantyType"];
   saving: boolean;
-  onChange: (s: WarrantyStatus) => void;
+  onChange: (patch: { status?: WarrantyStatus; warrantyType?: WarrantyType | null }) => void;
 }) {
   const denied = warrantyType === "denied";
   const idx = WARRANTY_STATUSES.indexOf(current);
-  // When the claim is on the denial path, the "to_send_new_product" stage is
-  // not part of the journey — the customer doesn't get a replacement. We dim
-  // and disable that stage so it's still visible but visibly skipped.
+  const decidedIdx = WARRANTY_STATUSES.indexOf("decided");
+
+  // Pipeline tree:
+  //   Open → In review → Decided ─┬─ To send new product → Finished
+  //                                └─ Rejected ─────────────────────┘
+  // The branch column (col 4) stacks "To send new product" (approval path,
+  // top) and "Rejected" (denial path, bottom). Both terminate at Finished.
+
+  function clickStage(s: WarrantyStatus) {
+    // Moving onto the approval branch from a rejected claim clears the
+    // denial flag so the pipeline doesn't immediately snap back.
+    if (s === "to_send_new_product" && denied) {
+      onChange({ status: s, warrantyType: null });
+      return;
+    }
+    onChange({ status: s });
+  }
+
+  function clickRejected() {
+    // Rejection logically follows the decision, so if the claim hasn't
+    // reached "Decided" yet, fast-forward the status as well.
+    if (idx < decidedIdx) {
+      onChange({ status: "decided", warrantyType: "denied" });
+    } else {
+      onChange({ warrantyType: "denied" });
+    }
+  }
+
+  function stageState(s: WarrantyStatus) {
+    const i = WARRANTY_STATUSES.indexOf(s);
+    // On the denial path, "To send new product" is a skipped stage rather
+    // than a past/future one — it's not part of this claim's journey.
+    if (s === "to_send_new_product" && denied) {
+      return { past: false, active: false, skipped: true };
+    }
+    return { past: i < idx, active: i === idx, skipped: false };
+  }
+
   return (
     <div>
       <div className="flex items-baseline justify-between mb-2">
@@ -389,78 +427,147 @@ function StatusPipeline({
           Pipeline · click a stage to move the claim
         </p>
         {denied && (
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-destructive flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-destructive" />
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-rose-600 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-600" />
             Rejection path
           </span>
         )}
       </div>
-      <div className="grid grid-cols-5 gap-1.5">
-        {WARRANTY_STATUSES.map((s, i) => {
-          const past = i < idx;
-          const active = i === idx;
-          const Icon = past ? CheckCircle2 : Circle;
-          const isDeniedStage = denied && s === "decided";
-          const isSkippedStage = denied && s === "to_send_new_product";
-          const label = isDeniedStage
-            ? "Rejected"
-            : WARRANTY_STATUS_LABELS[s];
-          return (
-            <button
-              key={s}
-              type="button"
-              onClick={() => !active && onChange(s)}
-              disabled={saving || active}
-              className={cn(
-                "group relative rounded-xl border px-2.5 py-2 text-left transition-all",
-                active && isDeniedStage
-                  ? "border-destructive bg-destructive text-destructive-foreground shadow-sm"
-                  : active
-                  ? "border-foreground bg-foreground text-background shadow-sm"
-                  : isDeniedStage
-                  ? "border-destructive/40 bg-destructive/5 text-destructive hover:bg-destructive/10"
-                  : isSkippedStage
-                  ? "border-dashed border-border bg-muted/20 text-muted-foreground/60 line-through"
-                  : past
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:border-emerald-700/50 dark:text-emerald-300"
-                  : "border-border bg-background text-muted-foreground hover:border-foreground/40 hover:text-foreground",
-                saving && "opacity-60 cursor-not-allowed",
-              )}
-              title={isSkippedStage ? "Skipped — the customer doesn't get a replacement" : undefined}
-            >
-              <div className="flex items-center gap-1.5">
-                <Icon
-                  className={cn(
-                    "w-3.5 h-3.5 shrink-0",
-                    active ? (isDeniedStage ? "text-destructive-foreground" : "text-background") : past ? "text-emerald-600" : "",
-                    isDeniedStage && !active && "text-destructive",
-                  )}
-                />
-                <span className="text-[10px] font-bold tabular-nums">
-                  {i + 1}
-                </span>
-              </div>
-              <p
-                className={cn(
-                  "text-[11px] font-semibold mt-1 truncate",
-                  active && isDeniedStage && "text-destructive-foreground",
-                  active && !isDeniedStage && "text-background",
-                )}
-              >
-                {label}
-              </p>
-            </button>
-          );
-        })}
+      <div className="grid grid-cols-[1fr_1fr_1fr_1.15fr_1fr] gap-1.5 items-stretch">
+        <StageButton
+          number={1}
+          label={WARRANTY_STATUS_LABELS.open}
+          state={stageState("open")}
+          saving={saving}
+          onClick={() => clickStage("open")}
+        />
+        <StageButton
+          number={2}
+          label={WARRANTY_STATUS_LABELS.in_review}
+          state={stageState("in_review")}
+          saving={saving}
+          onClick={() => clickStage("in_review")}
+        />
+        <StageButton
+          number={3}
+          label={WARRANTY_STATUS_LABELS.decided}
+          state={stageState("decided")}
+          saving={saving}
+          onClick={() => clickStage("decided")}
+        />
+        {/* Branch column — approval path (top) + denial path (bottom). */}
+        <div className="flex flex-col gap-1 relative">
+          <span className="absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-px bg-border" />
+          <StageButton
+            number={4}
+            label={WARRANTY_STATUS_LABELS.to_send_new_product}
+            state={stageState("to_send_new_product")}
+            saving={saving}
+            compact
+            onClick={() => clickStage("to_send_new_product")}
+          />
+          <StageButton
+            label="Rejected"
+            state={{ past: false, active: denied, skipped: false }}
+            saving={saving}
+            compact
+            variant="rejected"
+            onClick={clickRejected}
+          />
+        </div>
+        <StageButton
+          number={5}
+          label={WARRANTY_STATUS_LABELS.finished}
+          state={stageState("finished")}
+          saving={saving}
+          onClick={() => clickStage("finished")}
+        />
       </div>
       {denied && (
         <p className="text-[10px] text-muted-foreground mt-2 leading-relaxed">
-          This claim is on the rejection path. Change <strong className="text-foreground">Warranty type</strong> below if that&apos;s no longer correct.
+          This claim is on the rejection path. Click <strong className="text-foreground">To send new product</strong> above to move it back onto the approval branch.
         </p>
       )}
     </div>
   );
 }
+
+function StageButton({
+  number,
+  label,
+  state,
+  saving,
+  compact,
+  variant,
+  onClick,
+}: {
+  number?: number;
+  label: string;
+  state: { past: boolean; active: boolean; skipped: boolean };
+  saving: boolean;
+  compact?: boolean;
+  variant?: "rejected";
+  onClick: () => void;
+}) {
+  const { past, active, skipped } = state;
+  const Icon = past ? CheckCircle2 : Circle;
+  const isRejected = variant === "rejected";
+  return (
+    <button
+      type="button"
+      onClick={() => !active && onClick()}
+      disabled={saving || active}
+      className={cn(
+        "group relative rounded-xl border text-left transition-all",
+        compact ? "px-2.5 py-1.5" : "px-2.5 py-2",
+        active && isRejected
+          ? "border-rose-600 bg-rose-600 text-white shadow-sm"
+          : active
+          ? "border-foreground bg-foreground text-background shadow-sm"
+          : isRejected
+          ? "border-rose-300 bg-rose-50/60 text-rose-700 hover:bg-rose-100 dark:bg-rose-950/30 dark:border-rose-700/50 dark:text-rose-300"
+          : skipped
+          ? "border-dashed border-border bg-muted/20 text-muted-foreground/60 line-through"
+          : past
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:border-emerald-700/50 dark:text-emerald-300"
+          : "border-border bg-background text-muted-foreground hover:border-foreground/40 hover:text-foreground",
+        saving && "opacity-60 cursor-not-allowed",
+      )}
+      title={skipped ? "Skipped — the customer doesn't get a replacement" : undefined}
+    >
+      <div className="flex items-center gap-1.5">
+        <Icon
+          className={cn(
+            "w-3.5 h-3.5 shrink-0",
+            active && isRejected && "text-white",
+            active && !isRejected && "text-background",
+            !active && past && "text-emerald-600",
+            !active && isRejected && "text-rose-500",
+          )}
+        />
+        {number != null && (
+          <span className="text-[10px] font-bold tabular-nums">{number}</span>
+        )}
+        {isRejected && (
+          <span className="text-[9px] font-bold tabular-nums uppercase tracking-wider opacity-70">
+            alt
+          </span>
+        )}
+      </div>
+      <p
+        className={cn(
+          "text-[11px] font-semibold truncate",
+          compact ? "mt-0.5" : "mt-1",
+          active && isRejected && "text-white",
+          active && !isRejected && "text-background",
+        )}
+      >
+        {label}
+      </p>
+    </button>
+  );
+}
+
 
 // ============================================================================
 // Notes timeline

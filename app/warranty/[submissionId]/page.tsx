@@ -97,7 +97,7 @@ export default async function ClaimDetailPage({ params }: PageProps) {
               Received {fmtLong(doc.submittedAt)}
             </p>
           </div>
-          <WarrantyStatusBadge status={doc.status} />
+          <WarrantyStatusBadge status={doc.status} rejected={doc.warrantyType === "denied"} />
         </div>
       </div>
 

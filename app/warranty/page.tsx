@@ -21,11 +21,14 @@ import { WarrantyStatusBadge } from "@/components/warranty-status-badge";
 import { WarrantyKanban, type BoardGrouping } from "@/components/warranty-kanban";
 import {
   ASSIGNEES,
+  REJECTED_KEY,
   WARRANTY_STATUSES,
   WARRANTY_STATUS_LABELS,
   WARRANTY_TYPE_LABELS,
+  isRejected,
   type Assignee,
   type ListWarrantyResult,
+  type RejectedKey,
   type WarrantyStatus,
   type WarrantySubmission,
 } from "@/types/warranty";
@@ -42,12 +45,39 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type StatusFilter = "all" | WarrantyStatus;
+type StatusFilter = "all" | WarrantyStatus | RejectedKey;
 type AssigneeFilter = "all" | "unassigned" | Assignee;
 type ViewMode = "table" | "status_board" | "assignee_board";
 const ASSIGNEE_NONE = "__none__";
 
-const STATUS_FILTERS: StatusFilter[] = ["all", ...WARRANTY_STATUSES];
+// Insert the synthetic "Rejected" pill right before "Finished" so it reads as
+// the terminal branch of the decision split.
+const STATUS_FILTERS: StatusFilter[] = [
+  "all",
+  ...WARRANTY_STATUSES.filter((s) => s !== "finished"),
+  REJECTED_KEY,
+  "finished",
+];
+
+function statusFilterLabel(s: StatusFilter): string {
+  if (s === "all") return "All";
+  if (s === REJECTED_KEY) return "Rejected";
+  return WARRANTY_STATUS_LABELS[s];
+}
+
+// Build the query string for a given filter. "Rejected" is virtual: send
+// warrantyType=denied to the backend (and let the client also filter as a
+// safety net in case the backend doesn't honor that param).
+function filterToQuery(s: StatusFilter): URLSearchParams {
+  const qs = new URLSearchParams();
+  if (s === "all") return qs;
+  if (s === REJECTED_KEY) {
+    qs.set("warrantyType", "denied");
+    return qs;
+  }
+  qs.set("status", s);
+  return qs;
+}
 
 function joinName(name: string, surname: string): string {
   return [name, surname].filter((x) => x?.trim()).join(" ").trim();
@@ -78,6 +108,7 @@ export default function ClaimsPage() {
     in_review: 0,
     decided: 0,
     to_send_new_product: 0,
+    [REJECTED_KEY]: 0,
     finished: 0,
   });
 
@@ -85,11 +116,14 @@ export default function ClaimsPage() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    const qs = new URLSearchParams();
-    if (status !== "all") qs.set("status", status);
+    const qs = filterToQuery(status);
     if (assignee !== "all") qs.set("assignee", assignee);
     if (search.trim()) qs.set("q", search.trim());
-    qs.set("limit", view === "table" ? "200" : "500");
+    // Rejected is filtered client-side (backend ignores ?warrantyType), so
+    // pull a wider window to make sure denied claims aren't truncated off
+    // before the filter runs.
+    const isRejectedFilter = status === REJECTED_KEY;
+    qs.set("limit", isRejectedFilter ? "2000" : view === "table" ? "200" : "500");
     fetch(`/api/warranty/submissions?${qs.toString()}`)
       .then(async (r) => {
         const data = (await r.json()) as ListWarrantyResult | { error: string };
@@ -115,29 +149,57 @@ export default function ClaimsPage() {
     };
   }, [status, assignee, search, view]);
 
+  // Pill counts: one unfiltered fetch, counted client-side. We can't trust the
+  // backend to honor ?warrantyType=denied (it currently ignores it, so the
+  // Rejected total came back equal to All). Counting locally also lets each
+  // claim land in exactly one bucket — denied claims surface under Rejected
+  // and are excluded from their underlying status pill, matching the items
+  // view filter below.
   useEffect(() => {
     let cancelled = false;
-    Promise.all(
-      STATUS_FILTERS.map((s) =>
-        fetch(
-          `/api/warranty/submissions?limit=1${s === "all" ? "" : `&status=${s}`}${assignee !== "all" ? `&assignee=${assignee}` : ""}`,
-        )
-          .then((r) => (r.ok ? r.json() : { total: 0 }))
-          .then((d: { total?: number }) => ({ s, total: d.total ?? 0 })),
-      ),
-    ).then((rows) => {
-      if (cancelled) return;
-      const next = { ...counts };
-      for (const { s, total } of rows) next[s] = total;
-      setCounts(next);
-    });
+    const qs = new URLSearchParams();
+    if (assignee !== "all") qs.set("assignee", assignee);
+    qs.set("limit", "2000");
+    fetch(`/api/warranty/submissions?${qs.toString()}`)
+      .then((r) => (r.ok ? r.json() : { items: [], total: 0 }))
+      .then((d: { items?: WarrantySubmission[]; total?: number }) => {
+        if (cancelled) return;
+        const all = d.items ?? [];
+        const next: Record<StatusFilter, number> = {
+          all: d.total ?? all.length,
+          open: 0,
+          in_review: 0,
+          decided: 0,
+          to_send_new_product: 0,
+          finished: 0,
+          [REJECTED_KEY]: 0,
+        };
+        for (const it of all) {
+          if (isRejected(it)) next[REJECTED_KEY]++;
+          else next[it.status]++;
+        }
+        setCounts(next);
+      });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items.length, assignee]);
 
-  const filtered = items;
+  // Defense-in-depth: even if the backend ignores ?warrantyType=denied, the
+  // client splits the items into the right pill / board column so the UI
+  // stays consistent. Rejected claims are pulled out of their underlying
+  // status bucket and surface only under Rejected.
+  const filtered =
+    status === REJECTED_KEY
+      ? items.filter((it) => isRejected(it))
+      : status === "all"
+      ? items
+      : items.filter((it) => !isRejected(it));
+
+  // Header chip should reflect the active filter's count. The server's `total`
+  // is unreliable for the Rejected pill (backend ignores ?warrantyType), so
+  // prefer the locally counted value when we have one.
+  const headerCount = counts[status] || total;
 
   return (
     <div className="flex flex-col h-full">
@@ -145,9 +207,9 @@ export default function ClaimsPage() {
         <div className="h-14 flex items-center justify-between px-4 md:px-8">
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
             <h1 className="text-sm font-semibold text-foreground shrink-0">Warranty claims</h1>
-            {total > 0 && (
+            {headerCount > 0 && (
               <span className="text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
-                {total}
+                {headerCount}
               </span>
             )}
           </div>
@@ -209,20 +271,28 @@ export default function ClaimsPage() {
 
           {/* Status filter pills */}
           <div className="flex items-center gap-1 overflow-x-auto flex-1 min-w-0">
-            {STATUS_FILTERS.map((s) => (
-              <button
-                key={s}
-                onClick={() => setStatus(s)}
-                className={cn(
-                  "flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors select-none whitespace-nowrap",
-                  status === s
-                    ? "bg-foreground text-background border-foreground"
-                    : "bg-transparent text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground",
-                )}
-              >
-                {s === "all" ? `All (${counts.all})` : `${WARRANTY_STATUS_LABELS[s]} (${counts[s]})`}
-              </button>
-            ))}
+            {STATUS_FILTERS.map((s) => {
+              const isRejectedPill = s === REJECTED_KEY;
+              const active = status === s;
+              return (
+                <button
+                  key={s}
+                  onClick={() => setStatus(s)}
+                  className={cn(
+                    "flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors select-none whitespace-nowrap",
+                    active && isRejectedPill
+                      ? "bg-rose-600 text-white border-rose-600"
+                      : active
+                      ? "bg-foreground text-background border-foreground"
+                      : isRejectedPill
+                      ? "bg-transparent text-rose-600 border-rose-300 hover:border-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                      : "bg-transparent text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground",
+                  )}
+                >
+                  {statusFilterLabel(s)} ({counts[s]})
+                </button>
+              );
+            })}
           </div>
 
           {/* Assignee filter */}
@@ -233,7 +303,7 @@ export default function ClaimsPage() {
             <SelectTrigger className="h-8 text-[11px] w-[140px] shrink-0">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent position="popper" align="start" sideOffset={4}>
               <SelectItem value="all">All assignees</SelectItem>
               <SelectItem value="unassigned">Unassigned</SelectItem>
               {ASSIGNEES.map((a) => (
@@ -449,7 +519,7 @@ function ClaimRow({
         )}
       </TableCell>
       <TableCell>
-        <WarrantyStatusBadge status={item.status} />
+        <WarrantyStatusBadge status={item.status} rejected={isRejected(item)} />
       </TableCell>
       <TableCell className="pr-4">
         <Link
@@ -523,7 +593,7 @@ function InlineAssigneePicker({
           <span className="text-muted-foreground italic">Unassigned</span>
         )}
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent position="popper" align="start" sideOffset={4}>
         <SelectItem value={ASSIGNEE_NONE}>Unassigned</SelectItem>
         {ASSIGNEES.map((a) => (
           <SelectItem key={a} value={a}>

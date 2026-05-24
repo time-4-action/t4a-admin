@@ -15,8 +15,10 @@ import {
 } from "@dnd-kit/core";
 import {
   ASSIGNEES,
+  REJECTED_KEY,
   WARRANTY_STATUSES,
   WARRANTY_STATUS_LABELS,
+  isRejected,
   type Assignee,
   type WarrantyStatus,
   type WarrantySubmission,
@@ -46,11 +48,26 @@ type Column = {
   headerClass: string;
 };
 
-const STATUS_COLUMNS: Column[] = WARRANTY_STATUSES.map((s) => ({
-  id: s,
-  label: WARRANTY_STATUS_LABELS[s],
-  headerClass: STATUS_COLUMN_HEADER[s],
-}));
+// Real workflow statuses + the synthetic "Rejected" column (warrantyType=denied).
+// Rejected is inserted between "to_send_new_product" and "finished" so it
+// reads as a terminal branch of the decision split.
+const STATUS_COLUMNS: Column[] = [
+  ...WARRANTY_STATUSES.filter((s) => s !== "finished").map((s) => ({
+    id: s,
+    label: WARRANTY_STATUS_LABELS[s],
+    headerClass: STATUS_COLUMN_HEADER[s],
+  })),
+  {
+    id: REJECTED_KEY,
+    label: "Rejected",
+    headerClass: STATUS_COLUMN_HEADER[REJECTED_KEY],
+  },
+  {
+    id: "finished",
+    label: WARRANTY_STATUS_LABELS.finished,
+    headerClass: STATUS_COLUMN_HEADER.finished,
+  },
+];
 
 const ASSIGNEE_COLUMNS: Column[] = [
   {
@@ -68,7 +85,11 @@ const ASSIGNEE_COLUMNS: Column[] = [
 ];
 
 function bucketFor(grouping: BoardGrouping, item: WarrantySubmission): string {
-  return grouping === "status" ? item.status : item.assignee ?? UNASSIGNED;
+  if (grouping === "assignee") return item.assignee ?? UNASSIGNED;
+  // Rejection wins over the underlying workflow status — a denied claim
+  // belongs in the Rejected column even if its status is still "decided".
+  if (isRejected(item)) return REJECTED_KEY;
+  return item.status;
 }
 
 function applyOptimistic(
@@ -76,18 +97,40 @@ function applyOptimistic(
   item: WarrantySubmission,
   targetColumn: string,
 ): WarrantySubmission {
-  if (grouping === "status") {
-    return { ...item, status: targetColumn as WarrantyStatus };
+  if (grouping === "assignee") {
+    return {
+      ...item,
+      assignee: targetColumn === UNASSIGNED ? null : (targetColumn as Assignee),
+    };
   }
+  if (targetColumn === REJECTED_KEY) {
+    // Dropping into Rejected flips warrantyType to "denied"; status stays put.
+    return { ...item, warrantyType: "denied" };
+  }
+  // Dropping into a real status column. If the card was previously rejected,
+  // clear the denial flag so it doesn't snap back into the Rejected column.
   return {
     ...item,
-    assignee: targetColumn === UNASSIGNED ? null : (targetColumn as Assignee),
+    status: targetColumn as WarrantyStatus,
+    warrantyType: isRejected(item) ? null : item.warrantyType,
   };
 }
 
-function patchBody(grouping: BoardGrouping, targetColumn: string) {
-  if (grouping === "status") return { status: targetColumn };
-  return { assignee: targetColumn === UNASSIGNED ? null : targetColumn };
+function patchBody(
+  grouping: BoardGrouping,
+  source: WarrantySubmission,
+  targetColumn: string,
+) {
+  if (grouping === "assignee") {
+    return { assignee: targetColumn === UNASSIGNED ? null : targetColumn };
+  }
+  if (targetColumn === REJECTED_KEY) {
+    return { warrantyType: "denied" };
+  }
+  if (isRejected(source)) {
+    return { status: targetColumn, warrantyType: null };
+  }
+  return { status: targetColumn };
 }
 
 export function WarrantyKanban({
@@ -156,7 +199,7 @@ export function WarrantyKanban({
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patchBody(grouping, target)),
+        body: JSON.stringify(patchBody(grouping, card, target)),
       },
     );
     setSavingId(null);
@@ -174,6 +217,8 @@ export function WarrantyKanban({
   const gridCols =
     colCount <= 5
       ? "grid-cols-1 md:grid-cols-3 lg:grid-cols-5"
+      : colCount <= 6
+      ? "grid-cols-2 md:grid-cols-3 lg:grid-cols-6"
       : "grid-cols-2 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8";
 
   return (
@@ -339,7 +384,7 @@ function ClaimCard({
       <div className="flex items-center justify-between gap-2 mt-2 pt-1.5 border-t border-border/40">
         {hideAssignee ? (
           <span className="text-[10px] text-muted-foreground">
-            {WARRANTY_STATUS_LABELS[claim.status]}
+            {isRejected(claim) ? "Rejected" : WARRANTY_STATUS_LABELS[claim.status]}
           </span>
         ) : (
           <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">

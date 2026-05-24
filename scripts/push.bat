@@ -3,8 +3,13 @@ setlocal enabledelayedexpansion
 
 set IMAGE=time4action/t4a-admin
 
-:: Always generate a date tag
-for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set DATETAG=%%i
+:: Find the latest date-tagged image (yyyyMMdd-HHmmss format, sorted descending)
+for /f %%i in ('powershell -NoProfile -Command "docker images %IMAGE% --format '{{.Tag}}' | Where-Object { $_ -match '^\d{8}-\d{6}$' } | Sort-Object -Descending | Select-Object -First 1"') do set DATETAG=%%i
+
+if "%DATETAG%"=="" (
+    echo [push] No date-tagged image found for %IMAGE%. Run build.bat first.
+    exit /b 1
+)
 
 :: Parse optional alias tag
 set ALIASTAG=
