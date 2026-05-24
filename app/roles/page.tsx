@@ -219,7 +219,7 @@ export default function RolesPage() {
       <div className="flex flex-col flex-1 min-w-0">
         <header className="h-14 border-b border-border flex items-center justify-between px-4 md:px-8 shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
           <div className="flex items-center gap-2">
-            <h1 className="text-sm font-semibold text-foreground">Access Types</h1>
+            <h1 className="font-display text-lg font-medium tracking-tight text-foreground">Access Types</h1>
             {roles.length > 0 && (
               <span className="text-[10px] font-semibold text-muted-foreground bg-muted px-2 py-0.5 rounded-full tabular-nums">
                 {roles.length}

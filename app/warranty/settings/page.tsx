@@ -276,7 +276,7 @@ export default function WarrantySettingsPage() {
           Claims
         </Link>
         <span className="mx-2 text-border/60 select-none text-xs">/</span>
-        <h1 className="text-sm font-semibold text-foreground">Email settings</h1>
+        <h1 className="font-display text-lg font-medium tracking-tight text-foreground">Email settings</h1>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 md:p-8 max-w-3xl space-y-6 pb-24">

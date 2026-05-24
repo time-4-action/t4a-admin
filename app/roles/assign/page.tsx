@@ -408,7 +408,7 @@ export default function AssignAccessPage() {
   return (
     <div className="flex flex-col h-full">
       <header className="h-14 border-b border-border flex items-center px-4 md:px-8 shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
-        <h1 className="text-sm font-semibold text-foreground">Assign Access</h1>
+        <h1 className="font-display text-lg font-medium tracking-tight text-foreground">Assign Access</h1>
       </header>
 
       <div className="flex flex-col md:flex-row flex-1 overflow-hidden">

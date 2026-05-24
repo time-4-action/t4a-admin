@@ -86,7 +86,7 @@ export default async function ClaimDetailPage({ params }: PageProps) {
             <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
               Warranty claim
             </p>
-            <h1 className="text-xl font-bold text-foreground tracking-tight leading-tight">
+            <h1 className="font-display text-xl md:text-2xl font-medium text-foreground tracking-tight leading-none">
               {fullName || doc.email || "Unnamed claim"}
             </h1>
             <p className="text-[13px] text-muted-foreground mt-1 truncate">
