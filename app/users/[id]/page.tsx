@@ -107,14 +107,14 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
                   className="w-[60px] h-[60px] rounded-2xl border border-border/60 object-cover shrink-0 shadow-sm"
                 />
               ) : (
-                <div className="w-[60px] h-[60px] rounded-2xl bg-gradient-to-br from-slate-600 to-slate-800 flex items-center justify-center shrink-0 shadow-sm ring-1 ring-border/40">
-                  <span className="text-base font-bold text-white tracking-tight">{initials}</span>
+                <div className="w-[60px] h-[60px] rounded-2xl bg-foreground flex items-center justify-center shrink-0 shadow-sm ring-1 ring-border/40">
+                  <span className="text-base font-bold text-background tracking-tight">{initials}</span>
                 </div>
               )}
 
               {/* Identity */}
               <div className="flex-1 min-w-0 pt-0.5">
-                <h1 className="text-xl font-bold text-foreground tracking-tight leading-tight truncate">
+                <h1 className="font-display text-2xl md:text-3xl font-medium text-foreground tracking-tight leading-none truncate">
                   {auth0User.name}
                 </h1>
                 <p className="text-[13px] text-muted-foreground mt-0.5 truncate">{auth0User.email}</p>

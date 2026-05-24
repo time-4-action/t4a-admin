@@ -153,8 +153,8 @@ export default function RoleDialog({ user, onClose }: { user: any; onClose: () =
                       >
                         <div className={cn(
                           "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all duration-150",
-                          kind === "ai" && (active ? "bg-blue-500 shadow-sm shadow-blue-200" : "bg-blue-100 dark:bg-blue-900/50"),
-                          kind === "admin" && (active ? "bg-orange-500 shadow-sm shadow-orange-200" : "bg-orange-100 dark:bg-orange-900/50"),
+                          kind === "ai" && (active ? "bg-blue-500 shadow-sm" : "bg-blue-100 dark:bg-blue-900/50"),
+                          kind === "admin" && (active ? "bg-orange-500 shadow-sm" : "bg-orange-100 dark:bg-orange-900/50"),
                           kind === "default" && (active ? "bg-foreground/10" : "bg-muted"),
                         )}>
                           {kind === "ai"
