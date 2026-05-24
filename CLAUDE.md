@@ -100,6 +100,36 @@ All data-loading states use a **shimmer skeleton** system — never plain "Loadi
 
 All costs are stored in USD. `lib/currency-context.tsx` provides a client-side `CurrencyProvider` that lets the user toggle between USD and EUR display. The EUR/USD rate is a constant in `lib/currency.ts`.
 
+### Warranty module (`app/warranty/`)
+
+A read/update surface over the **patrik-warranty-form** service. The warranty
+service exposes `/api/admin/*` behind a shared `INTERNAL_ADMIN_TOKEN`; this
+admin calls those endpoints server-side via `lib/warranty-api.ts` and proxies
+them under `/api/warranty/*` so the bearer token never reaches the browser.
+
+| Page | Path | Notes |
+|---|---|---|
+| Submissions list | `/warranty` | Searchable, status-filterable table of every warranty claim. |
+| Submission detail | `/warranty/[submissionId]` | Full claim view with file thumbnails + status editor in the sidebar. |
+| Email settings | `/warranty/settings` | Recipients chip input + customer/admin email subject, intro, outro, and per-field toggles. Persists to the warranty service's `warranty_settings` Mongo collection. |
+
+| Proxy route | Methods |
+|---|---|
+| `/api/warranty/submissions` | GET |
+| `/api/warranty/submissions/[submissionId]` | GET, PATCH |
+| `/api/warranty/settings` | GET, PUT |
+
+Required env vars (server-side only — both are secrets):
+
+```
+WARRANTY_API_BASE=https://warranty.<host>
+INTERNAL_ADMIN_TOKEN=<must match the warranty service>
+```
+
+Shared types live in `types/warranty.ts` and mirror
+`patrik-warranty-form/src/types/warranty-settings.ts`. Keep them in sync by
+hand whenever a status / field is added.
+
 ### API Routes (`app/api/admin/`)
 
 | Route | Methods | Notes |

@@ -18,6 +18,8 @@ import {
   Bot,
   Menu,
   X,
+  Wrench,
+  Mail,
 } from "lucide-react";
 
 const sections: { label: string; links: { href: string; label: string; icon: React.ElementType; matchPrefix?: boolean }[] }[] = [
@@ -42,6 +44,13 @@ const sections: { label: string; links: { href: string; label: string; icon: Rea
       { href: "/ai/dashboard", label: "Dashboard",  icon: LayoutDashboard },
       { href: "/ai/usage",     label: "Usage",      icon: BarChart3 },
       { href: "/ai/access",    label: "AI Access",  icon: Bot, matchPrefix: true },
+    ],
+  },
+  {
+    label: "Warranty",
+    links: [
+      { href: "/warranty",          label: "Claims",         icon: Wrench, matchPrefix: true },
+      { href: "/warranty/settings", label: "Email Settings", icon: Mail },
     ],
   },
 ];
@@ -169,14 +178,28 @@ export default function Nav({ user }: { user?: NavUser }) {
                 </p>
               )}
               <div className="space-y-0.5">
-                {section.links.map((link) => (
-                  <NavLink
-                    key={link.href}
-                    {...link}
-                    active={pathname === link.href || (!!link.matchPrefix && pathname.startsWith(link.href + "/"))}
-                    open={isOpen}
-                  />
-                ))}
+                {section.links.map((link) => {
+                  // matchPrefix matches /href/* — but a sibling with a more
+                  // specific exact path takes priority so the two don't both
+                  // light up on a nested route (e.g. /warranty/settings).
+                  const exact = pathname === link.href;
+                  const prefixHit =
+                    !!link.matchPrefix && pathname.startsWith(link.href + "/");
+                  const siblingTakesIt = section.links.some(
+                    (s) =>
+                      s.href !== link.href &&
+                      (pathname === s.href || pathname.startsWith(s.href + "/")) &&
+                      s.href.length > link.href.length,
+                  );
+                  return (
+                    <NavLink
+                      key={link.href}
+                      {...link}
+                      active={(exact || prefixHit) && !siblingTakesIt}
+                      open={isOpen}
+                    />
+                  );
+                })}
               </div>
             </div>
           ))}
