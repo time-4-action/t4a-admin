@@ -140,14 +140,14 @@ export default function Nav({ user }: { user?: NavUser }) {
       <>
         {/* Brand header */}
         <div className={cn(
-          "flex items-center h-14 shrink-0 px-3 border-b border-border",
+          "flex items-center h-[57px] shrink-0 px-3 border-b border-border",
           isOpen ? "justify-between" : "justify-center",
         )}>
           {isOpen && (
             <div className="flex items-center gap-2.5 min-w-0">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/favicon.ico" alt="logo" className="h-6 w-6 object-contain rounded-lg shrink-0" />
-              <span className="font-display text-[18px] leading-none font-medium text-foreground truncate tracking-tight">
+              <span className="text-[13px] font-semibold text-foreground truncate">
                 {process.env.NEXT_PUBLIC_APP_NAME ?? "Admin"}
               </span>
             </div>
@@ -178,7 +178,7 @@ export default function Nav({ user }: { user?: NavUser }) {
           {sections.map((section) => (
             <div key={section.label}>
               {isOpen && (
-                <p className="overline px-3 pt-1 pb-1 text-muted-foreground/70 select-none">
+                <p className="px-3 pt-1 pb-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground select-none">
                   {section.label}
                 </p>
               )}
@@ -283,7 +283,7 @@ export default function Nav({ user }: { user?: NavUser }) {
         <div className="flex items-center gap-2 ml-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/favicon.ico" alt="logo" className="h-5 w-5 object-contain rounded-md" />
-          <span className="font-display text-[16px] leading-none font-medium text-foreground tracking-tight">
+          <span className="text-[13px] font-semibold text-foreground">
             {process.env.NEXT_PUBLIC_APP_NAME ?? "Admin"}
           </span>
         </div>
