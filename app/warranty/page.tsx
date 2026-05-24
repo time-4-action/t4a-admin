@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Table,
   TableBody,
@@ -65,9 +66,6 @@ function statusFilterLabel(s: StatusFilter): string {
   return WARRANTY_STATUS_LABELS[s];
 }
 
-// Build the query string for a given filter. "Rejected" is virtual: send
-// warrantyType=denied to the backend (and let the client also filter as a
-// safety net in case the backend doesn't honor that param).
 function filterToQuery(s: StatusFilter): URLSearchParams {
   const qs = new URLSearchParams();
   if (s === "all") return qs;
@@ -93,12 +91,22 @@ function fmtSubmitted(value: string): string {
   }).format(d);
 }
 
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(t);
+  }, [value, delayMs]);
+  return debounced;
+}
+
 export default function ClaimsPage() {
   const [items, setItems] = useState<WarrantySubmission[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [status, setStatus] = useState<StatusFilter>("all");
   const [assignee, setAssignee] = useState<AssigneeFilter>("all");
   const [view, setView] = useState<ViewMode>("table");
@@ -118,12 +126,11 @@ export default function ClaimsPage() {
     setError(null);
     const qs = filterToQuery(status);
     if (assignee !== "all") qs.set("assignee", assignee);
-    if (search.trim()) qs.set("q", search.trim());
-    // Rejected is filtered client-side (backend ignores ?warrantyType), so
-    // pull a wider window to make sure denied claims aren't truncated off
-    // before the filter runs.
+    if (debouncedSearch.trim()) qs.set("q", debouncedSearch.trim());
     const isRejectedFilter = status === REJECTED_KEY;
-    qs.set("limit", isRejectedFilter ? "2000" : view === "table" ? "200" : "500");
+    // Virtualized table can handle the full window; kanban still chunks per
+    // column so a smaller cap is fine there.
+    qs.set("limit", isRejectedFilter ? "2000" : view === "table" ? "2000" : "500");
     fetch(`/api/warranty/submissions?${qs.toString()}`)
       .then(async (r) => {
         const data = (await r.json()) as ListWarrantyResult | { error: string };
@@ -147,14 +154,10 @@ export default function ClaimsPage() {
     return () => {
       cancelled = true;
     };
-  }, [status, assignee, search, view]);
+  }, [status, assignee, debouncedSearch, view]);
 
-  // Pill counts: one unfiltered fetch, counted client-side. We can't trust the
-  // backend to honor ?warrantyType=denied (it currently ignores it, so the
-  // Rejected total came back equal to All). Counting locally also lets each
-  // claim land in exactly one bucket — denied claims surface under Rejected
-  // and are excluded from their underlying status pill, matching the items
-  // view filter below.
+  // Pill counts: one unfiltered fetch, counted client-side. The backend
+  // ignores ?warrantyType so we have to assign Rejected locally.
   useEffect(() => {
     let cancelled = false;
     const qs = new URLSearchParams();
@@ -185,20 +188,12 @@ export default function ClaimsPage() {
     };
   }, [items.length, assignee]);
 
-  // Defense-in-depth: even if the backend ignores ?warrantyType=denied, the
-  // client splits the items into the right pill / board column so the UI
-  // stays consistent. Rejected claims are pulled out of their underlying
-  // status bucket and surface only under Rejected.
-  const filtered =
-    status === REJECTED_KEY
-      ? items.filter((it) => isRejected(it))
-      : status === "all"
-      ? items
-      : items.filter((it) => !isRejected(it));
+  const filtered = useMemo(() => {
+    if (status === REJECTED_KEY) return items.filter((it) => isRejected(it));
+    if (status === "all") return items;
+    return items.filter((it) => !isRejected(it));
+  }, [items, status]);
 
-  // Header chip should reflect the active filter's count. The server's `total`
-  // is unreliable for the Rejected pill (backend ignores ?warrantyType), so
-  // prefer the locally counted value when we have one.
   const headerCount = counts[status] || total;
 
   return (
@@ -206,15 +201,16 @@ export default function ClaimsPage() {
       <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="h-14 flex items-center justify-between px-4 md:px-8">
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
-            <h1 className="text-sm font-semibold text-foreground shrink-0">Warranty claims</h1>
+            <h1 className="font-display text-lg font-medium tracking-tight text-foreground shrink-0">
+              Warranty claims
+            </h1>
             {headerCount > 0 && (
-              <span className="text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+              <span className="text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0 tabular-nums">
                 {headerCount}
               </span>
             )}
           </div>
           <div className="flex items-center gap-2">
-            {/* View toggle */}
             <div className="hidden md:flex items-center rounded-md bg-muted p-0.5">
               <ViewToggleButton
                 active={view === "table"}
@@ -240,36 +236,36 @@ export default function ClaimsPage() {
             </div>
 
             <div className="relative hidden sm:block">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" aria-hidden />
               <Input
                 placeholder="Search claims…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                aria-label="Search claims"
                 className="pl-8 h-8 w-40 md:w-56 text-xs bg-background"
               />
             </div>
             <Link
               href="/warranty/settings"
-              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border text-[12px] font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border text-[12px] font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <Settings className="w-3.5 h-3.5" />
+              <Settings className="w-3.5 h-3.5" aria-hidden />
               <span className="hidden sm:inline">Email settings</span>
             </Link>
           </div>
         </div>
         <div className="flex items-center gap-2 px-4 md:px-8 pb-3 flex-wrap">
-          {/* Mobile search */}
           <div className="relative sm:hidden flex-1 basis-full">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" aria-hidden />
             <Input
               placeholder="Search claims…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search claims"
               className="pl-8 h-8 text-xs bg-background w-full"
             />
           </div>
 
-          {/* Status filter pills */}
           <div className="flex items-center gap-1 overflow-x-auto flex-1 min-w-0">
             {STATUS_FILTERS.map((s) => {
               const isRejectedPill = s === REJECTED_KEY;
@@ -277,16 +273,19 @@ export default function ClaimsPage() {
               return (
                 <button
                   key={s}
+                  type="button"
                   onClick={() => setStatus(s)}
+                  aria-pressed={active}
                   className={cn(
-                    "flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors select-none whitespace-nowrap",
+                    "flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors select-none whitespace-nowrap tabular-nums",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     active && isRejectedPill
-                      ? "bg-rose-600 text-white border-rose-600"
+                      ? "bg-destructive text-white border-destructive"
                       : active
-                      ? "bg-foreground text-background border-foreground"
-                      : isRejectedPill
-                      ? "bg-transparent text-rose-600 border-rose-300 hover:border-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30"
-                      : "bg-transparent text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground",
+                        ? "bg-foreground text-background border-foreground"
+                        : isRejectedPill
+                          ? "bg-transparent text-destructive border-destructive/40 hover:border-destructive hover:bg-destructive/5"
+                          : "bg-transparent text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground",
                   )}
                 >
                   {statusFilterLabel(s)} ({counts[s]})
@@ -295,7 +294,6 @@ export default function ClaimsPage() {
             })}
           </div>
 
-          {/* Assignee filter */}
           <Select
             value={assignee}
             onValueChange={(v) => setAssignee(v as AssigneeFilter)}
@@ -316,9 +314,20 @@ export default function ClaimsPage() {
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-4 md:p-8">
+      {/* Body: flex column. For the table view, the inner card scrolls
+          (so we can virtualize its rows); for board views, the body scrolls
+          as a whole. */}
+      <div
+        className={cn(
+          "flex-1 min-h-0 p-4 md:p-8 flex flex-col",
+          view !== "table" && "overflow-y-auto",
+        )}
+      >
         {error && (
-          <div className="mb-4 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-[12px] text-destructive">
+          <div
+            role="alert"
+            className="mb-4 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-[12px] text-destructive"
+          >
             {error}
           </div>
         )}
@@ -372,10 +381,13 @@ function ViewToggleButton({
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       title={title}
+      aria-pressed={active}
       className={cn(
         "flex items-center gap-1.5 h-7 px-2.5 rounded text-[11px] font-medium transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         active
           ? "bg-background text-foreground shadow-sm"
           : "text-muted-foreground hover:text-foreground",
@@ -387,6 +399,8 @@ function ViewToggleButton({
   );
 }
 
+const ROW_HEIGHT_ESTIMATE = 56;
+
 function ClaimsTable({
   items,
   loading,
@@ -396,10 +410,34 @@ function ClaimsTable({
   loading: boolean;
   onAssigneeChange: (updated: WarrantySubmission) => void;
 }) {
+  const parentRef = useRef<HTMLDivElement>(null);
+  const skeletonCount = 8;
+  const count = loading ? skeletonCount : items.length;
+
+  const rowVirtualizer = useVirtualizer({
+    count,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ROW_HEIGHT_ESTIMATE,
+    overscan: 8,
+  });
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const totalSize = rowVirtualizer.getTotalSize();
+  const paddingTop = virtualItems[0]?.start ?? 0;
+  const paddingBottom =
+    virtualItems.length > 0
+      ? totalSize - (virtualItems[virtualItems.length - 1]?.end ?? 0)
+      : 0;
+
+  const empty = !loading && items.length === 0;
+
   return (
-    <div className="bg-background border border-border rounded-xl overflow-hidden overflow-x-auto">
+    <div
+      ref={parentRef}
+      className="flex-1 min-h-0 bg-surface border border-border rounded-xl overflow-auto"
+    >
       <Table>
-        <TableHeader>
+        <TableHeader className="sticky top-0 z-10 bg-surface">
           <TableRow className="hover:bg-transparent border-b border-border">
             <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9 pl-5">Received</TableHead>
             <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Claim</TableHead>
@@ -412,9 +450,21 @@ function ClaimsTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {loading
-            ? Array.from({ length: 8 }).map((_, i) => (
-                <TableRow key={i} className="border-b border-border/60">
+          {paddingTop > 0 && (
+            <tr aria-hidden style={{ height: paddingTop }}>
+              <td colSpan={8} />
+            </tr>
+          )}
+          {virtualItems.map((virtualRow) => {
+            if (loading) {
+              const i = virtualRow.index;
+              return (
+                <TableRow
+                  key={`sk-${i}`}
+                  ref={rowVirtualizer.measureElement}
+                  data-index={virtualRow.index}
+                  className="border-b border-border/60"
+                >
                   <TableCell className="pl-5 py-3">
                     <div className="h-3 w-24 rounded skeleton" style={{ animationDelay: `${i * 80}ms` }} />
                   </TableCell>
@@ -431,18 +481,28 @@ function ClaimsTable({
                   <TableCell><div className="h-5 w-20 rounded-full skeleton" style={{ animationDelay: `${i * 80 + 90}ms` }} /></TableCell>
                   <TableCell />
                 </TableRow>
-              ))
-            : items.map((item) => (
-                <ClaimRow
-                  key={item.submissionId}
-                  item={item}
-                  onAssigneeChange={onAssigneeChange}
-                />
-              ))}
-          {!loading && items.length === 0 && (
+              );
+            }
+            const item = items[virtualRow.index];
+            return (
+              <ClaimRow
+                key={item.submissionId}
+                item={item}
+                onAssigneeChange={onAssigneeChange}
+                rowRef={rowVirtualizer.measureElement}
+                rowIndex={virtualRow.index}
+              />
+            );
+          })}
+          {paddingBottom > 0 && (
+            <tr aria-hidden style={{ height: paddingBottom }}>
+              <td colSpan={8} />
+            </tr>
+          )}
+          {empty && (
             <TableRow>
               <TableCell colSpan={8} className="text-center text-[13px] text-muted-foreground py-16">
-                <ShieldCheck className="w-5 h-5 mx-auto mb-2 text-muted-foreground/50" />
+                <ShieldCheck className="w-5 h-5 mx-auto mb-2 text-muted-foreground/50" aria-hidden />
                 No claims match your filters.
               </TableCell>
             </TableRow>
@@ -456,31 +516,39 @@ function ClaimsTable({
 function ClaimRow({
   item,
   onAssigneeChange,
+  rowRef,
+  rowIndex,
 }: {
   item: WarrantySubmission;
   onAssigneeChange: (updated: WarrantySubmission) => void;
+  rowRef?: (el: HTMLElement | null) => void;
+  rowIndex?: number;
 }) {
   const fullName = joinName(item.name, item.surname);
   const shortId = item.submissionId.slice(0, 8);
   const href = `/warranty/${encodeURIComponent(item.submissionId)}`;
   return (
-    <TableRow className="border-b border-border/60 hover:bg-muted/30 transition-colors group">
+    <TableRow
+      ref={rowRef}
+      data-index={rowIndex}
+      className="border-b border-border/60 hover:bg-muted/30 transition-colors group"
+    >
       <TableCell className="pl-5 py-3 text-[12px] text-muted-foreground tabular-nums whitespace-nowrap">
-        <Link href={href} className="block">{fmtSubmitted(item.submittedAt)}</Link>
+        <Link href={href} className="block focus-visible:outline-none focus-visible:underline">{fmtSubmitted(item.submittedAt)}</Link>
       </TableCell>
       <TableCell className="text-[12px] font-mono text-muted-foreground">
-        <Link href={href} className="hover:text-foreground transition-colors flex items-center gap-1.5">
+        <Link href={href} className="hover:text-foreground transition-colors flex items-center gap-1.5 focus-visible:outline-none focus-visible:underline">
           #{shortId}
           {item.notes.length > 0 && (
             <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
-              <MessageSquare className="w-2.5 h-2.5" />
+              <MessageSquare className="w-2.5 h-2.5" aria-hidden />
               {item.notes.length}
             </span>
           )}
         </Link>
       </TableCell>
       <TableCell>
-        <Link href={href} className="min-w-0 block">
+        <Link href={href} className="min-w-0 block focus-visible:outline-none">
           <div className="text-[13px] font-medium text-foreground group-hover:underline truncate leading-tight">
             {fullName || "—"}
           </div>
@@ -490,7 +558,7 @@ function ClaimRow({
         </Link>
       </TableCell>
       <TableCell>
-        <Link href={href} className="block">
+        <Link href={href} className="block focus-visible:outline-none">
           <span className="text-[13px] text-foreground truncate block max-w-[240px]">{item.productName || "—"}</span>
           {item.serialNumber && (
             <span className="text-[10px] font-mono text-muted-foreground truncate block max-w-[240px]">
@@ -524,7 +592,8 @@ function ClaimRow({
       <TableCell className="pr-4">
         <Link
           href={href}
-          className="flex items-center justify-end text-muted-foreground hover:text-foreground transition-colors"
+          aria-label={`Open claim ${shortId}`}
+          className="flex items-center justify-end text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:text-foreground"
           title="Open"
         >
           <ChevronRight className="w-4 h-4" />
@@ -579,7 +648,7 @@ function InlineAssigneePicker({
       >
         {saving ? (
           <span className="flex items-center gap-1.5 text-muted-foreground">
-            <Loader2 className="w-3 h-3 animate-spin" />
+            <Loader2 className="w-3 h-3 animate-spin" aria-hidden />
             Saving…
           </span>
         ) : item.assignee ? (
@@ -626,7 +695,7 @@ function BoardSkeleton({ wide = false }: { wide?: boolean }) {
             </div>
             <div className="flex-1 rounded-b-xl border-2 border-t-0 border-border bg-muted/30 px-2 py-2 space-y-2">
               {Array.from({ length: cards }).map((_, i) => (
-                <div key={i} className="rounded-lg border border-border bg-background p-2.5 space-y-1.5">
+                <div key={i} className="rounded-lg border border-border bg-surface p-2.5 space-y-1.5">
                   <div className="h-2.5 w-16 skeleton rounded" style={{ animationDelay: `${i * 40}ms` }} />
                   <div className="h-3 w-28 skeleton rounded" style={{ animationDelay: `${i * 40 + 30}ms` }} />
                   <div className="h-2.5 w-20 skeleton rounded" style={{ animationDelay: `${i * 40 + 60}ms` }} />
