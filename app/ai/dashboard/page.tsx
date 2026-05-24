@@ -10,7 +10,14 @@ import { useCurrency } from "@/lib/currency-context";
 import { EUR_USD_RATE } from "@/lib/currency";
 import { DollarSign, Euro, Users, MessageSquare } from "lucide-react";
 
-const COLORS = ["#0f172a", "#334155", "#64748b", "#94a3b8", "#cbd5e1"];
+// Wired through CSS custom properties so dark mode swaps automatically.
+const CHART_COLORS = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+];
 
 function CustomTooltip({ active, payload, label }: any) {
   const { fmt } = useCurrency();
@@ -68,7 +75,7 @@ export default function DashboardPage() {
     <div className="flex flex-col h-full">
       {/* Page header */}
       <header className="h-14 border-b border-border flex items-center px-4 md:px-8 shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
-        <h1 className="text-sm font-semibold text-foreground">AI Dashboard</h1>
+        <h1 className="font-display text-lg font-medium tracking-tight text-foreground">AI Dashboard</h1>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 max-w-5xl">
@@ -135,13 +142,13 @@ export default function DashboardPage() {
               <p className="text-xs font-semibold text-foreground mb-4">Cost by user</p>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={stats.byUser} barCategoryGap="40%">
-                  <CartesianGrid vertical={false} stroke="oklch(0.922 0 0)" strokeDasharray="3 3" />
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: "oklch(0.556 0 0)" }} axisLine={false} tickLine={false} />
-                  <YAxis tickFormatter={yAxisFmt} tick={{ fontSize: 10, fill: "oklch(0.556 0 0)" }} axisLine={false} tickLine={false} width={60} />
-                  <Tooltip content={<CustomTooltip />} cursor={{ fill: "oklch(0.97 0 0)" }} />
+                  <CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 3" />
+                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={yAxisFmt} tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} width={60} />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: "var(--muted)" }} />
                   <Bar
                     dataKey="costUsd"
-                    fill="oklch(0.208 0.042 264)"
+                    fill="var(--foreground)"
                     radius={[4, 4, 0, 0]}
                     cursor="pointer"
                     onClick={(data: any) => {
@@ -184,7 +191,7 @@ export default function DashboardPage() {
                     <PieChart>
                       <Pie data={stats.byModel} dataKey="costUsd" nameKey="modelId" cx="50%" cy="50%" innerRadius={52} outerRadius={82} paddingAngle={2} strokeWidth={0}>
                         {stats.byModel.map((_: any, i: number) => (
-                          <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                         ))}
                       </Pie>
                       <Tooltip content={<PieTooltip />} />
@@ -195,7 +202,7 @@ export default function DashboardPage() {
                   {stats.byModel.map((m: any, i: number) => (
                     <li key={m.modelId} className="flex items-center justify-between gap-4">
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
                         <span className="text-xs font-mono text-muted-foreground truncate">{m.modelId}</span>
                       </div>
                       <span className="text-xs font-semibold text-foreground tabular-nums shrink-0">{fmt(m.costUsd)}</span>
