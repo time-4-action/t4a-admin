@@ -27,7 +27,7 @@ import { STATUS_COLUMN_HEADER } from "@/components/warranty-status-badge";
 import { User, Hash, Wrench, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const MAX_PER_COLUMN = 80;
+const MAX_PER_COLUMN = 200;
 const UNASSIGNED = "__unassigned__";
 
 export type BoardGrouping = "status" | "assignee";
@@ -213,21 +213,17 @@ export function WarrantyKanban({
     router.refresh();
   }
 
-  const colCount = columns.length;
-  const gridCols =
-    colCount <= 5
-      ? "grid-cols-1 md:grid-cols-3 lg:grid-cols-5"
-      : colCount <= 6
-      ? "grid-cols-2 md:grid-cols-3 lg:grid-cols-6"
-      : "grid-cols-2 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8";
-
   return (
     <DndContext
       sensors={sensors}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className={cn("grid gap-3 min-h-[60vh]", gridCols)}>
+      {/* Horizontal board: one row of fixed-width columns that scroll
+          sideways when they don't fit. Each column scrolls its own cards
+          vertically, so the board stays viewport-bound no matter how many
+          requests land in a single column. */}
+      <div className="flex-1 min-h-0 flex gap-3 overflow-x-auto pb-2">
         {columns.map((col) => {
           const items = grouped.get(col.id) ?? [];
           return (
@@ -264,10 +260,10 @@ function KanbanColumn({
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
   return (
-    <div className="flex flex-col min-h-0">
+    <div className="flex flex-col min-h-0 w-[280px] shrink-0">
       <div
         className={cn(
-          "rounded-t-xl border-2 border-b-0 px-3 py-2 flex items-center justify-between gap-2",
+          "rounded-t-xl border-2 border-b-0 px-3 py-2 flex items-center justify-between gap-2 shrink-0",
           column.headerClass,
         )}
       >
@@ -281,9 +277,9 @@ function KanbanColumn({
       <div
         ref={setNodeRef}
         className={cn(
-          "flex-1 rounded-b-xl border-2 border-t-0 px-2 py-2 space-y-2 transition-colors",
+          "flex-1 min-h-0 overflow-y-auto rounded-b-xl border-2 border-t-0 px-2 py-2 space-y-2 transition-colors",
           column.headerClass,
-          isOver ? "ring-2 ring-foreground/30 ring-offset-1 ring-offset-background" : "",
+          isOver ? "ring-2 ring-inset ring-foreground/30" : "",
         )}
       >
         {items.length === 0 && !isOver && (
