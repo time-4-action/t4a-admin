@@ -83,9 +83,6 @@ export default async function ClaimDetailPage({ params }: PageProps) {
         <div className="absolute inset-0 bg-gradient-to-br from-muted/40 via-transparent to-transparent pointer-events-none" />
         <div className="relative flex items-start justify-between gap-4 flex-wrap">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-              Warranty claim
-            </p>
             <h1 className="font-display text-xl md:text-2xl font-medium text-foreground tracking-tight leading-none">
               {fullName || doc.email || "Unnamed claim"}
             </h1>

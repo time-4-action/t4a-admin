@@ -41,7 +41,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <ThemeProvider>
           <CurrencyProvider>
             <Nav user={user} />
-            <main className="flex-1 overflow-y-auto bg-background pt-12 md:pt-0">
+            <main className="flex-1 min-w-0 overflow-hidden bg-background pt-12 md:pt-0">
               {children}
             </main>
           </CurrencyProvider>

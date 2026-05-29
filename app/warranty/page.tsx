@@ -110,6 +110,14 @@ export default function ClaimsPage() {
   const [status, setStatus] = useState<StatusFilter>("all");
   const [assignee, setAssignee] = useState<AssigneeFilter>("all");
   const [view, setView] = useState<ViewMode>("table");
+
+  // Switching to a board clears the filter that the board itself groups by,
+  // otherwise the board would collapse to a single column.
+  function changeView(next: ViewMode) {
+    if (next === "status_board") setStatus("all");
+    if (next === "assignee_board") setAssignee("all");
+    setView(next);
+  }
   const [counts, setCounts] = useState<Record<StatusFilter, number>>({
     all: 0,
     open: 0,
@@ -214,21 +222,21 @@ export default function ClaimsPage() {
             <div className="hidden md:flex items-center rounded-md bg-muted p-0.5">
               <ViewToggleButton
                 active={view === "table"}
-                onClick={() => setView("table")}
+                onClick={() => changeView("table")}
                 title="Table view"
                 icon={<List className="w-3 h-3" />}
                 label="Table"
               />
               <ViewToggleButton
                 active={view === "status_board"}
-                onClick={() => setView("status_board")}
+                onClick={() => changeView("status_board")}
                 title="By status — drag claims through the pipeline"
                 icon={<LayoutGrid className="w-3 h-3" />}
                 label="By status"
               />
               <ViewToggleButton
                 active={view === "assignee_board"}
-                onClick={() => setView("assignee_board")}
+                onClick={() => changeView("assignee_board")}
                 title="By assignee — drag claims onto a person"
                 icon={<Users className="w-3 h-3" />}
                 label="By assignee"
@@ -266,6 +274,9 @@ export default function ClaimsPage() {
             />
           </div>
 
+          {/* Status pills are redundant on the status board — that view
+              already splits claims into one column per status. */}
+          {view !== "status_board" && (
           <div className="flex items-center gap-1 overflow-x-auto flex-1 min-w-0">
             {STATUS_FILTERS.map((s) => {
               const isRejectedPill = s === REJECTED_KEY;
@@ -293,7 +304,11 @@ export default function ClaimsPage() {
               );
             })}
           </div>
+          )}
 
+          {/* Assignee filter is redundant on the assignee board — that view
+              already splits claims into one column per person. */}
+          {view !== "assignee_board" && (
           <Select
             value={assignee}
             onValueChange={(v) => setAssignee(v as AssigneeFilter)}
@@ -311,18 +326,14 @@ export default function ClaimsPage() {
               ))}
             </SelectContent>
           </Select>
+          )}
         </div>
       </header>
 
-      {/* Body: flex column. For the table view, the inner card scrolls
-          (so we can virtualize its rows); for board views, the body scrolls
-          as a whole. */}
-      <div
-        className={cn(
-          "flex-1 min-h-0 p-4 md:p-8 flex flex-col",
-          view !== "table" && "overflow-y-auto",
-        )}
-      >
+      {/* Body: flex column. The table virtualizes its own rows; the board
+          scrolls horizontally with each column scrolling its cards
+          independently. Either way the inner surface owns the scroll. */}
+      <div className="flex-1 min-h-0 p-4 md:p-8 flex flex-col">
         {error && (
           <div
             role="alert"
@@ -677,23 +688,16 @@ function InlineAssigneePicker({
 function BoardSkeleton({ wide = false }: { wide?: boolean }) {
   const columns = wide ? 8 : WARRANTY_STATUSES.length;
   return (
-    <div
-      className={cn(
-        "grid gap-3 min-h-[60vh]",
-        wide
-          ? "grid-cols-2 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8"
-          : "grid-cols-1 md:grid-cols-3 lg:grid-cols-5",
-      )}
-    >
+    <div className="flex-1 min-h-0 flex gap-3 overflow-x-auto pb-2">
       {Array.from({ length: columns }).map((_, ci) => {
         const cards = 2 + (ci % 3);
         return (
-          <div key={ci} className="flex flex-col">
-            <div className="rounded-t-xl border-2 border-b-0 border-border bg-muted/40 px-3 py-2 flex items-center justify-between">
+          <div key={ci} className="flex flex-col min-h-0 w-[280px] shrink-0">
+            <div className="rounded-t-xl border-2 border-b-0 border-border bg-muted/40 px-3 py-2 flex items-center justify-between shrink-0">
               <div className="h-3 w-20 skeleton rounded" />
               <div className="h-3 w-6 skeleton rounded-full" />
             </div>
-            <div className="flex-1 rounded-b-xl border-2 border-t-0 border-border bg-muted/30 px-2 py-2 space-y-2">
+            <div className="flex-1 min-h-0 overflow-y-auto rounded-b-xl border-2 border-t-0 border-border bg-muted/30 px-2 py-2 space-y-2">
               {Array.from({ length: cards }).map((_, i) => (
                 <div key={i} className="rounded-lg border border-border bg-surface p-2.5 space-y-1.5">
                   <div className="h-2.5 w-16 skeleton rounded" style={{ animationDelay: `${i * 40}ms` }} />
