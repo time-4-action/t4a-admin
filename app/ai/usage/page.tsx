@@ -126,7 +126,7 @@ export default function UsagePage() {
     <div className="flex flex-col h-full relative">
       {/* Page header */}
       <header className="h-14 border-b border-border flex items-center justify-between px-4 md:px-8 shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
-        <h1 className="text-sm font-semibold text-foreground">Usage</h1>
+        <h1 className="font-display text-lg font-medium tracking-tight text-foreground">AI Usage</h1>
 
         {/* Inline filters */}
         <div className="flex items-center gap-2">

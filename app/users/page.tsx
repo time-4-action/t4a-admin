@@ -107,7 +107,7 @@ async function toggleAiAccess(user: any) {
       <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="h-14 flex items-center justify-between px-4 md:px-8">
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
-            <h1 className="text-sm font-semibold text-foreground shrink-0">Users</h1>
+            <h1 className="font-display text-lg font-medium tracking-tight text-foreground shrink-0">Users</h1>
             {users.length > 0 && (
               <span className="text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
                 {users.length}
@@ -229,7 +229,7 @@ async function toggleAiAccess(user: any) {
                               "flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all",
                               hasAi
                                 ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-700"
-                                : "bg-muted text-muted-foreground border-border hover:border-slate-300 hover:text-foreground",
+                                : "bg-muted text-muted-foreground border-border hover:border-foreground/30 hover:text-foreground",
                               togglingId === u.id && "opacity-50 cursor-not-allowed"
                             )}
                           >

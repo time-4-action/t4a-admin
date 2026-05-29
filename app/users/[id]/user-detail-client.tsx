@@ -117,7 +117,7 @@ export function UserDetailStats({
                 <span className="text-[10px] text-muted-foreground tabular-nums">{fmt(limitDoc.currentSpendUsd)} used</span>
                 <span className={cn(
                   "text-[10px] font-semibold tabular-nums",
-                  pct > 80 ? "text-destructive" : pct > 60 ? "text-amber-500" : "text-emerald-600"
+                  pct > 80 ? "text-destructive" : pct > 60 ? "text-foreground" : "text-muted-foreground"
                 )}>
                   {Math.round(pct)}%
                 </span>
@@ -126,7 +126,7 @@ export function UserDetailStats({
                 <div
                   className={cn(
                     "h-full rounded-full transition-all duration-500",
-                    pct > 80 ? "bg-destructive" : pct > 60 ? "bg-amber-500" : "bg-emerald-500"
+                    pct > 80 ? "bg-destructive" : pct > 60 ? "bg-foreground" : "bg-accent-brand"
                   )}
                   style={{ width: `${pct}%` }}
                 />
@@ -336,7 +336,7 @@ function SaveButton({
       size="sm"
       className={cn(
         "h-7 text-xs px-3 transition-all duration-200",
-        saved && "bg-emerald-600 hover:bg-emerald-600 border-emerald-600"
+        saved && "bg-accent-brand hover:bg-accent-brand border-accent-brand text-accent-brand-foreground"
       )}
       onClick={onClick}
       disabled={disabled || saving || saved}

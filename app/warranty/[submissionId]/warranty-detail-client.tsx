@@ -230,7 +230,7 @@ function WorkflowCard({
             </span>
           )}
           {savedFlash && !savingField && (
-            <span className="flex items-center gap-1 text-emerald-600">
+            <span className="flex items-center gap-1 text-accent-brand">
               <Check className="w-3 h-3" /> Saved
             </span>
           )}
@@ -541,8 +541,8 @@ function StageButton({
             "w-3.5 h-3.5 shrink-0",
             active && isRejected && "text-white",
             active && !isRejected && "text-background",
-            !active && past && "text-emerald-600",
-            !active && isRejected && "text-rose-500",
+            !active && past && "text-accent-brand",
+            !active && isRejected && "text-destructive",
           )}
         />
         {number != null && (

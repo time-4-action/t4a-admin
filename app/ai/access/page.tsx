@@ -175,7 +175,7 @@ export default function AiAccessPage() {
       <header className="h-14 border-b border-border flex items-center justify-between px-4 md:px-8 shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="flex items-center gap-2">
           <Bot className="w-4 h-4 text-blue-500" />
-          <h1 className="text-sm font-semibold text-foreground">AI Access</h1>
+          <h1 className="font-display text-lg font-medium tracking-tight text-foreground">AI Access</h1>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -371,7 +371,7 @@ function UserRow({
       </div>
       <div className="flex items-center gap-2 shrink-0">
         {saved && !pending && (
-          <span className="flex items-center gap-1 text-[10px] text-emerald-600 font-medium">
+          <span className="flex items-center gap-1 text-[10px] text-accent-brand font-medium">
             <Check className="w-3 h-3" /> Saved
           </span>
         )}
