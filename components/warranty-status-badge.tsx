@@ -1,8 +1,6 @@
 import { cn } from "@/lib/utils";
 import {
-  REJECTED_KEY,
   WARRANTY_STATUS_LABELS,
-  type RejectedKey,
   type WarrantyStatus,
 } from "@/types/warranty";
 
@@ -20,16 +18,6 @@ const STATUS_STYLES: Record<WarrantyStatus, string> = {
 
 const REJECTED_STYLE =
   "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-700/50";
-
-export const STATUS_COLUMN_HEADER: Record<WarrantyStatus | RejectedKey, string> = {
-  open: "border-slate-300 bg-slate-50/60 dark:bg-slate-800/30 dark:border-slate-700",
-  in_review: "border-amber-300 bg-amber-50/60 dark:bg-amber-950/30 dark:border-amber-700",
-  decided: "border-sky-300 bg-sky-50/60 dark:bg-sky-950/30 dark:border-sky-700",
-  to_send_new_product:
-    "border-violet-300 bg-violet-50/60 dark:bg-violet-950/30 dark:border-violet-700",
-  finished: "border-emerald-300 bg-emerald-50/60 dark:bg-emerald-950/30 dark:border-emerald-700",
-  [REJECTED_KEY]: "border-rose-300 bg-rose-50/60 dark:bg-rose-950/30 dark:border-rose-700",
-};
 
 export function WarrantyStatusBadge({
   status,
