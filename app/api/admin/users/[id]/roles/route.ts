@@ -1,5 +1,7 @@
 import { getMgmtClient } from "@/lib/mgmt";
 import { isDevRole } from "@/lib/ai-role";
+import { isSuperAdmin, isPrivilegedRoleName } from "@/lib/access";
+import { getCurrentRoles } from "@/lib/current-user";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -25,6 +27,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const safeAssign = (assign ?? []).filter((rid) => !devRoleIds.has(rid));
   const safeRemove = (remove ?? []).filter((rid) => !devRoleIds.has(rid));
+
+  // Privilege-escalation guard: only a super-admin may grant or revoke
+  // admin-level roles. Without this, an access-admin could assign "admin" to
+  // themselves via this shared endpoint.
+  const privilegedRoleIds = new Set(
+    allRoles.filter((r: any) => isPrivilegedRoleName(r.name)).map((r: any) => r.id)
+  );
+  const touchesPrivileged = [...safeAssign, ...safeRemove].some((rid) =>
+    privilegedRoleIds.has(rid)
+  );
+  if (touchesPrivileged && !isSuperAdmin(await getCurrentRoles())) {
+    return NextResponse.json(
+      { error: "Only an admin can assign or remove admin-level roles." },
+      { status: 403 }
+    );
+  }
 
   if (safeAssign.length) {
     await mgmt.users.roles.assign(userId, { roles: safeAssign });
