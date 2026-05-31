@@ -379,7 +379,10 @@ function WarrantyCountStrip({
       role="group"
       aria-label="Filter claims by status"
     >
-      <div className="flex items-stretch w-full rounded-xl border border-border bg-surface shadow-sm divide-x divide-border overflow-hidden">
+      {/* Hairline-divided panel: a 1px gap over a border-coloured backdrop
+          draws the rules between segments in both axes, so the bar can wrap
+          to a second row on narrow screens without breaking the dividers. */}
+      <div className="flex flex-wrap w-full gap-px rounded-xl border border-border bg-border shadow-sm overflow-hidden">
         {STATUS_FILTERS.map((s, i) => {
           const isActive = active === s;
           const style = STATUS_STYLE[s];
@@ -393,9 +396,11 @@ function WarrantyCountStrip({
               aria-pressed={isActive}
               title={`${statusFilterLabel(s)} — ${value}`}
               className={cn(
-                "reveal relative flex flex-1 min-w-0 flex-col items-center justify-center gap-1 px-1.5 sm:px-2.5 py-2 transition-colors select-none",
+                // Wrap to ~4 per row on narrow screens (basis ~22%); collapse
+                // to a single row of seven from sm up (basis-0 grow).
+                "reveal relative flex grow basis-[22%] sm:basis-0 min-w-0 flex-col items-center justify-center gap-1 px-1.5 sm:px-2.5 py-2 transition-colors select-none",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-                isActive ? style.activeBg : "hover:bg-muted/50",
+                isActive ? style.activeBg : "bg-surface hover:bg-muted/60",
               )}
               style={{ animationDelay: `${i * 35}ms` }}
             >
