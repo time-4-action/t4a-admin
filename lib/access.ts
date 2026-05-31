@@ -50,6 +50,19 @@ export function canSee(roles: string[], section: SectionKey): boolean {
   return SECTION_ROLES[section].some((r) => roles.includes(r));
 }
 
+// Only the super-admin may grant or revoke admin-level roles.
+export function isSuperAdmin(roles: string[]): boolean {
+  return roles.includes("admin");
+}
+
+// A role is "privileged" if holding it grants any admin-portal access. These
+// roles may only be assigned/removed by a super-admin — otherwise an
+// access-admin could grant themselves "admin" and escalate. Matched by name so
+// a freshly-created role with one of these names is caught too.
+export function isPrivilegedRoleName(name: string): boolean {
+  return ALL_ADMIN_ROLES.includes(name);
+}
+
 // Maps a request path to the section that guards it. Pages and the clearly
 // section-specific API routes are listed; shared endpoints (e.g.
 // /api/admin/users, used by Users / Assign Access / AI Access alike) are left
