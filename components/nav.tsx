@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { canSee, type SectionKey } from "@/lib/access";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   LayoutDashboard,
@@ -23,15 +24,17 @@ import {
   Mail,
 } from "lucide-react";
 
-const sections: { label: string; links: { href: string; label: string; icon: React.ElementType; matchPrefix?: boolean }[] }[] = [
+const sections: { label: string; section: SectionKey; links: { href: string; label: string; icon: React.ElementType; matchPrefix?: boolean }[] }[] = [
   {
     label: "General",
+    section: "general",
     links: [
       { href: "/users", label: "Users", icon: Users, matchPrefix: true },
     ],
   },
   {
     label: "Access",
+    section: "access",
     links: [
       { href: "/roles",         label: "Access Types",  icon: ShieldCheck },
       { href: "/roles/assign",  label: "Assign Access", icon: UserCog },
@@ -41,6 +44,7 @@ const sections: { label: string; links: { href: string; label: string; icon: Rea
   },
   {
     label: "AI",
+    section: "ai",
     links: [
       { href: "/ai/dashboard", label: "Dashboard",  icon: LayoutDashboard },
       { href: "/ai/usage",     label: "Usage",      icon: BarChart3 },
@@ -49,6 +53,7 @@ const sections: { label: string; links: { href: string; label: string; icon: Rea
   },
   {
     label: "Warranty",
+    section: "warranty",
     links: [
       { href: "/warranty",          label: "Claims",         icon: Wrench, matchPrefix: true },
       { href: "/warranty/settings", label: "Email Settings", icon: Mail },
@@ -118,10 +123,13 @@ function NavLink({ href, label, icon: Icon, active, open }: {
 
 type NavUser = { name?: string | null; email?: string | null; picture?: string | null };
 
-export default function Nav({ user }: { user?: NavUser }) {
+export default function Nav({ user, roles = [] }: { user?: NavUser; roles?: string[] }) {
   const [open, setOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
+
+  const visibleSections = sections.filter((s) => canSee(roles, s.section));
+  const canSeeSettings = canSee(roles, "system");
 
   useEffect(() => {
     setMobileOpen(false);
@@ -175,7 +183,7 @@ export default function Nav({ user }: { user?: NavUser }) {
 
         {/* Nav sections */}
         <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4">
-          {sections.map((section) => (
+          {visibleSections.map((section) => (
             <div key={section.label}>
               {isOpen && (
                 <p className="px-3 pt-1 pb-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground select-none">
@@ -214,22 +222,24 @@ export default function Nav({ user }: { user?: NavUser }) {
             {isOpen ? <ThemeToggle /> : <ThemeToggle collapsed />}
           </div>
 
-          <Link
-            href="/settings"
-            title={!isOpen ? "Settings" : undefined}
-            aria-current={pathname.startsWith("/settings") ? "page" : undefined}
-            className={cn(
-              "flex items-center gap-2.5 w-full rounded-xl py-2 text-[13px] transition-all duration-150",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              isOpen ? "px-3" : "justify-center px-2",
-              pathname.startsWith("/settings")
-                ? "bg-muted text-foreground font-medium"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground",
-            )}
-          >
-            <Settings className={cn("h-[15px] w-[15px] shrink-0", pathname.startsWith("/settings") ? "text-foreground" : "text-muted-foreground/70")} />
-            {isOpen && <span>Settings</span>}
-          </Link>
+          {canSeeSettings && (
+            <Link
+              href="/settings"
+              title={!isOpen ? "Settings" : undefined}
+              aria-current={pathname.startsWith("/settings") ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-2.5 w-full rounded-xl py-2 text-[13px] transition-all duration-150",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                isOpen ? "px-3" : "justify-center px-2",
+                pathname.startsWith("/settings")
+                  ? "bg-muted text-foreground font-medium"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              <Settings className={cn("h-[15px] w-[15px] shrink-0", pathname.startsWith("/settings") ? "text-foreground" : "text-muted-foreground/70")} />
+              {isOpen && <span>Settings</span>}
+            </Link>
+          )}
 
           {user && (
             <div className={cn(

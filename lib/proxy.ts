@@ -1,5 +1,11 @@
 // lib/proxy.ts
 import { auth0 } from "@/lib/auth";
+import {
+  rolesFromIdToken,
+  hasAnyAccess,
+  sectionForPath,
+  canSee,
+} from "@/lib/access";
 import type { NextRequest } from "next/server";
 
 export async function proxy(req: NextRequest) {
@@ -20,22 +26,18 @@ export async function proxy(req: NextRequest) {
     return Response.redirect(loginUrl);
   }
 
-  // Require the "admin" role — decode ID token directly (custom claims
-  // are in the JWT payload but not forwarded through the userinfo endpoint)
-  let roles: string[] = [];
-  const idToken = session.tokenSet?.idToken;
-  if (idToken) {
-    try {
-      const payload = JSON.parse(
-        Buffer.from(idToken.split(".")[1], "base64url").toString()
-      );
-      roles = payload["https://time-4-action.com/roles"] ?? [];
-    } catch {
-      // malformed token — leave roles empty
-    }
+  // Decode roles from the ID token directly (custom claims are in the JWT
+  // payload but not forwarded through the userinfo endpoint).
+  const roles = rolesFromIdToken(session.tokenSet?.idToken);
+
+  // No admin role of any kind — not allowed into the portal at all.
+  if (!hasAnyAccess(roles)) {
+    return Response.redirect(new URL("/forbidden", req.nextUrl.origin));
   }
 
-  if (!roles.includes("admin")) {
+  // Has some access, but lacks the role this specific section requires.
+  const section = sectionForPath(req.nextUrl.pathname);
+  if (section && !canSee(roles, section)) {
     return Response.redirect(new URL("/forbidden", req.nextUrl.origin));
   }
 
