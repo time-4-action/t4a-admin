@@ -362,7 +362,11 @@ function WarrantyCountStrip({
   onSelect: (s: StatusFilter) => void;
 }) {
   return (
-    <div className="flex-1 min-w-0 overflow-x-auto" role="group" aria-label="Filter claims by status">
+    <div
+      className="basis-full lg:basis-0 lg:grow min-w-0 overflow-x-auto"
+      role="group"
+      aria-label="Filter claims by status"
+    >
       <div className="flex items-stretch w-max min-w-full rounded-xl border border-border bg-surface shadow-sm divide-x divide-border overflow-hidden">
         {STATUS_FILTERS.map((s, i) => {
           const isActive = active === s;
