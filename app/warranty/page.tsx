@@ -19,7 +19,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { WarrantyStatusBadge } from "@/components/warranty-status-badge";
-import { WarrantyKanban, type BoardGrouping } from "@/components/warranty-kanban";
 import {
   ASSIGNEES,
   REJECTED_KEY,
@@ -38,18 +37,75 @@ import {
   ShieldCheck,
   ChevronRight,
   Settings,
-  LayoutGrid,
-  List,
   MessageSquare,
   Loader2,
-  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type StatusFilter = "all" | WarrantyStatus | RejectedKey;
 type AssigneeFilter = "all" | "unassigned" | Assignee;
-type ViewMode = "table" | "status_board" | "assignee_board";
 const ASSIGNEE_NONE = "__none__";
+
+// Per-status palette for the count strip, mirroring the status badge colours.
+// `dot` is the resting colour chip; `rail` is the active tab underline;
+// `activeBg`/`activeText` tint the selected segment.
+type StripStyle = { dot: string; rail: string; activeBg: string; activeText: string };
+const STATUS_STYLE: Record<StatusFilter, StripStyle> = {
+  all: {
+    dot: "bg-foreground",
+    rail: "bg-foreground",
+    activeBg: "bg-muted",
+    activeText: "text-foreground",
+  },
+  open: {
+    dot: "bg-slate-400",
+    rail: "bg-slate-400",
+    activeBg: "bg-slate-50 dark:bg-slate-800/40",
+    activeText: "text-slate-700 dark:text-slate-200",
+  },
+  in_review: {
+    dot: "bg-amber-400",
+    rail: "bg-amber-400",
+    activeBg: "bg-amber-50 dark:bg-amber-950/40",
+    activeText: "text-amber-700 dark:text-amber-300",
+  },
+  decided: {
+    dot: "bg-sky-400",
+    rail: "bg-sky-400",
+    activeBg: "bg-sky-50 dark:bg-sky-950/40",
+    activeText: "text-sky-700 dark:text-sky-300",
+  },
+  to_send_new_product: {
+    dot: "bg-violet-400",
+    rail: "bg-violet-400",
+    activeBg: "bg-violet-50 dark:bg-violet-950/40",
+    activeText: "text-violet-700 dark:text-violet-300",
+  },
+  [REJECTED_KEY]: {
+    dot: "bg-rose-500",
+    rail: "bg-rose-500",
+    activeBg: "bg-rose-50 dark:bg-rose-950/40",
+    activeText: "text-rose-700 dark:text-rose-300",
+  },
+  finished: {
+    dot: "bg-emerald-500",
+    rail: "bg-emerald-500",
+    activeBg: "bg-emerald-50 dark:bg-emerald-950/40",
+    activeText: "text-emerald-700 dark:text-emerald-300",
+  },
+};
+
+// Compact labels for the strip so segments stay short and don't collide on
+// narrow screens. The full label still shows in the tooltip and the table.
+const STRIP_LABEL: Record<StatusFilter, string> = {
+  all: "All",
+  open: "Open",
+  in_review: "Review",
+  decided: "Decided",
+  to_send_new_product: "To send",
+  [REJECTED_KEY]: "Rejected",
+  finished: "Finished",
+};
 
 // Insert the synthetic "Rejected" pill right before "Finished" so it reads as
 // the terminal branch of the decision split.
@@ -109,15 +165,7 @@ export default function ClaimsPage() {
   const debouncedSearch = useDebouncedValue(search, 250);
   const [status, setStatus] = useState<StatusFilter>("all");
   const [assignee, setAssignee] = useState<AssigneeFilter>("all");
-  const [view, setView] = useState<ViewMode>("table");
-
-  // Switching to a board clears the filter that the board itself groups by,
-  // otherwise the board would collapse to a single column.
-  function changeView(next: ViewMode) {
-    if (next === "status_board") setStatus("all");
-    if (next === "assignee_board") setAssignee("all");
-    setView(next);
-  }
+  const [countsLoading, setCountsLoading] = useState(true);
   const [counts, setCounts] = useState<Record<StatusFilter, number>>({
     all: 0,
     open: 0,
@@ -135,10 +183,8 @@ export default function ClaimsPage() {
     const qs = filterToQuery(status);
     if (assignee !== "all") qs.set("assignee", assignee);
     if (debouncedSearch.trim()) qs.set("q", debouncedSearch.trim());
-    const isRejectedFilter = status === REJECTED_KEY;
-    // Virtualized table can handle the full window; kanban still chunks per
-    // column so a smaller cap is fine there.
-    qs.set("limit", isRejectedFilter ? "2000" : view === "table" ? "2000" : "500");
+    // The virtualized table renders the full window cheaply, so pull a wide cap.
+    qs.set("limit", "2000");
     fetch(`/api/warranty/submissions?${qs.toString()}`)
       .then(async (r) => {
         const data = (await r.json()) as ListWarrantyResult | { error: string };
@@ -162,12 +208,13 @@ export default function ClaimsPage() {
     return () => {
       cancelled = true;
     };
-  }, [status, assignee, debouncedSearch, view]);
+  }, [status, assignee, debouncedSearch]);
 
   // Pill counts: one unfiltered fetch, counted client-side. The backend
   // ignores ?warrantyType so we have to assign Rejected locally.
   useEffect(() => {
     let cancelled = false;
+    setCountsLoading(true);
     const qs = new URLSearchParams();
     if (assignee !== "all") qs.set("assignee", assignee);
     qs.set("limit", "2000");
@@ -190,6 +237,9 @@ export default function ClaimsPage() {
           else next[it.status]++;
         }
         setCounts(next);
+      })
+      .finally(() => {
+        if (!cancelled) setCountsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -219,30 +269,6 @@ export default function ClaimsPage() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <div className="hidden md:flex items-center rounded-md bg-muted p-0.5">
-              <ViewToggleButton
-                active={view === "table"}
-                onClick={() => changeView("table")}
-                title="Table view"
-                icon={<List className="w-3 h-3" />}
-                label="Table"
-              />
-              <ViewToggleButton
-                active={view === "status_board"}
-                onClick={() => changeView("status_board")}
-                title="By status — drag claims through the pipeline"
-                icon={<LayoutGrid className="w-3 h-3" />}
-                label="By status"
-              />
-              <ViewToggleButton
-                active={view === "assignee_board"}
-                onClick={() => changeView("assignee_board")}
-                title="By assignee — drag claims onto a person"
-                icon={<Users className="w-3 h-3" />}
-                label="By assignee"
-              />
-            </div>
-
             <div className="relative hidden sm:block">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" aria-hidden />
               <Input
@@ -274,41 +300,15 @@ export default function ClaimsPage() {
             />
           </div>
 
-          {/* Status pills are redundant on the status board — that view
-              already splits claims into one column per status. */}
-          {view !== "status_board" && (
-          <div className="flex items-center gap-1 overflow-x-auto flex-1 min-w-0">
-            {STATUS_FILTERS.map((s) => {
-              const isRejectedPill = s === REJECTED_KEY;
-              const active = status === s;
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setStatus(s)}
-                  aria-pressed={active}
-                  className={cn(
-                    "flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors select-none whitespace-nowrap tabular-nums",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    active && isRejectedPill
-                      ? "bg-destructive text-white border-destructive"
-                      : active
-                        ? "bg-foreground text-background border-foreground"
-                        : isRejectedPill
-                          ? "bg-transparent text-destructive border-destructive/40 hover:border-destructive hover:bg-destructive/5"
-                          : "bg-transparent text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground",
-                  )}
-                >
-                  {statusFilterLabel(s)} ({counts[s]})
-                </button>
-              );
-            })}
-          </div>
-          )}
+          {/* Per-status count strip — doubles as the status filter. Click a
+              card to scope the table to that status; the active card is filled. */}
+          <WarrantyCountStrip
+            counts={counts}
+            loading={countsLoading}
+            active={status}
+            onSelect={setStatus}
+          />
 
-          {/* Assignee filter is redundant on the assignee board — that view
-              already splits claims into one column per person. */}
-          {view !== "assignee_board" && (
           <Select
             value={assignee}
             onValueChange={(v) => setAssignee(v as AssigneeFilter)}
@@ -326,7 +326,6 @@ export default function ClaimsPage() {
               ))}
             </SelectContent>
           </Select>
-          )}
         </div>
       </header>
 
@@ -343,70 +342,116 @@ export default function ClaimsPage() {
           </div>
         )}
 
-        {view !== "table" ? (
-          loading ? (
-            <BoardSkeleton wide={view === "assignee_board"} />
-          ) : (
-            <WarrantyKanban
-              items={filtered}
-              grouping={(view === "assignee_board" ? "assignee" : "status") as BoardGrouping}
-              onPersisted={(updated) =>
-                setItems((prev) =>
-                  prev.map((p) =>
-                    p.submissionId === updated.submissionId ? updated : p,
-                  ),
-                )
-              }
-            />
-          )
-        ) : (
-          <ClaimsTable
-            items={filtered}
-            loading={loading}
-            onAssigneeChange={(updated) =>
-              setItems((prev) =>
-                prev.map((p) =>
-                  p.submissionId === updated.submissionId ? updated : p,
-                ),
-              )
-            }
-          />
-        )}
+        <ClaimsTable
+          items={filtered}
+          loading={loading}
+          onAssigneeChange={(updated) =>
+            setItems((prev) =>
+              prev.map((p) =>
+                p.submissionId === updated.submissionId ? updated : p,
+              ),
+            )
+          }
+        />
       </div>
     </div>
   );
 }
 
-function ViewToggleButton({
+// A connected segmented stat bar: one hairline-divided unit where each
+// segment shows a status's live count and doubles as the table filter.
+// The selected segment tints and grows a tab-style accent rail in its own
+// colour; clicking the active one (other than "All") clears back to All.
+function WarrantyCountStrip({
+  counts,
+  loading,
   active,
-  onClick,
-  title,
-  icon,
-  label,
+  onSelect,
 }: {
-  active: boolean;
-  onClick: () => void;
-  title: string;
-  icon: React.ReactNode;
-  label: string;
+  counts: Record<StatusFilter, number>;
+  loading: boolean;
+  active: StatusFilter;
+  onSelect: (s: StatusFilter) => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      aria-pressed={active}
-      className={cn(
-        "flex items-center gap-1.5 h-7 px-2.5 rounded text-[11px] font-medium transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        active
-          ? "bg-background text-foreground shadow-sm"
-          : "text-muted-foreground hover:text-foreground",
-      )}
+    <div
+      className="basis-full lg:basis-0 lg:grow min-w-0"
+      role="group"
+      aria-label="Filter claims by status"
     >
-      {icon}
-      {label}
-    </button>
+      {/* Hairline-divided panel: a 1px gap over a border-coloured backdrop
+          draws the rules between segments in both axes, so the bar can wrap
+          to a second row on narrow screens without breaking the dividers. */}
+      <div className="flex flex-wrap w-full gap-px rounded-xl border border-border bg-border shadow-sm overflow-hidden">
+        {STATUS_FILTERS.map((s, i) => {
+          const isActive = active === s;
+          const style = STATUS_STYLE[s];
+          const value = counts[s];
+          const isZero = !loading && value === 0;
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => onSelect(isActive && s !== "all" ? "all" : s)}
+              aria-pressed={isActive}
+              title={`${statusFilterLabel(s)} — ${value}`}
+              className={cn(
+                // Wrap to ~4 per row on narrow screens (basis ~22%); collapse
+                // to a single row of seven from sm up (basis-0 grow).
+                "reveal relative flex grow basis-[22%] sm:basis-0 min-w-0 flex-col items-center justify-center gap-1 px-1.5 sm:px-2.5 py-2 transition-colors select-none",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                isActive ? style.activeBg : "bg-surface hover:bg-muted/60",
+              )}
+              style={{ animationDelay: `${i * 35}ms` }}
+            >
+              <div className="flex items-center gap-1.5 leading-none">
+                <span
+                  className={cn(
+                    "w-1.5 h-1.5 rounded-full shrink-0 transition-opacity",
+                    style.dot,
+                    isZero ? "opacity-25" : isActive ? "opacity-100" : "opacity-80",
+                  )}
+                  aria-hidden
+                />
+                {loading ? (
+                  <span className="h-4 w-5 rounded skeleton" />
+                ) : (
+                  <span
+                    className={cn(
+                      "text-[15px] font-semibold tabular-nums leading-none tracking-tight",
+                      isZero
+                        ? "text-muted-foreground/40"
+                        : isActive
+                          ? style.activeText
+                          : "text-foreground",
+                    )}
+                  >
+                    {value}
+                  </span>
+                )}
+              </div>
+              <span
+                className={cn(
+                  "max-w-full truncate text-center text-[8.5px] font-semibold uppercase tracking-[0.1em] leading-none transition-colors",
+                  isActive ? style.activeText : "text-muted-foreground",
+                )}
+              >
+                {STRIP_LABEL[s]}
+              </span>
+              {isActive && (
+                <span
+                  className={cn(
+                    "absolute inset-x-2 bottom-0 h-[2px] rounded-full",
+                    style.rail,
+                  )}
+                  aria-hidden
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -685,30 +730,3 @@ function InlineAssigneePicker({
   );
 }
 
-function BoardSkeleton({ wide = false }: { wide?: boolean }) {
-  const columns = wide ? 8 : WARRANTY_STATUSES.length;
-  return (
-    <div className="flex-1 min-h-0 flex gap-3 overflow-x-auto pb-2">
-      {Array.from({ length: columns }).map((_, ci) => {
-        const cards = 2 + (ci % 3);
-        return (
-          <div key={ci} className="flex flex-col min-h-0 w-[280px] shrink-0">
-            <div className="rounded-t-xl border-2 border-b-0 border-border bg-muted/40 px-3 py-2 flex items-center justify-between shrink-0">
-              <div className="h-3 w-20 skeleton rounded" />
-              <div className="h-3 w-6 skeleton rounded-full" />
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto rounded-b-xl border-2 border-t-0 border-border bg-muted/30 px-2 py-2 space-y-2">
-              {Array.from({ length: cards }).map((_, i) => (
-                <div key={i} className="rounded-lg border border-border bg-surface p-2.5 space-y-1.5">
-                  <div className="h-2.5 w-16 skeleton rounded" style={{ animationDelay: `${i * 40}ms` }} />
-                  <div className="h-3 w-28 skeleton rounded" style={{ animationDelay: `${i * 40 + 30}ms` }} />
-                  <div className="h-2.5 w-20 skeleton rounded" style={{ animationDelay: `${i * 40 + 60}ms` }} />
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
