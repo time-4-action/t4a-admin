@@ -95,6 +95,18 @@ const STATUS_STYLE: Record<StatusFilter, StripStyle> = {
   },
 };
 
+// Compact labels for the strip so segments stay short and don't collide on
+// narrow screens. The full label still shows in the tooltip and the table.
+const STRIP_LABEL: Record<StatusFilter, string> = {
+  all: "All",
+  open: "Open",
+  in_review: "Review",
+  decided: "Decided",
+  to_send_new_product: "To send",
+  [REJECTED_KEY]: "Rejected",
+  finished: "Finished",
+};
+
 // Insert the synthetic "Rejected" pill right before "Finished" so it reads as
 // the terminal branch of the decision split.
 const STATUS_FILTERS: StatusFilter[] = [
@@ -363,11 +375,11 @@ function WarrantyCountStrip({
 }) {
   return (
     <div
-      className="basis-full lg:basis-0 lg:grow min-w-0 overflow-x-auto"
+      className="basis-full lg:basis-0 lg:grow min-w-0"
       role="group"
       aria-label="Filter claims by status"
     >
-      <div className="flex items-stretch w-max min-w-full rounded-xl border border-border bg-surface shadow-sm divide-x divide-border overflow-hidden">
+      <div className="flex items-stretch w-full rounded-xl border border-border bg-surface shadow-sm divide-x divide-border overflow-hidden">
         {STATUS_FILTERS.map((s, i) => {
           const isActive = active === s;
           const style = STATUS_STYLE[s];
@@ -381,7 +393,7 @@ function WarrantyCountStrip({
               aria-pressed={isActive}
               title={`${statusFilterLabel(s)} — ${value}`}
               className={cn(
-                "reveal relative flex flex-1 min-w-[68px] flex-col items-center justify-center gap-1 px-3 py-2 transition-colors select-none",
+                "reveal relative flex flex-1 min-w-0 flex-col items-center justify-center gap-1 px-1.5 sm:px-2.5 py-2 transition-colors select-none",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
                 isActive ? style.activeBg : "hover:bg-muted/50",
               )}
@@ -415,11 +427,11 @@ function WarrantyCountStrip({
               </div>
               <span
                 className={cn(
-                  "text-[8.5px] font-semibold uppercase tracking-[0.13em] leading-none whitespace-nowrap transition-colors",
+                  "max-w-full truncate text-center text-[8.5px] font-semibold uppercase tracking-[0.1em] leading-none transition-colors",
                   isActive ? style.activeText : "text-muted-foreground",
                 )}
               >
-                {statusFilterLabel(s)}
+                {STRIP_LABEL[s]}
               </span>
               {isActive && (
                 <span
