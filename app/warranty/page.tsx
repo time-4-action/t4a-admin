@@ -46,15 +46,53 @@ type StatusFilter = "all" | WarrantyStatus | RejectedKey;
 type AssigneeFilter = "all" | "unassigned" | Assignee;
 const ASSIGNEE_NONE = "__none__";
 
-// Dot colour per status for the count strip — mirrors the status badge palette.
-const STATUS_DOT: Record<StatusFilter, string> = {
-  all: "bg-foreground",
-  open: "bg-slate-400",
-  in_review: "bg-amber-400",
-  decided: "bg-sky-400",
-  to_send_new_product: "bg-violet-400",
-  [REJECTED_KEY]: "bg-rose-500",
-  finished: "bg-emerald-500",
+// Per-status palette for the count strip, mirroring the status badge colours.
+// `dot` is the resting colour chip; `rail` is the active tab underline;
+// `activeBg`/`activeText` tint the selected segment.
+type StripStyle = { dot: string; rail: string; activeBg: string; activeText: string };
+const STATUS_STYLE: Record<StatusFilter, StripStyle> = {
+  all: {
+    dot: "bg-foreground",
+    rail: "bg-foreground",
+    activeBg: "bg-muted",
+    activeText: "text-foreground",
+  },
+  open: {
+    dot: "bg-slate-400",
+    rail: "bg-slate-400",
+    activeBg: "bg-slate-50 dark:bg-slate-800/40",
+    activeText: "text-slate-700 dark:text-slate-200",
+  },
+  in_review: {
+    dot: "bg-amber-400",
+    rail: "bg-amber-400",
+    activeBg: "bg-amber-50 dark:bg-amber-950/40",
+    activeText: "text-amber-700 dark:text-amber-300",
+  },
+  decided: {
+    dot: "bg-sky-400",
+    rail: "bg-sky-400",
+    activeBg: "bg-sky-50 dark:bg-sky-950/40",
+    activeText: "text-sky-700 dark:text-sky-300",
+  },
+  to_send_new_product: {
+    dot: "bg-violet-400",
+    rail: "bg-violet-400",
+    activeBg: "bg-violet-50 dark:bg-violet-950/40",
+    activeText: "text-violet-700 dark:text-violet-300",
+  },
+  [REJECTED_KEY]: {
+    dot: "bg-rose-500",
+    rail: "bg-rose-500",
+    activeBg: "bg-rose-50 dark:bg-rose-950/40",
+    activeText: "text-rose-700 dark:text-rose-300",
+  },
+  finished: {
+    dot: "bg-emerald-500",
+    rail: "bg-emerald-500",
+    activeBg: "bg-emerald-50 dark:bg-emerald-950/40",
+    activeText: "text-emerald-700 dark:text-emerald-300",
+  },
 };
 
 // Insert the synthetic "Rejected" pill right before "Finished" so it reads as
@@ -308,8 +346,10 @@ export default function ClaimsPage() {
   );
 }
 
-// Horizontal strip of per-status count cards. Each card is a filter toggle:
-// click to scope the table to that status, click the active one again to clear.
+// A connected segmented stat bar: one hairline-divided unit where each
+// segment shows a status's live count and doubles as the table filter.
+// The selected segment tints and grows a tab-style accent rail in its own
+// colour; clicking the active one (other than "All") clears back to All.
 function WarrantyCountStrip({
   counts,
   loading,
@@ -322,59 +362,74 @@ function WarrantyCountStrip({
   onSelect: (s: StatusFilter) => void;
 }) {
   return (
-    <div className="flex items-stretch gap-1.5 overflow-x-auto flex-1 min-w-0 py-0.5">
-      {STATUS_FILTERS.map((s) => {
-        const isActive = active === s;
-        const isRejected = s === REJECTED_KEY;
-        return (
-          <button
-            key={s}
-            type="button"
-            onClick={() => onSelect(isActive && s !== "all" ? "all" : s)}
-            aria-pressed={isActive}
-            title={statusFilterLabel(s)}
-            className={cn(
-              "group flex items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-colors select-none whitespace-nowrap shrink-0",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              isActive
-                ? isRejected
-                  ? "border-rose-400 bg-rose-50 dark:bg-rose-950/40"
-                  : "border-foreground/40 bg-muted"
-                : "border-border bg-background hover:border-foreground/30 hover:bg-muted/40",
-            )}
-          >
-            <span
+    <div className="flex-1 min-w-0 overflow-x-auto" role="group" aria-label="Filter claims by status">
+      <div className="flex items-stretch w-max min-w-full rounded-xl border border-border bg-surface shadow-sm divide-x divide-border overflow-hidden">
+        {STATUS_FILTERS.map((s, i) => {
+          const isActive = active === s;
+          const style = STATUS_STYLE[s];
+          const value = counts[s];
+          const isZero = !loading && value === 0;
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => onSelect(isActive && s !== "all" ? "all" : s)}
+              aria-pressed={isActive}
+              title={`${statusFilterLabel(s)} — ${value}`}
               className={cn(
-                "w-2 h-2 rounded-full shrink-0",
-                STATUS_DOT[s],
-                !isActive && "opacity-70",
+                "reveal relative flex flex-1 min-w-[68px] flex-col items-center justify-center gap-1 px-3 py-2 transition-colors select-none",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                isActive ? style.activeBg : "hover:bg-muted/50",
               )}
-              aria-hidden
-            />
-            <span className="flex flex-col items-start leading-none gap-0.5">
-              {loading ? (
-                <span className="h-3.5 w-6 rounded skeleton" />
-              ) : (
+              style={{ animationDelay: `${i * 35}ms` }}
+            >
+              <div className="flex items-center gap-1.5 leading-none">
                 <span
                   className={cn(
-                    "text-[13px] font-semibold tabular-nums leading-none",
-                    isActive
-                      ? isRejected
-                        ? "text-rose-700 dark:text-rose-300"
-                        : "text-foreground"
-                      : "text-foreground",
+                    "w-1.5 h-1.5 rounded-full shrink-0 transition-opacity",
+                    style.dot,
+                    isZero ? "opacity-25" : isActive ? "opacity-100" : "opacity-80",
                   )}
-                >
-                  {counts[s]}
-                </span>
-              )}
-              <span className="text-[9px] uppercase tracking-wide font-medium text-muted-foreground leading-none">
+                  aria-hidden
+                />
+                {loading ? (
+                  <span className="h-4 w-5 rounded skeleton" />
+                ) : (
+                  <span
+                    className={cn(
+                      "text-[15px] font-semibold tabular-nums leading-none tracking-tight",
+                      isZero
+                        ? "text-muted-foreground/40"
+                        : isActive
+                          ? style.activeText
+                          : "text-foreground",
+                    )}
+                  >
+                    {value}
+                  </span>
+                )}
+              </div>
+              <span
+                className={cn(
+                  "text-[8.5px] font-semibold uppercase tracking-[0.13em] leading-none whitespace-nowrap transition-colors",
+                  isActive ? style.activeText : "text-muted-foreground",
+                )}
+              >
                 {statusFilterLabel(s)}
               </span>
-            </span>
-          </button>
-        );
-      })}
+              {isActive && (
+                <span
+                  className={cn(
+                    "absolute inset-x-2 bottom-0 h-[2px] rounded-full",
+                    style.rail,
+                  )}
+                  aria-hidden
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
