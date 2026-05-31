@@ -5,6 +5,7 @@ import Nav from "@/components/nav";
 import { CurrencyProvider } from "@/lib/currency-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { auth0 } from "@/lib/auth";
+import { rolesFromIdToken } from "@/lib/access";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,6 +30,7 @@ const noFlashThemeScript = `(function(){try{var t=localStorage.getItem('theme')|
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const session = await auth0.getSession();
   const user = session?.user;
+  const roles = rolesFromIdToken(session?.tokenSet?.idToken);
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -40,7 +42,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       >
         <ThemeProvider>
           <CurrencyProvider>
-            <Nav user={user} />
+            <Nav user={user} roles={roles} />
             <main className="flex-1 min-w-0 overflow-hidden bg-background pt-12 md:pt-0">
               {children}
             </main>

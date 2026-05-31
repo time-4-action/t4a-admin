@@ -1,5 +1,6 @@
-"use client";
 import Link from "next/link";
+import { auth0 } from "@/lib/auth";
+import { rolesFromIdToken, canSee, type SectionKey } from "@/lib/access";
 import {
   Users,
   ShieldCheck,
@@ -17,9 +18,17 @@ import {
   Cog,
 } from "lucide-react";
 
-const sections = [
+const sections: {
+  label: string;
+  section: SectionKey;
+  icon: React.ElementType;
+  color: string;
+  bg: string;
+  cards: { href: string; icon: React.ElementType; title: string; desc: string }[];
+}[] = [
   {
     label: "General",
+    section: "general",
     icon: Folder,
     color: "text-sky-500",
     bg: "bg-sky-500/10",
@@ -29,6 +38,7 @@ const sections = [
   },
   {
     label: "Access",
+    section: "access",
     icon: KeyRound,
     color: "text-violet-500",
     bg: "bg-violet-500/10",
@@ -39,6 +49,7 @@ const sections = [
   },
   {
     label: "AI",
+    section: "ai",
     icon: Sparkles,
     color: "text-emerald-500",
     bg: "bg-emerald-500/10",
@@ -50,6 +61,7 @@ const sections = [
   },
   {
     label: "Warranty",
+    section: "warranty",
     icon: Wrench,
     color: "text-amber-500",
     bg: "bg-amber-500/10",
@@ -60,6 +72,7 @@ const sections = [
   },
   {
     label: "System",
+    section: "system",
     icon: Cog,
     color: "text-rose-500",
     bg: "bg-rose-500/10",
@@ -69,7 +82,11 @@ const sections = [
   },
 ];
 
-export default function WelcomePage() {
+export default async function WelcomePage() {
+  const session = await auth0.getSession();
+  const roles = rolesFromIdToken(session?.tokenSet?.idToken);
+  const visibleSections = sections.filter((s) => canSee(roles, s.section));
+
   let cardIndex = 0;
   return (
     <div className="flex flex-col h-full">
@@ -87,7 +104,7 @@ export default function WelcomePage() {
 
       <div className="flex-1 overflow-y-auto px-4 md:px-8 py-5 md:py-6">
         <div className="max-w-3xl mx-auto space-y-6">
-          {sections.map(({ label, icon: SectionIcon, color, bg, cards }) => (
+          {visibleSections.map(({ label, icon: SectionIcon, color, bg, cards }) => (
             <section key={label}>
               {/* Section header: colored chip + label + hairline rule */}
               <div className="flex items-center gap-2.5 mb-2.5">
