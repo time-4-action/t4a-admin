@@ -2,7 +2,6 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ASSIGNEES,
   CUSTOMER_STATUSES,
   CUSTOMER_STATUS_LABELS,
   FACTORY_STATUSES,
@@ -48,6 +47,7 @@ import {
   Circle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useWarrantyAssignees, assigneeOptions } from "../use-assignees";
 
 const IMAGE_EXTS = /\.(jpe?g|png|gif|webp|avif|heic|heif)$/i;
 const isImage = (url: string) => IMAGE_EXTS.test(url.split("?")[0] ?? "");
@@ -173,6 +173,8 @@ function WorkflowCard({
   const [savingField, setSavingField] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { names: assigneeNames, loading: assigneesLoading } =
+    useWarrantyAssignees();
   const [, startTransition] = useTransition();
 
   async function patch(field: string, body: Record<string, unknown>) {
@@ -253,11 +255,15 @@ function WorkflowCard({
               onValueChange={(v) => setAssignee(v === NONE ? "" : (v as Assignee))}
             >
               <SelectTrigger className="h-8 text-[13px] w-full">
-                <SelectValue placeholder="Unassigned" />
+                {assigneesLoading && !doc.assignee ? (
+                  <span className="skeleton h-3.5 w-20 rounded" />
+                ) : (
+                  <SelectValue placeholder="Unassigned" />
+                )}
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={NONE}>Unassigned</SelectItem>
-                {ASSIGNEES.map((a) => (
+                {assigneeOptions(assigneeNames, doc.assignee).map((a) => (
                   <SelectItem key={a} value={a}>
                     {a}
                   </SelectItem>

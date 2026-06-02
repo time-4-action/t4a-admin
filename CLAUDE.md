@@ -118,6 +118,20 @@ them under `/api/warranty/*` so the bearer token never reaches the browser.
 | `/api/warranty/submissions` | GET |
 | `/api/warranty/submissions/[submissionId]` | GET, PATCH |
 | `/api/warranty/settings` | GET, PUT |
+| `/api/warranty/assignees` | GET |
+
+**Assignees come from Auth0, not a hardcoded list.** `GET /api/warranty/assignees`
+returns the users holding the `warranty-admin` role (via `lib/role-users.ts` →
+`getUsersWithRole`, the same 2-call pattern as `lib/dev-users.ts`). The list page
+filter, the per-row inline picker, and the claim detail "Assigned to" select all
+load it through the `useWarrantyAssignees()` hook (`app/warranty/use-assignees.ts`).
+The stored `assignee` is the user's **display name** (a plain string), so the
+warranty service is unchanged and legacy / removed assignees still render — the
+`assigneeOptions()` helper injects the claim's current value if it is no longer in
+the role. This route lives under `/api/warranty/*` (not `/api/admin/roles/*`) so
+`warranty-admin` users — who are not access-admins — are not 403'd by the section
+gate in `lib/access.ts`. Role name is configurable via
+`NEXT_PUBLIC_WARRANTY_ADMIN_ROLE_NAME` (default `"warranty-admin"`).
 
 Required env vars (server-side only — both are secrets):
 
@@ -166,5 +180,6 @@ Optional:
 NEXT_PUBLIC_APP_NAME         # Browser tab title (default: "Admin")
 NEXT_PUBLIC_AI_ROLE_NAME     # Name of the AI-access role (default: "AI User")
 NEXT_PUBLIC_DEV_ROLE_NAME    # Name of the dev role to hide (default: "dev")
+NEXT_PUBLIC_WARRANTY_ADMIN_ROLE_NAME  # Role whose members are warranty assignees (default: "warranty-admin")
 AUTH0_BASE_URL               # Production base URL (set by docker-compose)
 ```
