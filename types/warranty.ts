@@ -180,16 +180,19 @@ export const CUSTOMER_STATUS_LABELS: Record<CustomerStatus, string> = {
   done: "Done",
 };
 
-export const ASSIGNEES = [
-  "Tine",
-  "Patrik",
-  "Henning",
-  "Karin",
-  "Alex",
-  "Nejc",
-  "Zala",
-] as const;
-export type Assignee = (typeof ASSIGNEES)[number];
+// Assignee is the display name of an Auth0 user holding the "warranty-admin"
+// role. The selectable list is fetched live from GET /api/warranty/assignees;
+// the value stored on the claim is a plain string (name), so legacy / removed
+// assignees still render. See lib/role-users.ts and lib/warranty-role.ts.
+export type Assignee = string;
+
+// A user offered as a warranty assignee (member of the warranty-admin role).
+export type WarrantyAdmin = {
+  id: string;
+  name: string;
+  email: string;
+  picture?: string;
+};
 
 export type ClaimNote = {
   id: string;

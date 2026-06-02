@@ -20,7 +20,6 @@ import {
 } from "@/components/ui/select";
 import { WarrantyStatusBadge } from "@/components/warranty-status-badge";
 import {
-  ASSIGNEES,
   REJECTED_KEY,
   WARRANTY_STATUSES,
   WARRANTY_STATUS_LABELS,
@@ -32,6 +31,7 @@ import {
   type WarrantyStatus,
   type WarrantySubmission,
 } from "@/types/warranty";
+import { useWarrantyAssignees, assigneeOptions } from "./use-assignees";
 import {
   Search,
   ShieldCheck,
@@ -165,6 +165,7 @@ export default function ClaimsPage() {
   const debouncedSearch = useDebouncedValue(search, 250);
   const [status, setStatus] = useState<StatusFilter>("all");
   const [assignee, setAssignee] = useState<AssigneeFilter>("all");
+  const { names: assigneeNames } = useWarrantyAssignees();
   const [countsLoading, setCountsLoading] = useState(true);
   const [counts, setCounts] = useState<Record<StatusFilter, number>>({
     all: 0,
@@ -319,7 +320,7 @@ export default function ClaimsPage() {
             <SelectContent position="popper" align="start" sideOffset={4}>
               <SelectItem value="all">All assignees</SelectItem>
               <SelectItem value="unassigned">Unassigned</SelectItem>
-              {ASSIGNEES.map((a) => (
+              {assigneeOptions(assigneeNames, assignee === "all" || assignee === "unassigned" ? null : assignee).map((a) => (
                 <SelectItem key={a} value={a}>
                   {a}
                 </SelectItem>
@@ -345,6 +346,7 @@ export default function ClaimsPage() {
         <ClaimsTable
           items={filtered}
           loading={loading}
+          assigneeNames={assigneeNames}
           onAssigneeChange={(updated) =>
             setItems((prev) =>
               prev.map((p) =>
@@ -460,10 +462,12 @@ const ROW_HEIGHT_ESTIMATE = 56;
 function ClaimsTable({
   items,
   loading,
+  assigneeNames,
   onAssigneeChange,
 }: {
   items: WarrantySubmission[];
   loading: boolean;
+  assigneeNames: string[];
   onAssigneeChange: (updated: WarrantySubmission) => void;
 }) {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -544,6 +548,7 @@ function ClaimsTable({
               <ClaimRow
                 key={item.submissionId}
                 item={item}
+                assigneeNames={assigneeNames}
                 onAssigneeChange={onAssigneeChange}
                 rowRef={rowVirtualizer.measureElement}
                 rowIndex={virtualRow.index}
@@ -571,11 +576,13 @@ function ClaimsTable({
 
 function ClaimRow({
   item,
+  assigneeNames,
   onAssigneeChange,
   rowRef,
   rowIndex,
 }: {
   item: WarrantySubmission;
+  assigneeNames: string[];
   onAssigneeChange: (updated: WarrantySubmission) => void;
   rowRef?: (el: HTMLElement | null) => void;
   rowIndex?: number;
@@ -624,7 +631,7 @@ function ClaimRow({
         </Link>
       </TableCell>
       <TableCell>
-        <InlineAssigneePicker item={item} onChange={onAssigneeChange} />
+        <InlineAssigneePicker item={item} assigneeNames={assigneeNames} onChange={onAssigneeChange} />
       </TableCell>
       <TableCell className="text-[12px] text-foreground whitespace-nowrap">
         {item.warrantyType ? (
@@ -661,9 +668,11 @@ function ClaimRow({
 
 function InlineAssigneePicker({
   item,
+  assigneeNames,
   onChange,
 }: {
   item: WarrantySubmission;
+  assigneeNames: string[];
   onChange: (updated: WarrantySubmission) => void;
 }) {
   const [saving, setSaving] = useState(false);
@@ -720,7 +729,7 @@ function InlineAssigneePicker({
       </SelectTrigger>
       <SelectContent position="popper" align="start" sideOffset={4}>
         <SelectItem value={ASSIGNEE_NONE}>Unassigned</SelectItem>
-        {ASSIGNEES.map((a) => (
+        {assigneeOptions(assigneeNames, item.assignee).map((a) => (
           <SelectItem key={a} value={a}>
             {a}
           </SelectItem>
