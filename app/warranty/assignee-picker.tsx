@@ -61,6 +61,24 @@ export function adminPicture(
 }
 
 /**
+ * Picture URL for a person identified by name and/or email — matches email
+ * first (more stable), then name. Used to put Auth0 avatars on note authors and
+ * change-history actors, who are stored as plain name/email strings.
+ */
+export function pictureForPerson(
+  admins: WarrantyAdmin[],
+  name?: string | null,
+  email?: string | null,
+): string | undefined {
+  if (email) {
+    const byEmail = admins.find((a) => a.email && a.email === email)?.picture;
+    if (byEmail) return byEmail;
+  }
+  if (name) return admins.find((a) => a.name === name)?.picture;
+  return undefined;
+}
+
+/**
  * Modal assignee picker: searchable list of warranty-admin users with profile
  * pictures. Controlled via `open`/`onOpenChange`. Calls `onSelect(name | null)`
  * (null clears the assignee) and closes.

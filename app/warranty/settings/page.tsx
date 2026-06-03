@@ -7,6 +7,7 @@ import {
   CUSTOMER_FIELD_KEYS,
   CUSTOMER_FIELD_LABELS,
   type AdminFieldKey,
+  type AuditChange,
   type CustomerFieldKey,
   type WarrantySettings,
 } from "@/types/warranty";
@@ -24,6 +25,61 @@ import {
   Megaphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ChangeLogModal } from "@/components/change-log-modal";
+import { AuditHistory } from "@/components/audit-history";
+import { useWarrantyAssignees } from "../use-assignees";
+
+// Collapse whitespace and cap long values so the history diff for free-text
+// fields (subject / intro / outro) stays readable.
+function truncValue(s: string, n = 80): string {
+  const clean = s.replace(/\s+/g, " ").trim();
+  return clean.length > n ? clean.slice(0, n) + "…" : clean;
+}
+
+function fieldLabelList(
+  keys: readonly string[],
+  labels: Record<string, string>,
+): string {
+  return keys.length ? keys.map((k) => labels[k] ?? k).join(", ") : "none";
+}
+
+// Field-level diff of the email settings, used to preview and record what
+// changed on save.
+function diffSettings(
+  base: WarrantySettings,
+  next: WarrantySettings,
+): AuditChange[] {
+  const changes: AuditChange[] = [];
+  const push = (field: string, label: string, from: string, to: string) => {
+    if (from !== to) changes.push({ field, label, from, to });
+  };
+
+  push(
+    "adminRecipients",
+    "Admin recipients",
+    base.adminRecipients.join(", ") || "none",
+    next.adminRecipients.join(", ") || "none",
+  );
+  push("customer.subject", "Customer · subject", truncValue(base.customer.subject), truncValue(next.customer.subject));
+  push("customer.intro", "Customer · intro", truncValue(base.customer.intro), truncValue(next.customer.intro));
+  push("customer.outro", "Customer · outro", truncValue(base.customer.outro), truncValue(next.customer.outro));
+  push(
+    "customer.fields",
+    "Customer · rows",
+    fieldLabelList(base.customer.fields, CUSTOMER_FIELD_LABELS as Record<string, string>),
+    fieldLabelList(next.customer.fields, CUSTOMER_FIELD_LABELS as Record<string, string>),
+  );
+  push("admin.subject", "Admin · subject", truncValue(base.admin.subject), truncValue(next.admin.subject));
+  push("admin.intro", "Admin · intro", truncValue(base.admin.intro), truncValue(next.admin.intro));
+  push(
+    "admin.fields",
+    "Admin · fields",
+    fieldLabelList(base.admin.fields, ADMIN_FIELD_LABELS as Record<string, string>),
+    fieldLabelList(next.admin.fields, ADMIN_FIELD_LABELS as Record<string, string>),
+  );
+
+  return changes;
+}
 
 function emailValid(v: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
@@ -69,6 +125,11 @@ export default function WarrantySettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  // Bumped after a successful save so the history card reloads.
+  const [historyKey, setHistoryKey] = useState(0);
+  // Powers the Auth0 avatars on the change-history entries.
+  const { admins } = useWarrantyAssignees();
 
   useEffect(() => {
     let cancelled = false;
@@ -97,14 +158,19 @@ export default function WarrantySettingsPage() {
     return JSON.stringify(settings) !== JSON.stringify(original);
   }, [settings, original]);
 
-  async function save() {
+  const changes = useMemo(
+    () => (settings && original ? diffSettings(original, settings) : []),
+    [settings, original],
+  );
+
+  async function save(message: string) {
     if (!settings) return;
     setSaving(true);
     setSaveError(null);
     const res = await fetch("/api/warranty/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(settings),
+      body: JSON.stringify({ ...settings, audit: { message } }),
     });
     setSaving(false);
     if (!res.ok) {
@@ -115,6 +181,8 @@ export default function WarrantySettingsPage() {
     const data = (await res.json()) as WarrantySettings;
     setSettings(data);
     setOriginal(data);
+    setModalOpen(false);
+    setHistoryKey((k) => k + 1);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   }
@@ -321,6 +389,13 @@ export default function WarrantySettingsPage() {
                   />
                 </Field>
               </SectionCard>
+
+              <AuditHistory
+                entityType="settings"
+                entityId="settings"
+                refreshKey={historyKey}
+                admins={admins}
+              />
             </>
           )}
         </div>
@@ -355,7 +430,7 @@ export default function WarrantySettingsPage() {
                   "h-8 text-xs px-4 transition-colors",
                   saved && "bg-emerald-600 hover:bg-emerald-600 border-emerald-600",
                 )}
-                onClick={save}
+                onClick={() => setModalOpen(true)}
                 disabled={!dirty || saving || saved}
               >
                 {saved ? (
@@ -373,6 +448,19 @@ export default function WarrantySettingsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {settings && original && (
+        <ChangeLogModal
+          open={modalOpen}
+          onOpenChange={setModalOpen}
+          changes={changes}
+          saving={saving}
+          error={saveError}
+          onConfirm={save}
+          title="Save email settings"
+          confirmLabel="Save settings"
+        />
       )}
     </div>
   );
