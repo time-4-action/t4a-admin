@@ -135,6 +135,8 @@ export function ClaimDetailClient({
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
           <div className="space-y-6 min-w-0">
+            <ProblemCard description={doc.problemDescription} />
+
             <NotesCard
               submissionId={doc.submissionId}
               notes={doc.notes}
@@ -143,15 +145,6 @@ export function ClaimDetailClient({
               admins={admins}
               onUpdate={setDoc}
             />
-
-            <AuditHistory
-              entityType="claim"
-              entityId={doc.submissionId}
-              refreshKey={historyKey}
-              admins={admins}
-            />
-
-            <ProblemCard description={doc.problemDescription} />
 
             <UploadsCard fileUrls={doc.fileUrls} />
           </div>
@@ -162,6 +155,14 @@ export function ClaimDetailClient({
             <PurchaseCard doc={doc} />
           </aside>
         </div>
+
+        {/* Change history spans the full width at the very bottom. */}
+        <AuditHistory
+          entityType="claim"
+          entityId={doc.submissionId}
+          refreshKey={historyKey}
+          admins={admins}
+        />
       </div>
     </div>
   );
