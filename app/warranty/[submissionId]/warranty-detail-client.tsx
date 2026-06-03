@@ -23,13 +23,6 @@ import {
 } from "@/types/warranty";
 import { Button } from "@/components/ui/button";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Activity,
   Check,
   Loader2,
@@ -45,15 +38,20 @@ import {
   Image as ImageIcon,
   CheckCircle2,
   Circle,
+  ChevronsUpDown,
+  Split,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useWarrantyAssignees, assigneeOptions } from "../use-assignees";
+import { useWarrantyAssignees } from "../use-assignees";
+import {
+  AssigneePicker,
+  AssigneeAvatar,
+  adminPicture,
+} from "../assignee-picker";
+import { OptionPicker } from "../option-picker";
 
 const IMAGE_EXTS = /\.(jpe?g|png|gif|webp|avif|heic|heif)$/i;
 const isImage = (url: string) => IMAGE_EXTS.test(url.split("?")[0] ?? "");
-
-// Sentinel passed to Radix Select to mean "clear / not set". Radix forbids "".
-const NONE = "__none__";
 
 function fmtDateGB(value: string): string {
   if (!value) return "—";
@@ -173,8 +171,8 @@ function WorkflowCard({
   const [savingField, setSavingField] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { names: assigneeNames, loading: assigneesLoading } =
-    useWarrantyAssignees();
+  const { admins, loading: assigneesLoading } = useWarrantyAssignees();
+  const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [, startTransition] = useTransition();
 
   async function patch(field: string, body: Record<string, unknown>) {
@@ -250,102 +248,90 @@ function WorkflowCard({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <WorkflowField label="Assigned to" saving={savingField === "assignee"}>
-            <Select
-              value={doc.assignee ?? NONE}
-              onValueChange={(v) => setAssignee(v === NONE ? "" : (v as Assignee))}
+            <button
+              type="button"
+              onClick={() => setAssigneeOpen(true)}
+              className="flex h-8 w-full items-center gap-2 rounded-md border border-input bg-transparent px-2.5 text-[13px] transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
-              <SelectTrigger className="h-8 text-[13px] w-full">
-                {assigneesLoading && !doc.assignee ? (
-                  <span className="skeleton h-3.5 w-20 rounded" />
-                ) : (
-                  <SelectValue placeholder="Unassigned" />
-                )}
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>Unassigned</SelectItem>
-                {assigneeOptions(assigneeNames, doc.assignee).map((a) => (
-                  <SelectItem key={a} value={a}>
-                    {a}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              {doc.assignee ? (
+                <>
+                  <AssigneeAvatar
+                    name={doc.assignee}
+                    picture={adminPicture(admins, doc.assignee)}
+                    className="h-5 w-5 text-[10px]"
+                  />
+                  <span className="truncate">{doc.assignee}</span>
+                </>
+              ) : (
+                <span className="text-muted-foreground">Unassigned</span>
+              )}
+              <ChevronsUpDown
+                className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                aria-hidden
+              />
+            </button>
+            <AssigneePicker
+              open={assigneeOpen}
+              onOpenChange={setAssigneeOpen}
+              admins={admins}
+              loading={assigneesLoading}
+              value={doc.assignee}
+              onSelect={(name) => setAssignee(name ?? "")}
+            />
           </WorkflowField>
 
           <WorkflowField label="Warranty type" saving={savingField === "warrantyType"}>
-            <Select
-              value={doc.warrantyType ?? NONE}
-              onValueChange={(v) => setWarrantyType(v === NONE ? "" : (v as WarrantyType))}
-            >
-              <SelectTrigger className="h-8 text-[13px] w-full">
-                <SelectValue placeholder="Not set" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>Not set</SelectItem>
-                {WARRANTY_TYPES.map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {WARRANTY_TYPE_LABELS[t]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <OptionPicker
+              title="Warranty type"
+              value={doc.warrantyType}
+              options={WARRANTY_TYPES.map((t) => ({
+                value: t,
+                label: WARRANTY_TYPE_LABELS[t],
+              }))}
+              onSelect={(v) => setWarrantyType((v ?? "") as WarrantyType | "")}
+            />
           </WorkflowField>
 
           <WorkflowField label="Suggestion" saving={savingField === "suggestion"}>
-            <Select
-              value={doc.suggestion ?? NONE}
-              onValueChange={(v) => setSuggestion(v === NONE ? "" : (v as WarrantySuggestion))}
-            >
-              <SelectTrigger className="h-8 text-[13px] w-full">
-                <SelectValue placeholder="Not set" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>Not set</SelectItem>
-                {WARRANTY_SUGGESTIONS.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {WARRANTY_SUGGESTION_LABELS[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <OptionPicker
+              title="Suggestion"
+              value={doc.suggestion}
+              options={WARRANTY_SUGGESTIONS.map((s) => ({
+                value: s,
+                label: WARRANTY_SUGGESTION_LABELS[s],
+              }))}
+              onSelect={(v) =>
+                setSuggestion((v ?? "") as WarrantySuggestion | "")
+              }
+            />
           </WorkflowField>
 
           <WorkflowField label="Factory" saving={savingField === "factoryStatus"}>
-            <Select
-              value={doc.factoryStatus ?? NONE}
-              onValueChange={(v) => setFactoryStatus(v === NONE ? "" : (v as FactoryStatus))}
-            >
-              <SelectTrigger className="h-8 text-[13px] w-full">
-                <SelectValue placeholder="Not set" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>Not set</SelectItem>
-                {FACTORY_STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {FACTORY_STATUS_LABELS[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <OptionPicker
+              title="Factory status"
+              value={doc.factoryStatus}
+              options={FACTORY_STATUSES.map((s) => ({
+                value: s,
+                label: FACTORY_STATUS_LABELS[s],
+              }))}
+              onSelect={(v) =>
+                setFactoryStatus((v ?? "") as FactoryStatus | "")
+              }
+            />
           </WorkflowField>
 
           <WorkflowField label="Customer" saving={savingField === "customerStatus"}>
-            <Select
-              value={doc.customerStatus ?? NONE}
-              onValueChange={(v) => setCustomerStatus(v === NONE ? "" : (v as CustomerStatus))}
-            >
-              <SelectTrigger className="h-8 text-[13px] w-full">
-                <SelectValue placeholder="Not set" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>Not set</SelectItem>
-                {CUSTOMER_STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {CUSTOMER_STATUS_LABELS[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <OptionPicker
+              title="Customer status"
+              value={doc.customerStatus}
+              options={CUSTOMER_STATUSES.map((s) => ({
+                value: s,
+                label: CUSTOMER_STATUS_LABELS[s],
+              }))}
+              onSelect={(v) =>
+                setCustomerStatus((v ?? "") as CustomerStatus | "")
+              }
+            />
           </WorkflowField>
         </div>
       </div>
@@ -375,6 +361,12 @@ function WorkflowField({
   );
 }
 
+// Flowchart geometry. A fixed node height lets the branch fork SVG line up its
+// arrowheads with the two stacked rows on the right.
+const NODE_H = 56; // px — matches the node box height
+const ROW_GAP = 16; // px — gap between the two branch rows
+const BRANCH_H = NODE_H * 2 + ROW_GAP; // total height of the branch column
+
 function StatusPipeline({
   current,
   warrantyType,
@@ -389,17 +381,21 @@ function StatusPipeline({
   const denied = warrantyType === "denied";
   const idx = WARRANTY_STATUSES.indexOf(current);
   const decidedIdx = WARRANTY_STATUSES.indexOf("decided");
+  const toSendIdx = WARRANTY_STATUSES.indexOf("to_send_new_product");
+  const finishedIdx = WARRANTY_STATUSES.indexOf("finished");
 
-  // Pipeline tree:
-  //   Open → In review → Decided ─┬─ To send new product → Finished
-  //                                └─ Rejected ─────────────────────┘
-  // The branch column (col 4) stacks "To send new product" (approval path,
-  // top) and "Rejected" (denial path, bottom). Both terminate at Finished.
+  // Pipeline flow:
+  //   Open → In review → Decided ─┬─→ To send new product → Finished
+  //                                └─→ Rejected
+  // Three linear stages, then a fork after "Decided": the approval path
+  // (top, leading to Finished) and the denial path (bottom, terminal).
 
   function clickStage(s: WarrantyStatus) {
-    // Moving onto the approval branch from a rejected claim clears the
-    // denial flag so the pipeline doesn't immediately snap back.
-    if (s === "to_send_new_product" && denied) {
+    // Leaving the denial path clears the rejection flag — either onto the
+    // approval branch, or back to a stage before the decision (Open / In
+    // review) — so the pipeline doesn't stay stuck on the rejection path.
+    const targetIdx = WARRANTY_STATUSES.indexOf(s);
+    if (denied && (s === "to_send_new_product" || targetIdx < decidedIdx)) {
       onChange({ status: s, warrantyType: null });
       return;
     }
@@ -426,9 +422,11 @@ function StatusPipeline({
     return { past: i < idx, active: i === idx, skipped: false };
   }
 
+  const approvalLive = !denied && idx >= toSendIdx;
+
   return (
     <div>
-      <div className="flex items-baseline justify-between mb-2">
+      <div className="flex items-baseline justify-between mb-3">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           Pipeline · click a stage to move the claim
         </p>
@@ -439,56 +437,75 @@ function StatusPipeline({
           </span>
         )}
       </div>
-      <div className="grid grid-cols-[1fr_1fr_1fr_1.15fr_1fr] gap-1.5 items-stretch">
-        <StageButton
-          number={1}
-          label={WARRANTY_STATUS_LABELS.open}
-          state={stageState("open")}
-          saving={saving}
-          onClick={() => clickStage("open")}
-        />
-        <StageButton
-          number={2}
-          label={WARRANTY_STATUS_LABELS.in_review}
-          state={stageState("in_review")}
-          saving={saving}
-          onClick={() => clickStage("in_review")}
-        />
-        <StageButton
-          number={3}
-          label={WARRANTY_STATUS_LABELS.decided}
-          state={stageState("decided")}
-          saving={saving}
-          onClick={() => clickStage("decided")}
-        />
-        {/* Branch column — approval path (top) + denial path (bottom). */}
-        <div className="flex flex-col gap-1 relative">
-          <span className="absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-px bg-border" />
-          <StageButton
-            number={4}
-            label={WARRANTY_STATUS_LABELS.to_send_new_product}
-            state={stageState("to_send_new_product")}
+
+      {/* Horizontal flowchart. Scrolls sideways on narrow screens rather than
+          wrapping, so the branch geometry stays intact. */}
+      <div className="overflow-x-auto pb-1 -mx-1 px-1">
+        <div className="flex items-center w-max mx-auto" style={{ minHeight: BRANCH_H }}>
+          <Node
+            number={1}
+            label={WARRANTY_STATUS_LABELS.open}
+            state={stageState("open")}
             saving={saving}
-            compact
-            onClick={() => clickStage("to_send_new_product")}
+            onClick={() => clickStage("open")}
           />
-          <StageButton
-            label="Rejected"
-            state={{ past: false, active: denied, skipped: false }}
+          <Arrow active={idx >= 1} />
+          <Node
+            number={2}
+            label={WARRANTY_STATUS_LABELS.in_review}
+            state={stageState("in_review")}
             saving={saving}
-            compact
-            variant="rejected"
-            onClick={clickRejected}
+            onClick={() => clickStage("in_review")}
           />
+          <Arrow active={idx >= 2} />
+          <Gateway
+            label={WARRANTY_STATUS_LABELS.decided}
+            state={
+              denied
+                ? "rejected"
+                : idx > decidedIdx
+                ? "approved"
+                : idx === decidedIdx
+                ? "pending"
+                : "future"
+            }
+          />
+
+          <Fork topActive={approvalLive} bottomActive={denied} />
+
+          <div className="flex flex-col" style={{ gap: ROW_GAP }}>
+            {/* Approval path (top) */}
+            <div className="flex items-center">
+              <Node
+                number={3}
+                label={WARRANTY_STATUS_LABELS.to_send_new_product}
+                state={stageState("to_send_new_product")}
+                saving={saving}
+                onClick={() => clickStage("to_send_new_product")}
+              />
+              <Arrow active={!denied && idx >= finishedIdx} />
+              <Node
+                number={4}
+                label={WARRANTY_STATUS_LABELS.finished}
+                state={stageState("finished")}
+                saving={saving}
+                onClick={() => clickStage("finished")}
+              />
+            </div>
+            {/* Denial path (bottom) — terminal */}
+            <div className="flex items-center">
+              <Node
+                label="Rejected"
+                state={{ past: false, active: denied, skipped: false }}
+                saving={saving}
+                variant="rejected"
+                onClick={clickRejected}
+              />
+            </div>
+          </div>
         </div>
-        <StageButton
-          number={5}
-          label={WARRANTY_STATUS_LABELS.finished}
-          state={stageState("finished")}
-          saving={saving}
-          onClick={() => clickStage("finished")}
-        />
       </div>
+
       {denied && (
         <p className="text-[10px] text-muted-foreground mt-2 leading-relaxed">
           This claim is on the rejection path. Click <strong className="text-foreground">To send new product</strong> above to move it back onto the approval branch.
@@ -498,12 +515,131 @@ function StatusPipeline({
   );
 }
 
-function StageButton({
+// A soft rounded arrowhead pointing right, ending at (x, y).
+function arrowHead(x: number, y: number, s = 5) {
+  return `M${x - s - 1},${y - s} Q${x - s + 1},${y - s + 1} ${x},${y} Q${x - s + 1},${y + s - 1} ${x - s - 1},${y + s}`;
+}
+
+const EDGE_W = 2.25;
+
+// Horizontal connector between two aligned nodes — a soft, rounded edge with an
+// arrowhead, sized to a node's height so it meets node centres.
+function Arrow({ active, width = 38 }: { active: boolean; width?: number }) {
+  const y = NODE_H / 2;
+  const tip = width - 2;
+  return (
+    <svg
+      width={width}
+      height={NODE_H}
+      className={cn("shrink-0", active ? "text-emerald-500" : "text-border/70")}
+      aria-hidden
+    >
+      <path
+        d={`M2,${y} L${tip - 4},${y}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={EDGE_W}
+        strokeLinecap="round"
+      />
+      <path
+        d={arrowHead(tip, y)}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={EDGE_W}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+// The branch after "Decided": a single point that splits into two smooth
+// diverging curves — one easing up to the approval row, one down to the denial
+// row — each ending in a rounded arrowhead. No square corners.
+function Fork({ topActive, bottomActive }: { topActive: boolean; bottomActive: boolean }) {
+  const w = 52;
+  const tip = w - 2;
+  const topY = NODE_H / 2; // centre of the top row
+  const botY = NODE_H + ROW_GAP + NODE_H / 2; // centre of the bottom row
+  const midY = BRANCH_H / 2;
+  const cx = w * 0.55; // control-point x — pulls the curve into a gentle S
+  const curve = (toY: number) =>
+    `M2,${midY} C${cx},${midY} ${w * 0.42},${toY} ${tip - 4},${toY}`;
+  return (
+    <svg width={w} height={BRANCH_H} className="shrink-0 overflow-visible" aria-hidden>
+      {/* top branch → approval */}
+      <g className={topActive ? "text-emerald-500" : "text-border/70"}>
+        <path d={curve(topY)} fill="none" stroke="currentColor" strokeWidth={EDGE_W} strokeLinecap="round" />
+        <path d={arrowHead(tip, topY)} fill="none" stroke="currentColor" strokeWidth={EDGE_W} strokeLinejoin="round" strokeLinecap="round" />
+      </g>
+      {/* bottom branch → denial */}
+      <g className={bottomActive ? "text-rose-500" : "text-border/70"}>
+        <path d={curve(botY)} fill="none" stroke="currentColor" strokeWidth={EDGE_W} strokeLinecap="round" />
+        <path d={arrowHead(tip, botY)} fill="none" stroke="currentColor" strokeWidth={EDGE_W} strokeLinejoin="round" strokeLinecap="round" />
+      </g>
+    </svg>
+  );
+}
+
+// BPMN-style decision gateway — a rounded diamond, NOT clickable. It marks the
+// point where the claim must branch to an outcome (To send new product /
+// Rejected). Its colour reflects whether the decision is pending or made.
+function Gateway({
+  label,
+  state,
+}: {
+  label: string;
+  state: "future" | "pending" | "approved" | "rejected";
+}) {
+  const diamond = {
+    future: "border-border bg-background",
+    pending:
+      "border-amber-400 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-500/60",
+    approved:
+      "border-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-600/50",
+    rejected:
+      "border-rose-300 bg-rose-50 dark:bg-rose-950/30 dark:border-rose-600/50",
+  }[state];
+  const text = {
+    future: "text-muted-foreground",
+    pending: "text-amber-700 dark:text-amber-300",
+    approved: "text-emerald-700 dark:text-emerald-300",
+    rejected: "text-rose-700 dark:text-rose-300",
+  }[state];
+  return (
+    <div
+      className="relative grid shrink-0 place-items-center"
+      style={{ width: 48, height: 48 }}
+      title={`Decision (${label}) — the claim must go to an outcome below`}
+    >
+      {state === "pending" && (
+        <span
+          className="absolute h-8 w-8 rotate-45 rounded-md ring-2 ring-amber-400/40 animate-pulse"
+          aria-hidden
+        />
+      )}
+      <div
+        className={cn(
+          "absolute h-8 w-8 rotate-45 rounded-md border-2 shadow-sm transition-colors",
+          diamond,
+        )}
+        aria-hidden
+      />
+      <Split
+        className={cn("relative h-3.5 w-3.5 pointer-events-none", text)}
+        style={{ transform: "rotate(90deg)" }}
+      />
+    </div>
+  );
+}
+
+// A single flowchart node — a fixed-size box, centred label, clickable to move
+// the claim to that stage.
+function Node({
   number,
   label,
   state,
   saving,
-  compact,
   variant,
   onClick,
 }: {
@@ -511,7 +647,6 @@ function StageButton({
   label: string;
   state: { past: boolean; active: boolean; skipped: boolean };
   saving: boolean;
-  compact?: boolean;
   variant?: "rejected";
   onClick: () => void;
 }) {
@@ -523,9 +658,9 @@ function StageButton({
       type="button"
       onClick={() => !active && onClick()}
       disabled={saving || active}
+      style={{ height: NODE_H }}
       className={cn(
-        "group relative rounded-xl border text-left transition-all",
-        compact ? "px-2.5 py-1.5" : "px-2.5 py-2",
+        "group relative w-[124px] shrink-0 rounded-lg border px-2 flex flex-col items-center justify-center gap-1 text-center transition-all",
         active && isRejected
           ? "border-rose-600 bg-rose-600 text-white shadow-sm"
           : active
@@ -541,10 +676,10 @@ function StageButton({
       )}
       title={skipped ? "Skipped — the customer doesn't get a replacement" : undefined}
     >
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1 leading-none">
         <Icon
           className={cn(
-            "w-3.5 h-3.5 shrink-0",
+            "w-3 h-3 shrink-0",
             active && isRejected && "text-white",
             active && !isRejected && "text-background",
             !active && past && "text-accent-brand",
@@ -552,18 +687,15 @@ function StageButton({
           )}
         />
         {number != null && (
-          <span className="text-[10px] font-bold tabular-nums">{number}</span>
+          <span className="text-[9px] font-bold tabular-nums opacity-70">{number}</span>
         )}
         {isRejected && (
-          <span className="text-[9px] font-bold tabular-nums uppercase tracking-wider opacity-70">
-            alt
-          </span>
+          <span className="text-[8px] font-bold uppercase tracking-wider opacity-70">alt</span>
         )}
       </div>
       <p
         className={cn(
-          "text-[11px] font-semibold truncate",
-          compact ? "mt-0.5" : "mt-1",
+          "text-[11px] font-semibold leading-tight",
           active && isRejected && "text-white",
           active && !isRejected && "text-background",
         )}
