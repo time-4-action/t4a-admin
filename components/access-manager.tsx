@@ -259,28 +259,20 @@ export function AccessManager({
     <div className="flex flex-col h-full">
       {/* Header */}
       <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="h-16 flex items-center justify-between gap-3 px-4 md:px-8">
-          <div className="flex items-center gap-3 min-w-0">
-            <div
-              className={cn(
-                "hidden sm:flex w-9 h-9 rounded-xl border items-center justify-center shrink-0",
-                a.chip,
-              )}
-            >
-              <Icon className={cn("w-[18px] h-[18px]", a.iconText)} />
-            </div>
-            <div className="min-w-0">
-              <h1 className="font-display text-lg font-medium tracking-tight text-foreground leading-none">
-                {title}
-              </h1>
-              <p className="text-[11px] text-muted-foreground mt-1 truncate">
-                <span className="font-semibold text-foreground tabular-nums">
-                  {grantedAll}
-                </span>{" "}
-                of {users.length}{" "}
-                {users.length === 1 ? "person has" : "people have"} access
-              </p>
-            </div>
+        <div className="h-14 flex items-center justify-between gap-3 px-4 md:px-8">
+          <div className="flex items-center gap-2 min-w-0">
+            <Icon className={cn("w-4 h-4 shrink-0", a.iconText)} />
+            <h1 className="font-display text-lg font-medium tracking-tight text-foreground shrink-0">
+              {title}
+            </h1>
+            {users.length > 0 && (
+              <span
+                className="text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0 tabular-nums"
+                title={`${grantedAll} of ${users.length} have access`}
+              >
+                {grantedAll}/{users.length}
+              </span>
+            )}
           </div>
           <div className="relative shrink-0">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -339,8 +331,8 @@ export function AccessManager({
       </header>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6">
-        <div className="max-w-3xl mx-auto space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 md:p-8">
+        <div className="space-y-4">
           <p className="text-[12px] text-muted-foreground leading-relaxed">{lead}</p>
 
           {error && (
