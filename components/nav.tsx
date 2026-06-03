@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { canSee, type SectionKey } from "@/lib/access";
+import { canSee, isSuperAdmin, type SectionKey } from "@/lib/access";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   LayoutDashboard,
@@ -24,7 +24,7 @@ import {
   Mail,
 } from "lucide-react";
 
-const sections: { label: string; section: SectionKey; links: { href: string; label: string; icon: React.ElementType; matchPrefix?: boolean }[] }[] = [
+const sections: { label: string; section: SectionKey; links: { href: string; label: string; icon: React.ElementType; matchPrefix?: boolean; superAdminOnly?: boolean }[] }[] = [
   {
     label: "General",
     section: "general",
@@ -56,6 +56,7 @@ const sections: { label: string; section: SectionKey; links: { href: string; lab
     section: "warranty",
     links: [
       { href: "/warranty",          label: "Claims",         icon: Wrench, matchPrefix: true },
+      { href: "/warranty/access",   label: "Warranty Access", icon: ShieldCheck, superAdminOnly: true },
       { href: "/warranty/settings", label: "Email Settings", icon: Mail },
     ],
   },
@@ -128,7 +129,14 @@ export default function Nav({ user, roles = [] }: { user?: NavUser; roles?: stri
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
 
-  const visibleSections = sections.filter((s) => canSee(roles, s.section));
+  const superAdmin = isSuperAdmin(roles);
+  const visibleSections = sections
+    .filter((s) => canSee(roles, s.section))
+    .map((s) => ({
+      ...s,
+      links: s.links.filter((l) => !l.superAdminOnly || superAdmin),
+    }))
+    .filter((s) => s.links.length > 0);
   const canSeeSettings = canSee(roles, "system");
 
   useEffect(() => {
