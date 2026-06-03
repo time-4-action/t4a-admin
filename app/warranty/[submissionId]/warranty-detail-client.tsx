@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   CUSTOMER_STATUSES,
@@ -40,9 +40,18 @@ import {
   CheckCircle2,
   Circle,
   ChevronsUpDown,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  Download,
   Split,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useWarrantyAssignees } from "../use-assignees";
 import {
   AssigneePicker,
@@ -57,6 +66,7 @@ import type { AuditChange } from "@/types/warranty";
 
 const IMAGE_EXTS = /\.(jpe?g|png|gif|webp|avif|heic|heif)$/i;
 const isImage = (url: string) => IMAGE_EXTS.test(url.split("?")[0] ?? "");
+const isPdf = (url: string) => /\.pdf$/i.test(url.split("?")[0] ?? "");
 
 function fmtDateGB(value: string): string {
   if (!value) return "—";
@@ -1050,17 +1060,23 @@ function ProblemCard({ description }: { description: string }) {
   );
 }
 
+type Upload = { label: string; url: string };
+
 function UploadsCard({
   fileUrls,
 }: {
   fileUrls: WarrantySubmission["fileUrls"];
 }) {
-  const uploads: [string, string][] = [
-    ["Invoice / proof of purchase", fileUrls.invoice],
-    ["Serial number photo", fileUrls.serial],
-    ["Full product photo", fileUrls.full],
-    ["Closeup photo", fileUrls.closeup],
+  const uploads: Upload[] = [
+    { label: "Invoice / proof of purchase", url: fileUrls.invoice },
+    { label: "Serial number photo", url: fileUrls.serial },
+    { label: "Full product photo", url: fileUrls.full },
+    { label: "Closeup photo", url: fileUrls.closeup },
   ];
+  // Only files that exist are previewable / navigable in the viewer.
+  const present = uploads.filter((u) => u.url);
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
+
   return (
     <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
       <div className="px-5 py-3 border-b border-border/50 bg-muted/30 flex items-center gap-2.5">
@@ -1072,30 +1088,54 @@ function UploadsCard({
         </span>
       </div>
       <div className="p-5 grid grid-cols-2 md:grid-cols-4 gap-3">
-        {uploads.map(([label, url]) => (
-          <UploadThumb key={label} label={label} url={url} />
+        {uploads.map((u) => (
+          <UploadThumb
+            key={u.label}
+            label={u.label}
+            url={u.url}
+            onOpen={
+              u.url
+                ? () => setOpenIndex(present.findIndex((p) => p.url === u.url))
+                : undefined
+            }
+          />
         ))}
       </div>
+
+      <UploadsLightbox
+        items={present}
+        index={openIndex}
+        onIndexChange={setOpenIndex}
+        onClose={() => setOpenIndex(null)}
+      />
     </div>
   );
 }
 
-function UploadThumb({ label, url }: { label: string; url: string }) {
+function UploadThumb({
+  label,
+  url,
+  onOpen,
+}: {
+  label: string;
+  url: string;
+  onOpen?: () => void;
+}) {
   if (!url) {
     return (
-      <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 p-3 text-[11px] text-muted-foreground text-center">
+      <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 p-3 text-[11px] text-muted-foreground text-center flex flex-col justify-center">
         <p className="font-medium text-foreground/70 mb-1 truncate">{label}</p>
         <span>—</span>
       </div>
     );
   }
   const image = isImage(url);
+  const pdf = isPdf(url);
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="group block rounded-xl border border-border/60 bg-background overflow-hidden hover:border-foreground/30 transition-colors shadow-sm"
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group block w-full text-left rounded-xl border border-border/60 bg-background overflow-hidden hover:border-foreground/30 transition-colors shadow-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     >
       <div className="aspect-square bg-muted/40 flex items-center justify-center overflow-hidden">
         {image ? (
@@ -1107,18 +1147,168 @@ function UploadThumb({ label, url }: { label: string; url: string }) {
           />
         ) : (
           <div className="flex flex-col items-center gap-1 text-muted-foreground">
-            <ExternalLink className="w-5 h-5" />
-            <span className="text-[10px] uppercase tracking-wider">File</span>
+            {pdf ? (
+              <FileText className="w-6 h-6" />
+            ) : (
+              <ExternalLink className="w-5 h-5" />
+            )}
+            <span className="text-[10px] uppercase tracking-wider">
+              {pdf ? "PDF" : "File"}
+            </span>
           </div>
         )}
       </div>
       <div className="px-3 py-2">
         <p className="text-[11px] font-medium text-foreground truncate">{label}</p>
         <p className="text-[10px] text-muted-foreground truncate group-hover:text-foreground transition-colors">
-          {image ? "Click to enlarge" : "Open file"}
+          Click to preview
         </p>
       </div>
-    </a>
+    </button>
+  );
+}
+
+// Renders the actual preview for one upload: inline image, inline PDF, or a
+// fallback for anything else.
+function UploadPreview({ item }: { item: Upload }) {
+  if (isImage(item.url)) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={item.url}
+        alt={item.label}
+        className="max-h-full max-w-full object-contain"
+      />
+    );
+  }
+  if (isPdf(item.url)) {
+    return (
+      <iframe
+        src={item.url}
+        title={item.label}
+        className="h-full w-full border-0 bg-white"
+      />
+    );
+  }
+  return (
+    <div className="flex flex-col items-center gap-3 px-6 text-center">
+      <ExternalLink className="w-8 h-8 text-muted-foreground" />
+      <p className="text-[13px] text-muted-foreground">
+        This file can&apos;t be previewed here.
+      </p>
+      <a
+        href={item.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border text-[12px] font-medium text-foreground hover:border-foreground/40 transition-colors"
+      >
+        <Download className="w-3.5 h-3.5" /> Open file
+      </a>
+    </div>
+  );
+}
+
+// Full-screen-ish modal viewer for the uploads, with prev/next navigation
+// (buttons + arrow keys) and inline image / PDF preview.
+function UploadsLightbox({
+  items,
+  index,
+  onIndexChange,
+  onClose,
+}: {
+  items: Upload[];
+  index: number | null;
+  onIndexChange: (next: number) => void;
+  onClose: () => void;
+}) {
+  const count = items.length;
+  const open = index != null && index >= 0 && index < count;
+
+  const go = useCallback(
+    (delta: number) => {
+      if (index == null || count === 0) return;
+      onIndexChange((index + delta + count) % count);
+    },
+    [index, count, onIndexChange],
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        go(-1);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        go(1);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, go]);
+
+  const current = open ? items[index] : null;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+    >
+      <DialogContent
+        showCloseButton
+        className="p-0 gap-0 overflow-hidden w-[min(95vw,1100px)] sm:max-w-[min(95vw,1100px)]"
+      >
+        <div className="flex items-center gap-3 border-b border-border/60 px-4 py-2.5 pr-12">
+          <DialogTitle className="text-[13px] font-semibold truncate">
+            {current?.label ?? "Preview"}
+          </DialogTitle>
+          {count > 1 && (
+            <span className="text-[11px] text-muted-foreground tabular-nums shrink-0">
+              {(index ?? 0) + 1} / {count}
+            </span>
+          )}
+          {current && (
+            <a
+              href={current.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-auto inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              title="Open the original in a new tab"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Open original</span>
+            </a>
+          )}
+        </div>
+
+        <div className="relative flex h-[75vh] items-center justify-center bg-muted/30">
+          {current && <UploadPreview item={current} />}
+
+          {count > 1 && (
+            <>
+              <button
+                type="button"
+                onClick={() => go(-1)}
+                aria-label="Previous upload"
+                className="absolute left-3 top-1/2 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-full border border-border/60 bg-background/90 shadow-sm hover:bg-background transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => go(1)}
+                aria-label="Next upload"
+                className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-full border border-border/60 bg-background/90 shadow-sm hover:bg-background transition-colors"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
