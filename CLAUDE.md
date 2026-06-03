@@ -20,6 +20,21 @@ scripts\build.bat --latest   # Build image (tag: latest)
 scripts\push.bat --latest    # Push image to time4action/t4a-admin
 ```
 
+## Git Workflow
+
+Work flows through an integration branch — **never PR a feature branch directly into `main`.**
+
+```
+feature branch  →  PR into  dev  →  (when a release is ready)  PR  dev → main
+```
+
+1. **Branch off `dev`** for every change. Name it `feat/...`, `fix/...`, etc.
+2. **Open the PR against `dev`** (the base branch), not `main`. `dev` is the default integration target where features are merged and tested together.
+3. **`dev` → `main`** happens only when a batch of work is verified and ready to ship. Open a separate PR from `dev` into `main` for that promotion.
+4. **`main` is the production / release branch.** It should always reflect deployable state.
+
+When creating a PR with `gh pr create`, pass `--base dev` explicitly so it does not default to `main`.
+
 ## Architecture Overview
 
 This is a **Next.js 16 App Router** admin dashboard for managing users, access types (Auth0 roles), and AI usage costs. It is deployed as a standalone Docker container on port 3005.
