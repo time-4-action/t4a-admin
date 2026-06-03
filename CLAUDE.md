@@ -134,6 +134,7 @@ them under `/api/warranty/*` so the bearer token never reaches the browser.
 | `/api/warranty/submissions/[submissionId]` | GET, PATCH |
 | `/api/warranty/settings` | GET, PUT |
 | `/api/warranty/assignees` | GET |
+| `/api/warranty/audit` | GET |
 
 **Assignees come from Auth0, not a hardcoded list.** `GET /api/warranty/assignees`
 returns the users holding the `warranty-admin` role (via `lib/role-users.ts` →
@@ -158,6 +159,40 @@ INTERNAL_ADMIN_TOKEN=<must match the warranty service>
 Shared types live in `types/warranty.ts` and mirror
 `patrik-warranty-form/src/types/warranty-settings.ts`. Keep them in sync by
 hand whenever a status / field is added.
+
+#### Change history (audit log)
+
+Workflow edits are **not autosaved**. The Workflow card on `/warranty/[id]`
+stages edits to a local draft; a **Save changes** button opens a
+`ChangeLogModal` (`components/change-log-modal.tsx`) that previews every pending
+change (`label · before → after`) and takes an **optional** note. The email
+settings page (`/warranty/settings`) wraps its existing Save button in the same
+modal.
+
+**The audit log is owned and stored by the warranty service** — this admin
+stores nothing. On every save the admin sends an `_audit` envelope alongside the
+write; the service records the entry and **computes the field-level changes
+itself** (it is the source of truth for what persisted). The service-side
+contract lives in the `patrik-warranty-form` repo.
+
+- `lib/warranty-audit.ts` — `buildAuditEnvelope(audit)` stamps the actor from
+  the Auth0 session server-side (`actorId/actorName/actorEmail`, never trusted
+  from the browser) and carries the optional `message`. The client sends only
+  `{ audit: { message } }`; the `changes` it computes are used **only** for the
+  in-modal preview, not sent.
+- The submissions `PATCH` and settings `PUT` proxy routes swap the client's
+  `audit` field for the server-built `_audit` and forward it to the service
+  (`{ ...fields, _audit }`).
+- `GET /api/warranty/audit?entityType=claim|settings&entityId=<id>` proxies to
+  the service (`/api/admin/submissions/:id/audit` or `/api/admin/settings/audit`)
+  and returns `{ entries }` straight through. It lives under `/api/warranty/*`
+  so warranty-admins (not only super-admins) can read it. `GET` only.
+- `components/audit-history.tsx` (`<AuditHistory>`) is a self-fetching timeline
+  card shown on the claim detail (`entityType="claim"`, `entityId=submissionId`)
+  and the settings page (`entityType="settings"`, `entityId="settings"`). Bump
+  its `refreshKey` after a save to reload.
+- `AuditEntry` / `AuditChange` in `types/warranty.ts` mirror the service's audit
+  shape — keep in sync by hand like the other warranty types.
 
 ### API Routes (`app/api/admin/`)
 
