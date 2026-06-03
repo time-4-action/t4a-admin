@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   CUSTOMER_STATUSES,
@@ -16,6 +16,7 @@ import {
   type ClaimNote,
   type CustomerStatus,
   type FactoryStatus,
+  type WarrantyAdmin,
   type WarrantyStatus,
   type WarrantySubmission,
   type WarrantySuggestion,
@@ -24,7 +25,6 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   Activity,
-  Check,
   Loader2,
   Mail,
   MapPin,
@@ -32,7 +32,8 @@ import {
   Package,
   Receipt,
   Send,
-  Trash2,
+  Save,
+  Undo2,
   User,
   ExternalLink,
   Image as ImageIcon,
@@ -47,8 +48,12 @@ import {
   AssigneePicker,
   AssigneeAvatar,
   adminPicture,
+  pictureForPerson,
 } from "../assignee-picker";
 import { OptionPicker } from "../option-picker";
+import { ChangeLogModal } from "@/components/change-log-modal";
+import { AuditHistory } from "@/components/audit-history";
+import type { AuditChange } from "@/types/warranty";
 
 const IMAGE_EXTS = /\.(jpe?g|png|gif|webp|avif|heic|heif)$/i;
 const isImage = (url: string) => IMAGE_EXTS.test(url.split("?")[0] ?? "");
@@ -96,29 +101,25 @@ function RelativeTime({ value }: { value: string }) {
   );
 }
 
-function initials(name: string): string {
-  return (
-    name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((w) => w[0]?.toUpperCase() ?? "")
-      .join("") || "?"
-  );
-}
-
 // ============================================================================
 
 export function ClaimDetailClient({
   initialDoc,
   publicUrl,
   adminLabel,
+  adminPictureUrl,
 }: {
   initialDoc: WarrantySubmission;
   publicUrl: string;
   adminLabel: string;
+  adminPictureUrl?: string;
 }) {
   const [doc, setDoc] = useState<WarrantySubmission>(initialDoc);
+  // Bumped after every saved workflow change so the history card reloads.
+  const [historyKey, setHistoryKey] = useState(0);
+  // One assignees fetch for the whole view — feeds the assignee picker plus the
+  // Auth0 avatars on notes and change history.
+  const { admins, loading: assigneesLoading } = useWarrantyAssignees();
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -127,6 +128,9 @@ export function ClaimDetailClient({
           submissionId={doc.submissionId}
           doc={doc}
           onUpdate={setDoc}
+          onSaved={() => setHistoryKey((k) => k + 1)}
+          admins={admins}
+          assigneesLoading={assigneesLoading}
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
@@ -135,7 +139,16 @@ export function ClaimDetailClient({
               submissionId={doc.submissionId}
               notes={doc.notes}
               adminLabel={adminLabel}
+              adminPictureUrl={adminPictureUrl}
+              admins={admins}
               onUpdate={setDoc}
+            />
+
+            <AuditHistory
+              entityType="claim"
+              entityId={doc.submissionId}
+              refreshKey={historyKey}
+              admins={admins}
             />
 
             <ProblemCard description={doc.problemDescription} />
@@ -158,26 +171,167 @@ export function ClaimDetailClient({
 // Workflow card (pipeline + 5 dropdowns)
 // ============================================================================
 
+// The six fields that make up the claim workflow. Edits are staged locally and
+// committed together via the Save button, so we can record one history entry
+// describing everything that changed.
+type WorkflowDraft = Pick<
+  WarrantySubmission,
+  | "status"
+  | "warrantyType"
+  | "assignee"
+  | "suggestion"
+  | "factoryStatus"
+  | "customerStatus"
+>;
+
+function pickWorkflow(doc: WarrantySubmission): WorkflowDraft {
+  return {
+    status: doc.status,
+    warrantyType: doc.warrantyType,
+    assignee: doc.assignee,
+    suggestion: doc.suggestion,
+    factoryStatus: doc.factoryStatus,
+    customerStatus: doc.customerStatus,
+  };
+}
+
+// Field metadata used both for the diff and for the human-readable history
+// (label + before/after formatting).
+const WORKFLOW_FIELDS: {
+  key: keyof WorkflowDraft;
+  label: string;
+  fmt: (v: WorkflowDraft[keyof WorkflowDraft]) => string;
+}[] = [
+  {
+    key: "status",
+    label: "Status",
+    fmt: (v) => (v ? WARRANTY_STATUS_LABELS[v as WarrantyStatus] : "—"),
+  },
+  {
+    key: "warrantyType",
+    label: "Warranty type",
+    fmt: (v) => (v ? WARRANTY_TYPE_LABELS[v as WarrantyType] : "—"),
+  },
+  {
+    key: "assignee",
+    label: "Assigned to",
+    fmt: (v) => (v ? String(v) : "Unassigned"),
+  },
+  {
+    key: "suggestion",
+    label: "Suggestion",
+    fmt: (v) => (v ? WARRANTY_SUGGESTION_LABELS[v as WarrantySuggestion] : "—"),
+  },
+  {
+    key: "factoryStatus",
+    label: "Factory",
+    fmt: (v) => (v ? FACTORY_STATUS_LABELS[v as FactoryStatus] : "—"),
+  },
+  {
+    key: "customerStatus",
+    label: "Customer",
+    fmt: (v) => (v ? CUSTOMER_STATUS_LABELS[v as CustomerStatus] : "—"),
+  },
+];
+
+function diffWorkflow(base: WorkflowDraft, draft: WorkflowDraft): AuditChange[] {
+  const changes: AuditChange[] = [];
+  for (const f of WORKFLOW_FIELDS) {
+    const a = base[f.key] ?? null;
+    const b = draft[f.key] ?? null;
+    if (a !== b) {
+      changes.push({
+        field: f.key,
+        label: f.label,
+        from: f.fmt(a),
+        to: f.fmt(b),
+      });
+    }
+  }
+  return changes;
+}
+
 function WorkflowCard({
   submissionId,
   doc,
   onUpdate,
+  onSaved,
+  admins,
+  assigneesLoading,
 }: {
   submissionId: string;
   doc: WarrantySubmission;
   onUpdate: (next: WarrantySubmission) => void;
+  onSaved: () => void;
+  admins: WarrantyAdmin[];
+  assigneesLoading: boolean;
 }) {
   const router = useRouter();
-  const [savingField, setSavingField] = useState<string | null>(null);
-  const [savedFlash, setSavedFlash] = useState<string | null>(null);
+  const [draft, setDraft] = useState<WorkflowDraft>(() => pickWorkflow(doc));
+  const [modalOpen, setModalOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { admins, loading: assigneesLoading } = useWarrantyAssignees();
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [, startTransition] = useTransition();
 
-  async function patch(field: string, body: Record<string, unknown>) {
-    setSavingField(field);
+  // Resync the draft when the saved workflow fields change (e.g. after our own
+  // save). Keyed on the individual fields — not the whole doc — so editing the
+  // workflow while a note is posted (which mutates doc.notes only) doesn't wipe
+  // unsaved edits.
+  useEffect(() => {
+    setDraft(pickWorkflow(doc));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    doc.status,
+    doc.warrantyType,
+    doc.assignee,
+    doc.suggestion,
+    doc.factoryStatus,
+    doc.customerStatus,
+  ]);
+
+  const changes = useMemo(
+    () => diffWorkflow(pickWorkflow(doc), draft),
+    [doc, draft],
+  );
+  const dirty = changes.length > 0;
+  const changedFields = useMemo(
+    () => new Set(changes.map((c) => c.field)),
+    [changes],
+  );
+
+  const applyPipeline = (patch: {
+    status?: WarrantyStatus;
+    warrantyType?: WarrantyType | null;
+  }) => setDraft((d) => ({ ...d, ...patch }));
+  const setAssignee = (v: Assignee | "") =>
+    setDraft((d) => ({ ...d, assignee: v === "" ? null : v }));
+  const setWarrantyType = (v: WarrantyType | "") =>
+    setDraft((d) => ({ ...d, warrantyType: v === "" ? null : v }));
+  const setSuggestion = (v: WarrantySuggestion | "") =>
+    setDraft((d) => ({ ...d, suggestion: v === "" ? null : v }));
+  const setFactoryStatus = (v: FactoryStatus | "") =>
+    setDraft((d) => ({ ...d, factoryStatus: v === "" ? null : v }));
+  const setCustomerStatus = (v: CustomerStatus | "") =>
+    setDraft((d) => ({ ...d, customerStatus: v === "" ? null : v }));
+
+  function discard() {
+    setDraft(pickWorkflow(doc));
     setError(null);
+  }
+
+  async function save(message: string) {
+    if (!dirty) return;
+    setSaving(true);
+    setError(null);
+    // Only send the fields that actually changed, plus the note. The warranty
+    // service computes the recorded field changes itself, so we send just the
+    // message — `changes` here is only used for the in-modal preview.
+    const body: Record<string, unknown> = {};
+    for (const f of changes) {
+      body[f.field] = draft[f.field as keyof WorkflowDraft];
+    }
+    body.audit = { message };
     const res = await fetch(
       `/api/warranty/submissions/${encodeURIComponent(submissionId)}`,
       {
@@ -186,7 +340,7 @@ function WorkflowCard({
         body: JSON.stringify(body),
       },
     );
-    setSavingField(null);
+    setSaving(false);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       setError(data?.error ?? "Couldn't save");
@@ -194,25 +348,10 @@ function WorkflowCard({
     }
     const updated = (await res.json()) as WarrantySubmission;
     onUpdate(updated);
-    setSavedFlash(field);
-    setTimeout(() => setSavedFlash((f) => (f === field ? null : f)), 1500);
+    setModalOpen(false);
+    onSaved();
     startTransition(() => router.refresh());
   }
-
-  const updatePipeline = (body: {
-    status?: WarrantyStatus;
-    warrantyType?: WarrantyType | null;
-  }) => patch("status", body);
-  const setAssignee = (v: Assignee | "") =>
-    patch("assignee", { assignee: v === "" ? null : v });
-  const setWarrantyType = (v: WarrantyType | "") =>
-    patch("warrantyType", { warrantyType: v === "" ? null : v });
-  const setSuggestion = (v: WarrantySuggestion | "") =>
-    patch("suggestion", { suggestion: v === "" ? null : v });
-  const setFactoryStatus = (v: FactoryStatus | "") =>
-    patch("factoryStatus", { factoryStatus: v === "" ? null : v });
-  const setCustomerStatus = (v: CustomerStatus | "") =>
-    patch("customerStatus", { customerStatus: v === "" ? null : v });
 
   return (
     <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
@@ -223,44 +362,62 @@ function WorkflowCard({
           </div>
           <span className="text-[12px] font-semibold text-foreground">Workflow</span>
         </div>
-        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-          {savingField && (
-            <span className="flex items-center gap-1">
-              <Loader2 className="w-3 h-3 animate-spin" /> Saving…
+        <div className="flex items-center gap-2">
+          {dirty ? (
+            <>
+              <span className="text-[10px] text-amber-600 dark:text-amber-400 flex items-center gap-1 mr-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                {changes.length} unsaved{" "}
+                {changes.length === 1 ? "change" : "changes"}
+              </span>
+              <button
+                type="button"
+                onClick={discard}
+                disabled={saving}
+                className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-50"
+              >
+                <Undo2 className="w-3 h-3" /> Discard
+              </button>
+              <Button
+                size="sm"
+                className="h-7 text-xs px-3 gap-1.5"
+                onClick={() => setModalOpen(true)}
+                disabled={saving}
+              >
+                <Save className="w-3 h-3" /> Save changes
+              </Button>
+            </>
+          ) : (
+            <span className="text-[10px] text-muted-foreground">
+              All changes saved
             </span>
           )}
-          {savedFlash && !savingField && (
-            <span className="flex items-center gap-1 text-accent-brand">
-              <Check className="w-3 h-3" /> Saved
-            </span>
-          )}
-          {error && <span className="text-destructive">{error}</span>}
         </div>
       </div>
 
       <div className="p-5 space-y-5">
         <StatusPipeline
-          current={doc.status}
-          warrantyType={doc.warrantyType}
-          saving={savingField === "status"}
-          onChange={updatePipeline}
+          current={draft.status}
+          warrantyType={draft.warrantyType}
+          saving={saving}
+          onChange={applyPipeline}
         />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          <WorkflowField label="Assigned to" saving={savingField === "assignee"}>
+          <WorkflowField label="Assigned to" modified={changedFields.has("assignee")}>
             <button
               type="button"
               onClick={() => setAssigneeOpen(true)}
               className="flex h-8 w-full items-center gap-2 rounded-md border border-input bg-transparent px-2.5 text-[13px] transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
-              {doc.assignee ? (
+              {draft.assignee ? (
                 <>
                   <AssigneeAvatar
-                    name={doc.assignee}
-                    picture={adminPicture(admins, doc.assignee)}
+                    name={draft.assignee}
+                    picture={adminPicture(admins, draft.assignee)}
                     className="h-5 w-5 text-[10px]"
                   />
-                  <span className="truncate">{doc.assignee}</span>
+                  <span className="truncate">{draft.assignee}</span>
                 </>
               ) : (
                 <span className="text-muted-foreground">Unassigned</span>
@@ -275,15 +432,15 @@ function WorkflowCard({
               onOpenChange={setAssigneeOpen}
               admins={admins}
               loading={assigneesLoading}
-              value={doc.assignee}
+              value={draft.assignee}
               onSelect={(name) => setAssignee(name ?? "")}
             />
           </WorkflowField>
 
-          <WorkflowField label="Warranty type" saving={savingField === "warrantyType"}>
+          <WorkflowField label="Warranty type" modified={changedFields.has("warrantyType")}>
             <OptionPicker
               title="Warranty type"
-              value={doc.warrantyType}
+              value={draft.warrantyType}
               options={WARRANTY_TYPES.map((t) => ({
                 value: t,
                 label: WARRANTY_TYPE_LABELS[t],
@@ -292,10 +449,10 @@ function WorkflowCard({
             />
           </WorkflowField>
 
-          <WorkflowField label="Suggestion" saving={savingField === "suggestion"}>
+          <WorkflowField label="Suggestion" modified={changedFields.has("suggestion")}>
             <OptionPicker
               title="Suggestion"
-              value={doc.suggestion}
+              value={draft.suggestion}
               options={WARRANTY_SUGGESTIONS.map((s) => ({
                 value: s,
                 label: WARRANTY_SUGGESTION_LABELS[s],
@@ -306,10 +463,10 @@ function WorkflowCard({
             />
           </WorkflowField>
 
-          <WorkflowField label="Factory" saving={savingField === "factoryStatus"}>
+          <WorkflowField label="Factory" modified={changedFields.has("factoryStatus")}>
             <OptionPicker
               title="Factory status"
-              value={doc.factoryStatus}
+              value={draft.factoryStatus}
               options={FACTORY_STATUSES.map((s) => ({
                 value: s,
                 label: FACTORY_STATUS_LABELS[s],
@@ -320,10 +477,10 @@ function WorkflowCard({
             />
           </WorkflowField>
 
-          <WorkflowField label="Customer" saving={savingField === "customerStatus"}>
+          <WorkflowField label="Customer" modified={changedFields.has("customerStatus")}>
             <OptionPicker
               title="Customer status"
-              value={doc.customerStatus}
+              value={draft.customerStatus}
               options={CUSTOMER_STATUSES.map((s) => ({
                 value: s,
                 label: CUSTOMER_STATUS_LABELS[s],
@@ -335,17 +492,28 @@ function WorkflowCard({
           </WorkflowField>
         </div>
       </div>
+
+      <ChangeLogModal
+        open={modalOpen}
+        onOpenChange={setModalOpen}
+        changes={changes}
+        saving={saving}
+        error={error}
+        onConfirm={save}
+        title="Save workflow changes"
+        confirmLabel="Save changes"
+      />
     </div>
   );
 }
 
 function WorkflowField({
   label,
-  saving,
+  modified,
   children,
 }: {
   label: string;
-  saving: boolean;
+  modified: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -354,7 +522,12 @@ function WorkflowField({
         <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           {label}
         </label>
-        {saving && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+        {modified && (
+          <span
+            className="w-1.5 h-1.5 rounded-full bg-amber-500"
+            title="Unsaved change"
+          />
+        )}
       </div>
       {children}
     </div>
@@ -715,18 +888,21 @@ function NotesCard({
   submissionId,
   notes,
   adminLabel,
+  adminPictureUrl,
+  admins,
   onUpdate,
 }: {
   submissionId: string;
   notes: ClaimNote[];
   adminLabel: string;
+  adminPictureUrl?: string;
+  admins: WarrantyAdmin[];
   onUpdate: (next: WarrantySubmission) => void;
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   async function post() {
     const text = draft.trim();
@@ -753,19 +929,6 @@ function NotesCard({
     router.refresh();
   }
 
-  async function remove(noteId: string) {
-    setDeletingId(noteId);
-    const res = await fetch(
-      `/api/warranty/submissions/${encodeURIComponent(submissionId)}/notes/${encodeURIComponent(noteId)}`,
-      { method: "DELETE" },
-    );
-    setDeletingId(null);
-    if (!res.ok) return;
-    const payload = (await res.json()) as { doc: WarrantySubmission };
-    onUpdate(payload.doc);
-    router.refresh();
-  }
-
   return (
     <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
       <div className="px-5 py-3 border-b border-border/50 bg-muted/30 flex items-center gap-2.5">
@@ -782,9 +945,11 @@ function NotesCard({
 
       <div className="p-5 space-y-4">
         <div className="flex gap-3">
-          <div className="w-7 h-7 rounded-full bg-foreground text-background flex items-center justify-center text-[10px] font-bold shrink-0">
-            {initials(adminLabel)}
-          </div>
+          <AssigneeAvatar
+            name={adminLabel}
+            picture={adminPictureUrl ?? pictureForPerson(admins, adminLabel)}
+            className="w-7 h-7 text-[10px]"
+          />
           <div className="flex-1 min-w-0 space-y-2">
             <textarea
               value={draft}
@@ -834,10 +999,12 @@ function NotesCard({
         ) : (
           <div className="space-y-3 pt-2 border-t border-border/40">
             {notes.map((n) => (
-              <div key={n.id} className="flex gap-3 group">
-                <div className="w-7 h-7 rounded-full bg-muted border border-border/60 flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">
-                  {initials(n.authorName || "?")}
-                </div>
+              <div key={n.id} className="flex gap-3">
+                <AssigneeAvatar
+                  name={n.authorName}
+                  picture={pictureForPerson(admins, n.authorName, n.authorEmail)}
+                  className="w-7 h-7 text-[10px]"
+                />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2 flex-wrap">
                     <span className="text-[12px] font-semibold text-foreground">
@@ -846,19 +1013,6 @@ function NotesCard({
                     <span className="text-[10px] text-muted-foreground">
                       <RelativeTime value={n.createdAt} />
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => remove(n.id)}
-                      disabled={deletingId === n.id}
-                      className="opacity-0 group-hover:opacity-100 text-[10px] text-muted-foreground hover:text-destructive transition-all flex items-center gap-1 ml-auto"
-                      title="Delete this note"
-                    >
-                      {deletingId === n.id ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Trash2 className="w-3 h-3" />
-                      )}
-                    </button>
                   </div>
                   <p className="text-[13px] text-foreground whitespace-pre-wrap break-words leading-relaxed mt-0.5">
                     {n.text}

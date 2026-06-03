@@ -48,6 +48,7 @@ export default async function ClaimDetailPage({ params }: PageProps) {
   const fullName = joinName(doc.name, doc.surname);
   const publicUrl = `${process.env.WARRANTY_API_BASE?.replace(/\/$/, "") ?? ""}/warranty/${doc.submissionId}`;
   const adminLabel = session?.user?.name ?? session?.user?.email ?? "Admin";
+  const adminPictureUrl = session?.user?.picture ?? undefined;
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -102,6 +103,7 @@ export default async function ClaimDetailPage({ params }: PageProps) {
         initialDoc={doc}
         publicUrl={publicUrl}
         adminLabel={adminLabel}
+        adminPictureUrl={adminPictureUrl}
       />
     </div>
   );
