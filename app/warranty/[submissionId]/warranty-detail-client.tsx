@@ -133,28 +133,26 @@ export function ClaimDetailClient({
           assigneesLoading={assigneesLoading}
         />
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
-          <div className="space-y-6 min-w-0">
-            <ProblemCard description={doc.problemDescription} />
-
-            <NotesCard
-              submissionId={doc.submissionId}
-              notes={doc.notes}
-              adminLabel={adminLabel}
-              adminPictureUrl={adminPictureUrl}
-              admins={admins}
-              onUpdate={setDoc}
-            />
-
-            <UploadsCard fileUrls={doc.fileUrls} />
-          </div>
-
-          <aside className="space-y-4">
-            <ProductCard doc={doc} />
-            <ContactCard doc={doc} publicUrl={publicUrl} />
-            <PurchaseCard doc={doc} />
-          </aside>
+        {/* Product / Customer / Purchase — three equal cards in a row. Grid
+            stretches them to matching heights so they line up cleanly. */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <ProductCard doc={doc} />
+          <ContactCard doc={doc} publicUrl={publicUrl} />
+          <PurchaseCard doc={doc} />
         </div>
+
+        <ProblemCard description={doc.problemDescription} />
+
+        <NotesCard
+          submissionId={doc.submissionId}
+          notes={doc.notes}
+          adminLabel={adminLabel}
+          adminPictureUrl={adminPictureUrl}
+          admins={admins}
+          onUpdate={setDoc}
+        />
+
+        <UploadsCard fileUrls={doc.fileUrls} />
 
         {/* Change history spans the full width at the very bottom. */}
         <AuditHistory
