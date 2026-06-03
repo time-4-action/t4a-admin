@@ -126,6 +126,7 @@ them under `/api/warranty/*` so the bearer token never reaches the browser.
 |---|---|---|
 | Submissions list | `/warranty` | Searchable, status-filterable table of every warranty claim. |
 | Submission detail | `/warranty/[submissionId]` | Full claim view with file thumbnails + status editor in the sidebar. |
+| Warranty Access | `/warranty/access` | Mirrors AI Access (`app/ai/access`): per-user toggle of the `warranty-admin` role with a grant-confirmation dialog. Reuses `/api/admin/users` + `/api/admin/roles` + `PATCH /api/admin/users/[id]/roles`. Because `warranty-admin` is a privileged role, granting/revoking it is **super-admin only** (enforced in the roles PATCH route); the nav link is therefore hidden from non-super-admins via the `superAdminOnly` flag in `components/nav.tsx`. |
 | Email settings | `/warranty/settings` | Recipients chip input + customer/admin email subject, intro, outro, and per-field toggles. Persists to the warranty service's `warranty_settings` Mongo collection. |
 
 | Proxy route | Methods |
