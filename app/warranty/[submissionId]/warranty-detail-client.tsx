@@ -157,9 +157,9 @@ export function ClaimDetailClient({
           </div>
 
           <aside className="space-y-4">
+            <ProductCard doc={doc} />
             <ContactCard doc={doc} publicUrl={publicUrl} />
             <PurchaseCard doc={doc} />
-            <ProductCard doc={doc} />
           </aside>
         </div>
       </div>
