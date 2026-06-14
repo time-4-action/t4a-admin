@@ -16,6 +16,7 @@ export const SECTION_ROLES = {
   access: ["admin", "access-admin"],
   ai: ["admin", "ai-admin"],
   warranty: ["admin", "warranty-admin"],
+  partners: ["admin", "partners-admin"],
   system: ["admin"],
 } as const;
 
@@ -71,12 +72,14 @@ export function isPrivilegedRoleName(name: string): boolean {
 export const ROUTE_RULES: { prefix: string; section: SectionKey }[] = [
   // pages
   { prefix: "/warranty", section: "warranty" },
+  { prefix: "/partners", section: "partners" },
   { prefix: "/roles", section: "access" },
   { prefix: "/ai", section: "ai" },
   { prefix: "/users", section: "general" },
   { prefix: "/settings", section: "system" },
   // section-specific API routes
   { prefix: "/api/warranty", section: "warranty" },
+  { prefix: "/api/partners", section: "partners" },
   { prefix: "/api/admin/roles", section: "access" },
   { prefix: "/api/admin/resource-servers", section: "access" },
   { prefix: "/api/admin/stats", section: "ai" },

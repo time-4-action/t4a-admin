@@ -16,6 +16,7 @@ import {
   Sparkles,
   KeyRound,
   Cog,
+  Handshake,
 } from "lucide-react";
 
 const sections: {
@@ -68,6 +69,16 @@ const sections: {
     cards: [
       { href: "/warranty",          icon: Wrench, title: "Warranty Claims", desc: "Review, triage and resolve" },
       { href: "/warranty/settings", icon: Mail,   title: "Email Settings",  desc: "Customize warranty emails" },
+    ],
+  },
+  {
+    label: "Partners",
+    section: "partners",
+    icon: Handshake,
+    color: "text-indigo-500",
+    bg: "bg-indigo-500/10",
+    cards: [
+      { href: "/partners", icon: Handshake, title: "Partners", desc: "Accounts, activity and insights" },
     ],
   },
   {

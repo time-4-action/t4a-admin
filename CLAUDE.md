@@ -195,6 +195,48 @@ contract lives in the `patrik-warranty-form` repo.
 - `AuditEntry` / `AuditChange` in `types/warranty.ts` mirror the service's audit
   shape — keep in sync by hand like the other warranty types.
 
+### Partners module (`app/partners/`)
+
+A read/update surface over the **t4a-partner-portal** API, modelled on Warranty.
+A "partner" is an Auth0 user holding the portal's export role
+(`NEXT_PUBLIC_PARTNER_ROLE_NAME`, default `"export"`). The portal exposes an
+internal admin surface at `/api/admin/partners/*` behind a shared
+`PARTNER_ADMIN_TOKEN`; this admin calls it server-side via `lib/partner-api.ts`
+(`callPartnerPortal`) and proxies it under `/api/partners/*` so the token never
+reaches the browser. The portal **owns** all partner data (activity, notes); this
+admin stores nothing.
+
+| Page | Path | Notes |
+|---|---|---|
+| Partners list | `/partners` | All export-role Auth0 users joined with per-partner portal activity (Shopify connections, exports + downloads, feeds, last-active). Dormant partners show with zeros. |
+| Partner detail | `/partners/[sub]` | Insight cards (Shopify / Exports / Own Sources), "most interacted with", activity timeline, and a timestamped internal-notes log. `sub` is the Auth0 sub (URL-encoded). |
+| Partners Access | `/partners/access` | Per-user toggle of the **partner** role (`PARTNER_ROLE_NAME`, default `export`) — i.e. manage *who is a partner*. Granting it makes a user appear in the Partners list and gives them partner-portal access. Reuses `<AccessManager>`. (This is distinct from `partners-admin`, the role that gates the admin section itself — that one is managed via the general Access section.) |
+
+| Proxy route | Methods |
+|---|---|
+| `/api/partners` | GET (list: `getUsersWithRole` + portal `/overview`, joined by sub) |
+| `/api/partners/[sub]` | GET |
+| `/api/partners/[sub]/activity` | GET |
+| `/api/partners/[sub]/notes` | GET, POST (author stamped from the session, like warranty notes) |
+| `/api/partners/[sub]/notes/[noteId]` | DELETE |
+
+The partner list is the set of Auth0 users with `PARTNER_ROLE_NAME` (via
+`lib/role-users.ts` → `getUsersWithRole`, the same 2-call pattern as
+`lib/dev-users.ts`). Activity comes from the portal, which logs it via a new
+`activity_log` / `partner_activity` instrumentation (login/last-active, export
+downloads, Shopify/feed actions). Shared types live in `types/partner.ts` and
+mirror the portal's `src/controllers/adminPartnersController.js` — keep in sync
+by hand. Role names are configurable via `NEXT_PUBLIC_PARTNERS_ADMIN_ROLE_NAME`
+(default `"partners-admin"`) and `NEXT_PUBLIC_PARTNER_ROLE_NAME` (default
+`"export"`) in `lib/partner-role.ts`.
+
+Required env vars (server-side only):
+
+```
+PARTNER_API_BASE=https://<partner-portal-api host>   # e.g. https://api.time-4-action.com
+PARTNER_API_TOKEN=<must match the portal's PARTNER_ADMIN_TOKEN>
+```
+
 ### API Routes (`app/api/admin/`)
 
 | Route | Methods | Notes |
@@ -232,5 +274,10 @@ NEXT_PUBLIC_APP_NAME         # Browser tab title (default: "Admin")
 NEXT_PUBLIC_AI_ROLE_NAME     # Name of the AI-access role (default: "AI User")
 NEXT_PUBLIC_DEV_ROLE_NAME    # Name of the dev role to hide (default: "dev")
 NEXT_PUBLIC_WARRANTY_ADMIN_ROLE_NAME  # Role whose members are warranty assignees (default: "warranty-admin")
+NEXT_PUBLIC_PARTNERS_ADMIN_ROLE_NAME  # Role that grants the Partners section (default: "partners-admin")
+NEXT_PUBLIC_PARTNER_ROLE_NAME         # Auth0 role that identifies a partner (default: "export")
 AUTH0_BASE_URL               # Production base URL (set by docker-compose)
 ```
+
+Partners module also requires `PARTNER_API_BASE` and `PARTNER_API_TOKEN` (both
+server-side secrets — see the Partners module section above).
