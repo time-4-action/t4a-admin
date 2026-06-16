@@ -24,6 +24,7 @@ import {
   Mail,
   Handshake,
   RefreshCw,
+  Warehouse,
 } from "lucide-react";
 
 const sections: { label: string; section: SectionKey; links: { href: string; label: string; icon: React.ElementType; matchPrefix?: boolean; superAdminOnly?: boolean }[] }[] = [
@@ -69,6 +70,13 @@ const sections: { label: string; section: SectionKey; links: { href: string; lab
       { href: "/partners",        label: "Partners",        icon: Handshake, matchPrefix: true },
       { href: "/partners/sync",   label: "Catalogue Sync",  icon: RefreshCw },
       { href: "/partners/access", label: "Partners Access", icon: ShieldCheck, superAdminOnly: true },
+    ],
+  },
+  {
+    label: "Automation",
+    section: "automation",
+    links: [
+      { href: "/automation", label: "Warehouse & Products", icon: Warehouse, matchPrefix: true },
     ],
   },
 ];

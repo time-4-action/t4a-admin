@@ -241,6 +241,35 @@ PARTNER_API_BASE=https://<partner-portal-api host>   # e.g. https://api.time-4-a
 PARTNER_API_TOKEN=<must match the portal's PARTNER_ADMIN_TOKEN>
 ```
 
+### Automation module (`app/automation/`)
+
+A read/update surface over the **t4a-mk-automation** service (the Metakocka warehouse +
+products sync engine). Modelled on Warranty/Partners: the service exposes `/api/v1/*`
+behind an `x-api-key`; this admin calls it server-side via `lib/mk-api.ts`
+(`callMkAutomation`) and proxies it under `/api/automation/*` so the key never reaches the
+browser. The service owns its data (cron schedules in `cron.json`, run history in SQLite).
+
+Gated by a new `automation` section (`SECTION_ROLES.automation = ["admin", "automation-admin"]`).
+
+| Page | Path | Notes |
+|---|---|---|
+| Warehouse & Products | `/automation` | Two cards (Warehouse sync, Products sync): status, plain-English schedule with an inline cron editor (presets + live `humanizeCron` preview), next/last run, **Run now**, and a combined run-history table. Polls while a sync is running. |
+
+| Proxy route | Methods |
+|---|---|
+| `/api/automation/status` | GET (mk `/api/v1/status` + `/api/v1/runs` per type, combined) |
+| `/api/automation/schedules/[type]` | PUT (`type` = `warehouse` \| `products` → mk schedule endpoints) |
+| `/api/automation/[type]/run` | POST (mk run endpoints — 202 started / 409 already running) |
+
+The mk-automation run endpoints are **asynchronous**: they record a row in the service's
+`sync_runs` table, run in the background, and respond `202` immediately. Shared types live
+in `types/automation.ts`. Required env vars (server-side secrets):
+
+```
+MK_API_BASE=https://<mk-automation host>
+MK_API_TOKEN=<must match the service's API_KEY>
+```
+
 ### API Routes (`app/api/admin/`)
 
 | Route | Methods | Notes |
@@ -285,3 +314,7 @@ AUTH0_BASE_URL               # Production base URL (set by docker-compose)
 
 Partners module also requires `PARTNER_API_BASE` and `PARTNER_API_TOKEN` (both
 server-side secrets — see the Partners module section above).
+
+Automation module requires `MK_API_BASE` and `MK_API_TOKEN` (server-side
+secrets — see the Automation module section above). Its section is gated by the
+`automation-admin` role (or `admin`).

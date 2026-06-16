@@ -17,6 +17,7 @@ export const SECTION_ROLES = {
   ai: ["admin", "ai-admin"],
   warranty: ["admin", "warranty-admin"],
   partners: ["admin", "partners-admin"],
+  automation: ["admin", "automation-admin"],
   system: ["admin"],
 } as const;
 
@@ -73,6 +74,7 @@ export const ROUTE_RULES: { prefix: string; section: SectionKey }[] = [
   // pages
   { prefix: "/warranty", section: "warranty" },
   { prefix: "/partners", section: "partners" },
+  { prefix: "/automation", section: "automation" },
   { prefix: "/roles", section: "access" },
   { prefix: "/ai", section: "ai" },
   { prefix: "/users", section: "general" },
@@ -80,6 +82,7 @@ export const ROUTE_RULES: { prefix: string; section: SectionKey }[] = [
   // section-specific API routes
   { prefix: "/api/warranty", section: "warranty" },
   { prefix: "/api/partners", section: "partners" },
+  { prefix: "/api/automation", section: "automation" },
   { prefix: "/api/admin/roles", section: "access" },
   { prefix: "/api/admin/resource-servers", section: "access" },
   { prefix: "/api/admin/stats", section: "ai" },

@@ -17,6 +17,8 @@ import {
   KeyRound,
   Cog,
   Handshake,
+  Warehouse,
+  Boxes,
 } from "lucide-react";
 
 const sections: {
@@ -79,6 +81,16 @@ const sections: {
     bg: "bg-indigo-500/10",
     cards: [
       { href: "/partners", icon: Handshake, title: "Partners", desc: "Accounts, activity and insights" },
+    ],
+  },
+  {
+    label: "Automation",
+    section: "automation",
+    icon: Warehouse,
+    color: "text-sky-500",
+    bg: "bg-sky-500/10",
+    cards: [
+      { href: "/automation", icon: Boxes, title: "Warehouse & Products", desc: "Metakocka sync schedules and runs" },
     ],
   },
   {
