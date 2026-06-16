@@ -289,8 +289,9 @@ function RunDetailsModal({ run, onClose }: { run: MkRun | null; onClose: () => v
                 </div>
               </div>
 
-              {/* a fatal error (sync threw before completing) */}
-              {run.status === "error" && run.error && (
+              {/* A fatal error (the sync threw before completing) — shown only when there is no
+                  per-item error list to display instead. */}
+              {run.status === "error" && run.error && !(details?.type === "products" && details.errorCount > 0) && (
                 <div className="rounded-lg border border-rose-300/40 bg-rose-50 dark:bg-rose-950/30 px-3 py-2 text-[12px] text-rose-700 dark:text-rose-300 break-words">
                   {run.error}
                 </div>
@@ -361,8 +362,12 @@ function RunDetailsModal({ run, onClose }: { run: MkRun | null; onClose: () => v
                 </>
               )}
 
-              {!details && run.status !== "error" && (
-                <p className="text-[12px] text-muted-foreground">No detailed breakdown was recorded for this run.</p>
+              {!details && (
+                <div className="rounded-lg border border-border bg-background/50 px-3 py-2 text-[12px] text-muted-foreground">
+                  {run.status === "error"
+                    ? "This run was recorded before per-item error capture was added, so the individual failures weren't saved. Run the sync again to see exactly which items failed and why."
+                    : "No detailed breakdown was recorded for this run."}
+                </div>
               )}
             </div>
           </>
