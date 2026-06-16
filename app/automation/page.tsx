@@ -441,7 +441,13 @@ function SyncCard({
             running ? (
               <span className="text-amber-600 dark:text-amber-400">Running…</span>
             ) : last?.status === "error" ? (
-              <span className="text-rose-600 dark:text-rose-400">Failed</span>
+              <button
+                type="button"
+                onClick={() => last && onViewDetails(last)}
+                className="text-rose-600 dark:text-rose-400 hover:underline"
+              >
+                Failed{last.error ? ` · ${last.error}` : ""}
+              </button>
             ) : last?.status === "ok" ? (
               `${(last.item_count ?? 0).toLocaleString()} ${itemLabel}`
             ) : (
@@ -451,17 +457,7 @@ function SyncCard({
         />
       </div>
 
-      {last?.status === "error" && last.error && (
-        <button
-          type="button"
-          onClick={() => last && onViewDetails(last)}
-          className="text-[11px] text-rose-600 dark:text-rose-400 break-words border-t border-border pt-2 text-left hover:underline"
-        >
-          {last.error} — see what failed
-        </button>
-      )}
-
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 mt-auto pt-1">
         <Button size="sm" className="h-8 text-xs gap-1.5 flex-1" onClick={onRun} disabled={running}>
           {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
           {running ? "Running…" : "Run now"}
