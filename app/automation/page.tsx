@@ -13,6 +13,8 @@ import {
   CircleDashed,
   Pencil,
   CalendarClock,
+  ArrowRight,
+  ChevronRight,
 } from "lucide-react";
 import {
   Table,
@@ -34,7 +36,13 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { humanizeCron } from "@/lib/cron";
-import type { AutomationStatus, MkRun, MkSyncState, SyncType } from "@/types/automation";
+import {
+  parseRunDetails,
+  type AutomationStatus,
+  type MkRun,
+  type MkSyncState,
+  type SyncType,
+} from "@/types/automation";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -236,6 +244,134 @@ function CronEditorModal({
   );
 }
 
+// ── run details modal ─────────────────────────────────────────────────────────
+
+// changes<Name> → "Updated in <Name>", newIn<Name> → "Created in <Name>".
+function bucketLabel(key: string): string {
+  if (key.startsWith("changes")) return `Updated in ${key.slice("changes".length)}`;
+  if (key.startsWith("newIn")) return `Created in ${key.slice("newIn".length)}`;
+  return key;
+}
+
+function RunDetailsModal({ run, onClose }: { run: MkRun | null; onClose: () => void }) {
+  const details = parseRunDetails(run?.details);
+  return (
+    <Dialog open={!!run} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        {run && (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                {resultIcon(run.status)}
+                {run.type === "warehouse" ? "Warehouse sync" : "Products sync"}
+              </DialogTitle>
+              <DialogDescription>
+                {run.trigger === "manual" ? "Started manually" : "Ran automatically on schedule"} · {fmtDate(run.started_at)}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 max-h-[60vh] overflow-auto">
+              {/* summary */}
+              <div className="grid grid-cols-3 gap-2 text-[12px]">
+                <div className="rounded-lg border border-border bg-background/50 px-3 py-2">
+                  <p className="text-muted-foreground text-[10px] uppercase tracking-wide">Result</p>
+                  <p className={cn("font-medium mt-0.5", run.status === "error" ? "text-rose-600 dark:text-rose-400" : run.status === "ok" ? "text-emerald-600 dark:text-emerald-400" : "text-foreground")}>
+                    {run.status === "ok" ? "Success" : run.status === "error" ? "Failed" : run.status}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border bg-background/50 px-3 py-2">
+                  <p className="text-muted-foreground text-[10px] uppercase tracking-wide">Duration</p>
+                  <p className="font-medium mt-0.5 tabular-nums">{fmtDuration(run.duration_ms)}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-background/50 px-3 py-2">
+                  <p className="text-muted-foreground text-[10px] uppercase tracking-wide">Items</p>
+                  <p className="font-medium mt-0.5 tabular-nums">{run.item_count ?? "—"}</p>
+                </div>
+              </div>
+
+              {/* a fatal error (sync threw before completing) */}
+              {run.status === "error" && run.error && (
+                <div className="rounded-lg border border-rose-300/40 bg-rose-50 dark:bg-rose-950/30 px-3 py-2 text-[12px] text-rose-700 dark:text-rose-300 break-words">
+                  {run.error}
+                </div>
+              )}
+
+              {/* warehouse breakdown — each source written to its own CREAGLOBE warehouse */}
+              {details?.type === "warehouse" && (
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Warehouses written</p>
+                  {details.warehouses.map((w, i) => (
+                    <div key={i} className="rounded-lg border border-border bg-background/50 px-3 py-2 flex items-center gap-2 text-[12px]">
+                      <span className="text-foreground font-medium">{w.source}</span>
+                      <ArrowRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                      <span className="text-muted-foreground">{w.target}</span>
+                      <span className="ml-auto tabular-nums font-medium text-foreground">{w.count ?? "—"} items</span>
+                    </div>
+                  ))}
+                  <p className="text-[11px] text-muted-foreground">
+                    Stock from each source warehouse is written into its own matching virtual warehouse in CREAGLOBE — kept separate, not merged.
+                  </p>
+                </div>
+              )}
+
+              {/* product change buckets */}
+              {details?.type === "products" && (
+                <>
+                  {details.buckets.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Changes applied</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {details.buckets.map((b) => (
+                          <div key={b.key} className="rounded-lg border border-border bg-background/50 px-3 py-2 flex items-center justify-between text-[12px]">
+                            <span className="text-muted-foreground truncate">{bucketLabel(b.key)}</span>
+                            <span className="tabular-nums font-medium text-foreground">{b.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* the actual per-item errors */}
+                  {details.errorCount > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">
+                        {details.errorCount} item error{details.errorCount === 1 ? "" : "s"}
+                        {details.errors.length < details.errorCount && ` (showing first ${details.errors.length})`}
+                      </p>
+                      <div className="rounded-lg border border-border divide-y divide-border/60 overflow-hidden">
+                        {details.errors.map((e, i) => (
+                          <div key={i} className="px-3 py-2 text-[12px]">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {e.product_code && <span className="font-mono text-foreground">{e.product_code}</span>}
+                              {e.action && (
+                                <span className="text-[10px] uppercase tracking-wide text-muted-foreground border border-border rounded px-1">{e.action}</span>
+                              )}
+                              {e.system && <span className="text-[10px] text-muted-foreground">in {e.system}</span>}
+                            </div>
+                            <p className="text-rose-600 dark:text-rose-400 mt-0.5 break-words">{e.message}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    run.status === "ok" && (
+                      <p className="text-[12px] text-emerald-600 dark:text-emerald-400">All changes applied without errors.</p>
+                    )
+                  )}
+                </>
+              )}
+
+              {!details && run.status !== "error" && (
+                <p className="text-[12px] text-muted-foreground">No detailed breakdown was recorded for this run.</p>
+              )}
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── sync card ─────────────────────────────────────────────────────────────────
 
 function SyncCard({
@@ -247,6 +383,7 @@ function SyncCard({
   starting,
   onRun,
   onEdit,
+  onViewDetails,
 }: {
   icon: React.ElementType;
   title: string;
@@ -256,6 +393,7 @@ function SyncCard({
   starting: boolean;
   onRun: () => void;
   onEdit: () => void;
+  onViewDetails: (run: MkRun) => void;
 }) {
   const tone = stateTone(state, starting);
   const running = state?.isRunning || starting;
@@ -314,13 +452,33 @@ function SyncCard({
       </div>
 
       {last?.status === "error" && last.error && (
-        <p className="text-[11px] text-rose-600 dark:text-rose-400 break-words border-t border-border pt-2">{last.error}</p>
+        <button
+          type="button"
+          onClick={() => last && onViewDetails(last)}
+          className="text-[11px] text-rose-600 dark:text-rose-400 break-words border-t border-border pt-2 text-left hover:underline"
+        >
+          {last.error} — see what failed
+        </button>
       )}
 
-      <Button size="sm" className="h-8 text-xs gap-1.5 w-full" onClick={onRun} disabled={running}>
-        {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-        {running ? "Running…" : "Run now"}
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button size="sm" className="h-8 text-xs gap-1.5 flex-1" onClick={onRun} disabled={running}>
+          {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+          {running ? "Running…" : "Run now"}
+        </Button>
+        {last && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs gap-1"
+            onClick={() => onViewDetails(last)}
+            title="View last run details"
+          >
+            Details
+            <ChevronRight className="w-3.5 h-3.5" />
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -336,6 +494,7 @@ export default function AutomationPage() {
   const [editing, setEditing] = useState<SyncType | null>(null);
   const [savingCron, setSavingCron] = useState(false);
   const [cronError, setCronError] = useState<string | null>(null);
+  const [openRun, setOpenRun] = useState<MkRun | null>(null);
   const mounted = useRef(true);
 
   const load = useCallback(async () => {
@@ -460,9 +619,10 @@ export default function AutomationPage() {
 
       <div className="flex-1 min-h-0 overflow-auto p-4 md:p-8 space-y-6">
         <p className="text-[12px] text-muted-foreground max-w-3xl -mt-1">
-          Keeps Metakocka in sync with the CREAGLOBE company. <span className="text-foreground font-medium">Warehouse sync</span> copies
-          available stock across warehouses; <span className="text-foreground font-medium">products sync</span> mirrors product data
-          between the two systems. Each runs on its own schedule — edit it, watch past runs, or run one right now.
+          Bridges the two Metakocka companies (T4A and CREAGLOBE). <span className="text-foreground font-medium">Warehouse sync</span> reads
+          available stock from each source warehouse and writes it into its <em>own matching</em> virtual warehouse in CREAGLOBE — kept
+          separate, never merged. <span className="text-foreground font-medium">Products sync</span> mirrors product data between the two
+          companies. Each runs on its own schedule — edit it, open any run to see exactly what happened, or run one right now.
         </p>
 
         {error && (
@@ -495,12 +655,13 @@ export default function AutomationPage() {
               <SyncCard
                 icon={Warehouse}
                 title="Warehouse Sync"
-                description="Reads available stock from the T4A and ProMode (Germany) warehouses and writes the combined free quantities into the CREAGLOBE warehouse in Metakocka."
+                description="Reads available (free) stock from the T4A and ProMode (Germany) warehouses and writes each into its own matching virtual warehouse inside the CREAGLOBE Metakocka company — the two are kept separate, not merged."
                 itemLabel="items synced"
                 state={status.warehouse}
                 starting={starting.warehouse}
                 onRun={() => runNow("warehouse")}
                 onEdit={() => { setCronError(null); setEditing("warehouse"); }}
+                onViewDetails={setOpenRun}
               />
               <SyncCard
                 icon={Boxes}
@@ -511,6 +672,7 @@ export default function AutomationPage() {
                 starting={starting.products}
                 onRun={() => runNow("products")}
                 onEdit={() => { setCronError(null); setEditing("products"); }}
+                onViewDetails={setOpenRun}
               />
             </div>
           )
@@ -532,19 +694,24 @@ export default function AutomationPage() {
                     <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">How</TableHead>
                     <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Outcome</TableHead>
                     <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Took</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9 pr-5">Items</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Items</TableHead>
+                    <TableHead className="h-9 w-[40px] pr-5" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {allRuns.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-[12px] text-muted-foreground py-8">
+                      <TableCell colSpan={7} className="text-center text-[12px] text-muted-foreground py-8">
                         No runs yet — press <span className="font-medium text-foreground">Run now</span> on a sync above.
                       </TableCell>
                     </TableRow>
                   ) : (
                     allRuns.map((run) => (
-                      <TableRow key={`${run.type}-${run.id}`} className="border-b border-border/60">
+                      <TableRow
+                        key={`${run.type}-${run.id}`}
+                        className="border-b border-border/60 cursor-pointer hover:bg-muted/40"
+                        onClick={() => setOpenRun(run)}
+                      >
                         <TableCell className="pl-5 py-2.5 text-[12px] text-foreground" title={fmtDate(run.started_at)}>
                           {fmtDate(run.started_at)}
                         </TableCell>
@@ -573,8 +740,11 @@ export default function AutomationPage() {
                           )}
                         </TableCell>
                         <TableCell className="py-2.5 text-[12px] text-muted-foreground tabular-nums">{fmtDuration(run.duration_ms)}</TableCell>
-                        <TableCell className="pr-5 py-2.5 text-[12px] text-muted-foreground tabular-nums">
+                        <TableCell className="py-2.5 text-[12px] text-muted-foreground tabular-nums">
                           {run.item_count ?? "—"}
+                        </TableCell>
+                        <TableCell className="pr-5 py-2.5 text-right">
+                          <ChevronRight className="w-4 h-4 text-muted-foreground/60 inline" />
                         </TableCell>
                       </TableRow>
                     ))
@@ -595,6 +765,8 @@ export default function AutomationPage() {
         onClose={() => setEditing(null)}
         onSave={saveCron}
       />
+
+      <RunDetailsModal run={openRun} onClose={() => setOpenRun(null)} />
     </div>
   );
 }
