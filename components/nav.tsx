@@ -23,6 +23,7 @@ import {
   Wrench,
   Mail,
   Handshake,
+  RefreshCw,
 } from "lucide-react";
 
 const sections: { label: string; section: SectionKey; links: { href: string; label: string; icon: React.ElementType; matchPrefix?: boolean; superAdminOnly?: boolean }[] }[] = [
@@ -66,6 +67,7 @@ const sections: { label: string; section: SectionKey; links: { href: string; lab
     section: "partners",
     links: [
       { href: "/partners",        label: "Partners",        icon: Handshake, matchPrefix: true },
+      { href: "/partners/sync",   label: "Catalogue Sync",  icon: RefreshCw },
       { href: "/partners/access", label: "Partners Access", icon: ShieldCheck, superAdminOnly: true },
     ],
   },

@@ -112,6 +112,85 @@ export type PartnerActivityEvent = {
   timestamp: string;
 };
 
+// ── Catalogue Sync (scheduler status) ────────────────────────────────────────
+// Mirrors src/controllers/adminSystemController.js in the portal. Keep in sync by hand.
+
+export type PnvSyncStats = {
+  totalProcessed?: number;
+  created?: number;
+  updated?: number;
+  deactivated?: number;
+  aiRuns?: { exportId: string; categorized?: number; error?: string }[];
+};
+
+export type PnvSyncRun = {
+  _id: string;
+  trigger: "schedule" | "manual" | string;
+  result: "ok" | "error" | string;
+  error?: string | null;
+  stats?: PnvSyncStats | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  durationMs?: number | null;
+};
+
+export type PnvSyncStatus = {
+  enabled: boolean;
+  schedule: string | null;
+  isRunning: boolean;
+  runningBy?: string | null;
+  nextRunAt: string | null;
+  lastStartedAt: string | null;
+  lastFinishedAt: string | null;
+  lastDurationMs: number | null;
+  lastResult: string | null;
+  lastError: string | null;
+  lastStats: PnvSyncStats | null;
+  runs: PnvSyncRun[];
+};
+
+export type OwnSourceFeedStatus = {
+  feedId: string;
+  brand: string;
+  ownerEmail: string | null;
+  status: string | null;
+  scheduleEnabled: boolean;
+  frequency: string | null;
+  nextRunAt: string | null;
+  isRunning: boolean;
+  health: {
+    lastImportAt: string | null;
+    lastResult: string | null;
+    lastError: { code?: string; message?: string } | string | null;
+    counts: Record<string, number> | null;
+  };
+};
+
+export type OwnSourceRun = {
+  _id: string;
+  feedId: string;
+  ownerSub?: string;
+  trigger?: string;
+  result?: string;
+  counts?: Record<string, number> | null;
+  error?: unknown;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+};
+
+export type ShopifyCleanupStatus = {
+  intervalMs: number;
+  pendingTtlMs: number;
+  lastSweepAt: string | null;
+  lastRemoved: number | null;
+};
+
+export type SyncStatus = {
+  pnv: PnvSyncStatus;
+  ownSources: { enabled: boolean; feeds: OwnSourceFeedStatus[]; runs: OwnSourceRun[] };
+  shopifyCleanup: ShopifyCleanupStatus;
+};
+
 // Human labels for the activity event enum (matches activity.service.js).
 export const EVENT_LABELS: Record<string, string> = {
   login: "Signed in",

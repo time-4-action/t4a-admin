@@ -210,6 +210,7 @@ admin stores nothing.
 |---|---|---|
 | Partners list | `/partners` | All export-role Auth0 users joined with per-partner portal activity (Shopify connections, exports + downloads, feeds, last-active). Dormant partners show with zeros. |
 | Partner detail | `/partners/[sub]` | Insight cards (Shopify / Exports / Own Sources), "most interacted with", activity timeline, and a timestamped internal-notes log. `sub` is the Auth0 sub (URL-encoded). |
+| Catalogue Sync | `/partners/sync` | Global (not per-partner) view of the portal's in-app schedulers: PNV catalogue refresh, Own Sources feed imports, Shopify pending-cleanup sweep. Status cards (next/last run, duration, result), a PNV run-history table, an Own Sources feed table, and **Run now** buttons (full PNV pipeline + per-feed). Polls `/api/partners/sync` while a run is in flight. Fed entirely by the portal's `/api/admin/system/*` surface. |
 | Partners Access | `/partners/access` | Per-user toggle of the **partner** role (`PARTNER_ROLE_NAME`, default `export`) — i.e. manage *who is a partner*. Granting it makes a user appear in the Partners list and gives them partner-portal access. Reuses `<AccessManager>`. (This is distinct from `partners-admin`, the role that gates the admin section itself — that one is managed via the general Access section.) |
 
 | Proxy route | Methods |
@@ -219,6 +220,9 @@ admin stores nothing.
 | `/api/partners/[sub]/activity` | GET |
 | `/api/partners/[sub]/notes` | GET, POST (author stamped from the session, like warranty notes) |
 | `/api/partners/[sub]/notes/[noteId]` | DELETE |
+| `/api/partners/sync` | GET (proxy portal `/api/admin/system/sync`) |
+| `/api/partners/sync/run` | POST (proxy portal `/api/admin/system/sync/pnv/run` — full pipeline) |
+| `/api/partners/sync/own-sources/[feedId]/run` | POST (proxy portal feed run) |
 
 The partner list is the set of Auth0 users with `PARTNER_ROLE_NAME` (via
 `lib/role-users.ts` → `getUsersWithRole`, the same 2-call pattern as
