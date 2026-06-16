@@ -344,8 +344,8 @@ export default function AutomationPage() {
       const data = await r.json();
       if (!mounted.current) return;
       if (!r.ok || data?.reachable === false) {
+        // Keep any previously loaded status on a transient blip; just surface the error.
         setError(data?.error ?? "Couldn't reach the automation service");
-        setStatus(data?.reachable === false ? null : status);
         return;
       }
       setError(null);
@@ -358,7 +358,6 @@ export default function AutomationPage() {
         setStarting({ warehouse: false, products: false });
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
