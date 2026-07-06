@@ -1,7 +1,25 @@
 "use client";
 import { useMemo, useState } from "react";
-import { SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal, GripVertical } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  arrayMove,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { BUILDER_SCRIPT_URL } from "@/lib/builder-role";
+import { cn } from "@/lib/utils";
 import {
   BuilderShell,
   Group,
@@ -19,6 +37,59 @@ import {
 } from "../builder-ui";
 
 const DEF_RANGE = "#b4ff64";
+
+// Deterministic stop-key counter (stable across SSR/CSR because keys are only
+// minted in the same call order). Gives drag-and-drop a stable identity per
+// stop even when labels duplicate or are blank.
+let _sid = 0;
+const sid = () => `s${_sid++}`;
+
+// A single draggable stop row (handle-based, so the label input stays editable).
+function SortableStopRow({
+  id,
+  index,
+  value,
+  onChange,
+  onRemove,
+}: {
+  id: string;
+  index: number;
+  value: string;
+  onChange: (v: string) => void;
+  onRemove?: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        "flex items-center gap-1.5 rounded-lg",
+        isDragging && "relative z-10 bg-surface shadow-lg ring-1 ring-blue-400/50",
+      )}
+    >
+      <button
+        type="button"
+        className="w-5 h-8 flex items-center justify-center text-muted-foreground/50 hover:text-foreground cursor-grab active:cursor-grabbing touch-none shrink-0"
+        title="Drag to reorder"
+        aria-label="Drag to reorder"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="w-3.5 h-3.5" />
+      </button>
+      <span className="w-5 h-8 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px] font-bold flex items-center justify-center shrink-0 tabular-nums">
+        {index}
+      </span>
+      <TextField value={value} onChange={onChange} placeholder={`Stop ${index + 1}`} />
+      {onRemove && (
+        <IconButton onClick={onRemove} title="Remove stop">
+          <RemoveIcon />
+        </IconButton>
+      )}
+    </div>
+  );
+}
 
 // A dropdown that picks one of the scale's stops by its 0-based index — used
 // for the band start/end when the band snaps to stops, so the values are the
@@ -59,26 +130,31 @@ type Bar = {
   value: number;
   range: string;
   scale: string;
+  // Stable drag-and-drop keys, one per comma-separated stop in `scale`.
+  stopKeys: string[];
   scaleIndex: boolean;
 };
 
 const esc = (s: string) =>
   String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-const newBar = (over: Partial<Bar> = {}): Bar => ({
-  mode: "two",
-  title: "New bar",
-  left: "Left",
-  right: "Right",
-  min: 20,
-  max: 70,
-  marker: false,
-  value: 50,
-  range: DEF_RANGE,
-  scale: "Entry,Intermediate,Advanced,Pro",
-  scaleIndex: true,
-  ...over,
-});
+const newBar = (over: Partial<Bar> = {}): Bar => {
+  const base = {
+    mode: "two" as BarMode,
+    title: "New bar",
+    left: "Left",
+    right: "Right",
+    min: 20 as number | "",
+    max: 70 as number | "",
+    marker: false,
+    value: 50,
+    range: DEF_RANGE,
+    scale: "Entry,Intermediate,Advanced,Pro",
+    scaleIndex: true,
+    ...over,
+  };
+  return { ...base, stopKeys: base.scale.split(",").map(() => sid()) };
+};
 
 export default function RangeBarsBuilder() {
   const [wrap, setWrap] = useState(true);
@@ -87,6 +163,11 @@ export default function RangeBarsBuilder() {
     newBar({ title: "Power delivery", left: "Direct", right: "Smooth", min: 25, max: 62 }),
     newBar({ title: "Center of effort", left: "Backhanded", right: "Fronthanded", min: 45, max: 80 }),
   ]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   const updateBar = (bi: number, patch: Partial<Bar>) =>
     setBars((bs) => bs.map((b, i) => (i === bi ? { ...b, ...patch } : b)));
@@ -127,7 +208,7 @@ export default function RangeBarsBuilder() {
     };
 
     const m = buildMarkup();
-    const full = `${m}\n\n<!-- load once per page, near the end of <body> -->\n<script src="${BUILDER_SCRIPT_URL}"></script>`;
+    const full = `${m}\n\n<script src="${BUILDER_SCRIPT_URL}"></script>`;
     return { markup: m, code: full };
   }, [wrap, heading, bars]);
 
@@ -149,7 +230,48 @@ export default function RangeBarsBuilder() {
         <div className="space-y-3">
           {bars.map((bar, bi) => {
             const stops = bar.scale.split(",");
-            const setStops = (next: string[]) => updateBar(bi, { scale: next.join(",") });
+            // Keep keys aligned to stops defensively (should already match).
+            const keys =
+              bar.stopKeys.length === stops.length
+                ? bar.stopKeys
+                : stops.map((_, i) => bar.stopKeys[i] ?? sid());
+
+            const editStop = (si: number, v: string) =>
+              updateBar(bi, { scale: stops.map((x, j) => (j === si ? v : x)).join(",") });
+            const addStop = () =>
+              updateBar(bi, {
+                scale: [...stops, `Stop ${stops.length + 1}`].join(","),
+                stopKeys: [...keys, sid()],
+              });
+            const removeStop = (si: number) =>
+              updateBar(bi, {
+                scale: stops.filter((_, j) => j !== si).join(","),
+                stopKeys: keys.filter((_, j) => j !== si),
+              });
+            const reorderStops = (e: DragEndEvent) => {
+              const { active, over } = e;
+              if (!over || active.id === over.id) return;
+              const from = keys.indexOf(String(active.id));
+              const to = keys.indexOf(String(over.id));
+              if (from < 0 || to < 0) return;
+              // order[newPos] = oldIndex — used to remap the band's stop indexes.
+              const order = arrayMove(stops.map((_, i) => i), from, to);
+              const patch: Partial<Bar> = {
+                scale: arrayMove(stops, from, to).join(","),
+                stopKeys: arrayMove(keys, from, to),
+              };
+              if (bar.scaleIndex) {
+                if (typeof bar.min === "number") {
+                  const ni = order.indexOf(bar.min);
+                  if (ni >= 0) patch.min = ni;
+                }
+                if (typeof bar.max === "number") {
+                  const ni = order.indexOf(bar.max);
+                  if (ni >= 0) patch.max = ni;
+                }
+              }
+              updateBar(bi, patch);
+            };
             return (
               <SubCard
                 key={bi}
@@ -205,34 +327,32 @@ export default function RangeBarsBuilder() {
                     <div>
                       <span className="text-[11px] font-medium text-muted-foreground">
                         Stops{" "}
-                        <span className="text-muted-foreground/60 font-normal">(left → right)</span>
+                        <span className="text-muted-foreground/60 font-normal">
+                          (drag to reorder, left → right)
+                        </span>
                       </span>
-                      <div className="space-y-1.5 mt-1.5">
-                        {stops.map((s, si) => (
-                          <div key={si} className="flex items-center gap-1.5">
-                            <span className="w-5 h-8 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px] font-bold flex items-center justify-center shrink-0 tabular-nums">
-                              {si}
-                            </span>
-                            <TextField
-                              value={s}
-                              onChange={(v) => setStops(stops.map((x, j) => (j === si ? v : x)))}
-                              placeholder={`Stop ${si + 1}`}
-                            />
-                            {stops.length > 2 && (
-                              <IconButton
-                                onClick={() => setStops(stops.filter((_, j) => j !== si))}
-                                title="Remove stop"
-                              >
-                                <RemoveIcon />
-                              </IconButton>
-                            )}
+                      <DndContext
+                        sensors={sensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={reorderStops}
+                      >
+                        <SortableContext items={keys} strategy={verticalListSortingStrategy}>
+                          <div className="space-y-1.5 mt-1.5">
+                            {stops.map((s, si) => (
+                              <SortableStopRow
+                                key={keys[si]}
+                                id={keys[si]}
+                                index={si}
+                                value={s}
+                                onChange={(v) => editStop(si, v)}
+                                onRemove={stops.length > 2 ? () => removeStop(si) : undefined}
+                              />
+                            ))}
                           </div>
-                        ))}
-                      </div>
+                        </SortableContext>
+                      </DndContext>
                       <div className="mt-1.5">
-                        <AddButton onClick={() => setStops([...stops, `Stop ${stops.length + 1}`])}>
-                          Add stop
-                        </AddButton>
+                        <AddButton onClick={addStop}>Add stop</AddButton>
                       </div>
                     </div>
 

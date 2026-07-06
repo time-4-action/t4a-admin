@@ -263,7 +263,7 @@ export default function RadarChartBuilder() {
     };
 
     const m = buildMarkup();
-    const full = `${m}\n\n<!-- load once per page, near the end of <body> -->\n<script src="${BUILDER_SCRIPT_URL}"></script>`;
+    const full = `${m}\n\n<script src="${BUILDER_SCRIPT_URL}"></script>`;
     return { markup: m, code: full };
   }, [wrap, heading, mode, axes, values, datasets, colors]);
 
