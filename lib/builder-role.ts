@@ -12,10 +12,8 @@ export const BUILDER_ADMIN_ROLE_NAME =
   process.env.NEXT_PUBLIC_BUILDER_ADMIN_ROLE_NAME || "builder-admin";
 
 // The URL written into the <script src="…"> line of every generated snippet.
-// This points at wherever the shared renderer (patrik-components.js) is hosted
-// for the live website. The admin bundles its own copy at /patrik-components.js
-// purely to power the live preview + the download button — the *snippet* should
-// reference the site's canonical copy, so this is configurable. Defaults to a
-// bare relative path (the reference repo's convention) when unset.
+// This is the canonical, hosted copy of the shared renderer on the live site.
+// (The admin bundles its own copy at /patrik-components.js purely to power the
+// live preview + the download button.) Hardcoded on purpose — not configurable.
 export const BUILDER_SCRIPT_URL =
-  process.env.NEXT_PUBLIC_BUILDER_SCRIPT_URL || "patrik-components.js";
+  "https://www.patrikinternational.com/assets/added_js_files/patrik-components.js";

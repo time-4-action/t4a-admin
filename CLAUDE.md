@@ -298,12 +298,13 @@ website's `patrik-components.js` is bundled verbatim at `public/patrik-component
 subtree, so the preview is byte-identical to production output. The same file is
 offered as a download from the builder pages.
 
-The `<script src="…">` line written into every **generated snippet** is
-configurable via `BUILDER_SCRIPT_URL` (env `NEXT_PUBLIC_BUILDER_SCRIPT_URL`,
-default the bare relative path `patrik-components.js`) — it should point at
-wherever the site hosts the renderer. Role name is configurable via
-`NEXT_PUBLIC_BUILDER_ADMIN_ROLE_NAME` (default `"builder-admin"`). Both live in
-`lib/builder-role.ts`. To add a new section builder: bundle its renderer logic
+The `<script src="…">` line written into every **generated snippet** is a
+**hardcoded** constant `BUILDER_SCRIPT_URL` in `lib/builder-role.ts` (the
+canonical hosted renderer at
+`https://www.patrikinternational.com/assets/added_js_files/patrik-components.js`)
+— not env-configurable. Role name is configurable via
+`NEXT_PUBLIC_BUILDER_ADMIN_ROLE_NAME` (default `"builder-admin"`, also in
+`lib/builder-role.ts`). To add a new section builder: bundle its renderer logic
 into `patrik-components.js`, then add a `/builder/<name>` page that drives
 `BuilderShell` (see the two existing builders as templates).
 
@@ -348,7 +349,6 @@ NEXT_PUBLIC_PARTNERS_ADMIN_ROLE_NAME  # Role that grants the Partners section (d
 NEXT_PUBLIC_PARTNER_ROLE_NAME         # Auth0 role that identifies a partner (default: "export")
 NEXT_PUBLIC_AUTOMATION_ADMIN_ROLE_NAME # Role that grants the Automation section (default: "automation-admin")
 NEXT_PUBLIC_BUILDER_ADMIN_ROLE_NAME  # Role that grants the Builder section (default: "builder-admin")
-NEXT_PUBLIC_BUILDER_SCRIPT_URL       # <script src> written into generated snippets (default: "patrik-components.js")
 AUTH0_BASE_URL               # Production base URL (set by docker-compose)
 ```
 
