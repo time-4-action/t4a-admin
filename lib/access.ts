@@ -18,6 +18,7 @@ export const SECTION_ROLES = {
   warranty: ["admin", "warranty-admin"],
   partners: ["admin", "partners-admin"],
   automation: ["admin", "automation-admin"],
+  builder: ["admin", "builder-admin"],
   system: ["admin"],
 } as const;
 
@@ -71,10 +72,20 @@ export function isPrivilegedRoleName(name: string): boolean {
 // unmapped so any admin role may call them — page gating already hides them.
 // Order is most-specific-first.
 export const ROUTE_RULES: { prefix: string; section: SectionKey }[] = [
+  // Access-management pages are STRICT super-admin only — mapped to the
+  // admin-only "system" section. These must precede the broader section
+  // prefixes below so the more-specific /<section>/access path wins.
+  { prefix: "/roles/super-admins", section: "system" },
+  { prefix: "/ai/access", section: "system" },
+  { prefix: "/warranty/access", section: "system" },
+  { prefix: "/partners/access", section: "system" },
+  { prefix: "/automation/access", section: "system" },
+  { prefix: "/builder/access", section: "system" },
   // pages
   { prefix: "/warranty", section: "warranty" },
   { prefix: "/partners", section: "partners" },
   { prefix: "/automation", section: "automation" },
+  { prefix: "/builder", section: "builder" },
   { prefix: "/roles", section: "access" },
   { prefix: "/ai", section: "ai" },
   { prefix: "/users", section: "general" },

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -12,12 +12,12 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   ShieldCheck,
   UserCog,
   UserPlus,
   LogOut,
   KeyRound,
-  Bot,
   Menu,
   X,
   Wrench,
@@ -25,9 +25,26 @@ import {
   Handshake,
   RefreshCw,
   Warehouse,
+  Folder,
+  Sparkles,
+  Zap,
+  Cog,
+  Crown,
+  Blocks,
+  Radar,
+  SlidersHorizontal,
 } from "lucide-react";
 
-const sections: { label: string; section: SectionKey; links: { href: string; label: string; icon: React.ElementType; matchPrefix?: boolean; superAdminOnly?: boolean }[] }[] = [
+type NavLinkDef = {
+  href: string;
+  label: string;
+  icon: React.ElementType;
+  matchPrefix?: boolean;
+  superAdminOnly?: boolean;
+};
+type NavSection = { label: string; section: SectionKey; links: NavLinkDef[] };
+
+const sections: NavSection[] = [
   {
     label: "General",
     section: "general",
@@ -39,10 +56,11 @@ const sections: { label: string; section: SectionKey; links: { href: string; lab
     label: "Access",
     section: "access",
     links: [
-      { href: "/roles",         label: "Access Types",  icon: ShieldCheck },
-      { href: "/roles/assign",  label: "Assign Access", icon: UserCog },
-      { href: "/roles/scopes",  label: "Scopes",        icon: KeyRound },
-      { href: "/roles/new",     label: "New Access Type", icon: UserPlus },
+      { href: "/roles",                label: "Access Types",    icon: ShieldCheck },
+      { href: "/roles/assign",         label: "Assign Access",   icon: UserCog },
+      { href: "/roles/scopes",         label: "Scopes",          icon: KeyRound },
+      { href: "/roles/new",            label: "New Access Type", icon: UserPlus },
+      { href: "/roles/super-admins",   label: "Super Admins",    icon: Crown, superAdminOnly: true },
     ],
   },
   {
@@ -51,16 +69,16 @@ const sections: { label: string; section: SectionKey; links: { href: string; lab
     links: [
       { href: "/ai/dashboard", label: "Dashboard",  icon: LayoutDashboard },
       { href: "/ai/usage",     label: "Usage",      icon: BarChart3 },
-      { href: "/ai/access",    label: "AI Access",  icon: Bot, matchPrefix: true },
+      { href: "/ai/access",    label: "AI Access",  icon: ShieldCheck, matchPrefix: true, superAdminOnly: true },
     ],
   },
   {
     label: "Warranty",
     section: "warranty",
     links: [
-      { href: "/warranty",          label: "Claims",         icon: Wrench, matchPrefix: true },
+      { href: "/warranty",          label: "Claims",          icon: Wrench, matchPrefix: true },
+      { href: "/warranty/settings", label: "Email Settings",  icon: Mail },
       { href: "/warranty/access",   label: "Warranty Access", icon: ShieldCheck, superAdminOnly: true },
-      { href: "/warranty/settings", label: "Email Settings", icon: Mail },
     ],
   },
   {
@@ -76,10 +94,36 @@ const sections: { label: string; section: SectionKey; links: { href: string; lab
     label: "Automation",
     section: "automation",
     links: [
-      { href: "/automation", label: "Warehouse & Products", icon: Warehouse, matchPrefix: true },
+      { href: "/automation",        label: "Warehouse & Products", icon: Warehouse, matchPrefix: true },
+      { href: "/automation/access", label: "Automation Access",    icon: ShieldCheck, superAdminOnly: true },
+    ],
+  },
+  {
+    label: "Builder",
+    section: "builder",
+    links: [
+      { href: "/builder",             label: "Section Builder", icon: Blocks },
+      { href: "/builder/radar-chart", label: "Radar Chart",     icon: Radar },
+      { href: "/builder/range-bars",  label: "Range Bars",      icon: SlidersHorizontal },
+      { href: "/builder/access",      label: "Builder Access",  icon: ShieldCheck, superAdminOnly: true },
     ],
   },
 ];
+
+// Per-section identity: a colored icon chip so each group reads at a glance and
+// stays coherent with the home-page section palette.
+const SECTION_STYLE: Record<SectionKey, { icon: React.ElementType; color: string; bg: string }> = {
+  general:    { icon: Folder,    color: "text-sky-500",     bg: "bg-sky-500/10" },
+  access:     { icon: KeyRound,  color: "text-violet-500",  bg: "bg-violet-500/10" },
+  ai:         { icon: Sparkles,  color: "text-emerald-500", bg: "bg-emerald-500/10" },
+  warranty:   { icon: Wrench,    color: "text-amber-500",   bg: "bg-amber-500/10" },
+  partners:   { icon: Handshake, color: "text-indigo-500",  bg: "bg-indigo-500/10" },
+  automation: { icon: Zap,       color: "text-rose-500",    bg: "bg-rose-500/10" },
+  builder:    { icon: Blocks,    color: "text-blue-600 dark:text-blue-500", bg: "bg-blue-600/10" },
+  system:     { icon: Cog,       color: "text-slate-500",   bg: "bg-slate-500/10" },
+};
+
+const OPEN_SECTIONS_KEY = "t4a-nav-open-sections";
 
 function UserAvatar({ user, size }: { user: NavUser; size: number }) {
   if (user.picture) {
@@ -110,13 +154,14 @@ function UserAvatar({ user, size }: { user: NavUser; size: number }) {
   );
 }
 
-function NavLink({ href, label, icon: Icon, active, open }: {
+function NavLink({ href, label, icon: Icon, active, open, indent }: {
   href: string;
   label: string;
   icon: React.ElementType;
   active: boolean;
   open: boolean;
   matchPrefix?: boolean;
+  indent?: boolean;
 }) {
   return (
     <Link
@@ -126,7 +171,7 @@ function NavLink({ href, label, icon: Icon, active, open }: {
       className={cn(
         "group relative flex items-center gap-2.5 rounded-xl py-2 text-[13px] transition-all duration-150",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        open ? "px-3" : "justify-center px-2",
+        open ? (indent ? "pl-3.5 pr-3" : "px-3") : "justify-center px-2",
         active
           ? "bg-muted text-foreground font-medium"
           : "text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -139,6 +184,20 @@ function NavLink({ href, label, icon: Icon, active, open }: {
       {open && <span className="truncate">{label}</span>}
     </Link>
   );
+}
+
+// Compute whether a link is the active one (exact / prefix match), ceding to a
+// more-specific sibling so e.g. /warranty isn't highlighted on /warranty/access.
+function isLinkActive(link: NavLinkDef, links: NavLinkDef[], pathname: string): boolean {
+  const exact = pathname === link.href;
+  const prefixHit = !!link.matchPrefix && pathname.startsWith(link.href + "/");
+  const siblingTakesIt = links.some(
+    (s) =>
+      s.href !== link.href &&
+      (pathname === s.href || pathname.startsWith(s.href + "/")) &&
+      s.href.length > link.href.length,
+  );
+  return (exact || prefixHit) && !siblingTakesIt;
 }
 
 type NavUser = { name?: string | null; email?: string | null; picture?: string | null };
@@ -157,6 +216,51 @@ export default function Nav({ user, roles = [] }: { user?: NavUser; roles?: stri
     }))
     .filter((s) => s.links.length > 0);
   const canSeeSettings = canSee(roles, "system");
+
+  // Which section contains the current route — used to auto-open it.
+  const activeSectionKey = useMemo(() => {
+    const hit = sections.find((s) =>
+      s.links.some((l) => pathname === l.href || pathname.startsWith(l.href + "/")),
+    );
+    return hit?.section ?? null;
+  }, [pathname]);
+
+  // Accordion open/closed state, persisted. A section with no explicit entry
+  // defaults to open iff it's the active section.
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(OPEN_SECTIONS_KEY);
+      if (raw) setOpenSections(JSON.parse(raw));
+    } catch {
+      /* ignore */
+    }
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      localStorage.setItem(OPEN_SECTIONS_KEY, JSON.stringify(openSections));
+    } catch {
+      /* ignore */
+    }
+  }, [openSections, hydrated]);
+
+  // Navigating into a section opens it.
+  useEffect(() => {
+    if (activeSectionKey) {
+      setOpenSections((prev) =>
+        prev[activeSectionKey] ? prev : { ...prev, [activeSectionKey]: true },
+      );
+    }
+  }, [activeSectionKey]);
+
+  const isExpanded = (key: SectionKey) => openSections[key] ?? key === activeSectionKey;
+  const toggleSection = (key: SectionKey) =>
+    setOpenSections((prev) => ({ ...prev, [key]: !(prev[key] ?? key === activeSectionKey) }));
 
   useEffect(() => {
     setMobileOpen(false);
@@ -209,37 +313,65 @@ export default function Nav({ user, roles = [] }: { user?: NavUser; roles?: stri
         </div>
 
         {/* Nav sections */}
-        <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4">
-          {visibleSections.map((section) => (
-            <div key={section.label}>
-              {isOpen && (
-                <p className="px-3 pt-1 pb-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground select-none">
-                  {section.label}
-                </p>
-              )}
-              <div className="space-y-0.5">
-                {section.links.map((link) => {
-                  const exact = pathname === link.href;
-                  const prefixHit =
-                    !!link.matchPrefix && pathname.startsWith(link.href + "/");
-                  const siblingTakesIt = section.links.some(
-                    (s) =>
-                      s.href !== link.href &&
-                      (pathname === s.href || pathname.startsWith(s.href + "/")) &&
-                      s.href.length > link.href.length,
-                  );
-                  return (
+        <div className={cn("flex-1 overflow-y-auto px-2 py-3", isOpen ? "space-y-1" : "space-y-4")}>
+          {visibleSections.map((section) => {
+            const style = SECTION_STYLE[section.section];
+            const SectionIcon = style.icon;
+
+            // Collapsed rail: no headers, just the link icons (unchanged behaviour).
+            if (!isOpen) {
+              return (
+                <div key={section.label} className="space-y-0.5">
+                  {section.links.map((link) => (
                     <NavLink
                       key={link.href}
                       {...link}
-                      active={(exact || prefixHit) && !siblingTakesIt}
-                      open={isOpen}
+                      active={isLinkActive(link, section.links, pathname)}
+                      open={false}
                     />
-                  );
-                })}
+                  ))}
+                </div>
+              );
+            }
+
+            // Expanded: collapsible accordion group with a colored section icon.
+            const expanded = isExpanded(section.section);
+            return (
+              <div key={section.label}>
+                <button
+                  type="button"
+                  onClick={() => toggleSection(section.section)}
+                  aria-expanded={expanded}
+                  className="flex items-center gap-2.5 w-full rounded-xl px-3 py-2 text-[13px] font-medium text-foreground hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span className={cn("w-[22px] h-[22px] rounded-md flex items-center justify-center shrink-0", style.bg)}>
+                    <SectionIcon className={cn("w-3.5 h-3.5", style.color)} />
+                  </span>
+                  <span className="flex-1 text-left truncate">{section.label}</span>
+                  <ChevronDown
+                    className={cn(
+                      "w-4 h-4 text-muted-foreground/60 transition-transform duration-150 shrink-0",
+                      expanded ? "" : "-rotate-90",
+                    )}
+                    aria-hidden
+                  />
+                </button>
+                {expanded && (
+                  <div className="mt-0.5 mb-1 ml-[18px] pl-2 border-l border-border/60 space-y-0.5">
+                    {section.links.map((link) => (
+                      <NavLink
+                        key={link.href}
+                        {...link}
+                        active={isLinkActive(link, section.links, pathname)}
+                        open
+                        indent
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Theme + Settings + user */}

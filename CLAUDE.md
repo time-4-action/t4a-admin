@@ -270,6 +270,43 @@ MK_API_BASE=https://<mk-automation host>
 MK_API_TOKEN=<must match the service's API_KEY>
 ```
 
+### Builder module (`app/builder/`)
+
+A **fully client-side** tool that generates copyable HTML snippets for the
+marketing website's "sections". It is a polished admin-portal port of the
+**t4a-main-website-sections** repo (used only as the concept reference) — it
+calls **no backend** and stores nothing. Each snippet is scriptless: only markup
++ `data-*` config, rendered on the live site by one shared script
+(`patrik-components.js`). Gated by a new `builder` section
+(`SECTION_ROLES.builder = ["admin", "builder-admin"]`).
+
+| Page | Path | Notes |
+|---|---|---|
+| Section Builder hub | `/builder` | Landing page: lists the available builders + a "how it works" primer and a renderer download. |
+| Radar Chart builder | `/builder/radar-chart` | Performance octagon — single dataset or a comparison dropdown; axes, values, and optional colours. |
+| Range Bars builder | `/builder/range-bars` | Feel / rider-goal bars — two-pole or labelled-scale mode, optional marker + band colour. Add any number of bars. |
+| Builder Access | `/builder/access` | Per-user toggle of the `builder-admin` role. Reuses `<AccessManager>` (`fuchsia` accent); super-admin only (mapped to the `system` section in `ROUTE_RULES`, like the other `*/access` pages). |
+
+Each builder holds its own state, generates the markup in a `useMemo`, and renders
+through the shared `BuilderShell` in `app/builder/builder-ui.tsx` (which also holds
+the controls kit, the syntax-highlighted copyable code panel, and the live
+preview). Code generation is a faithful port of the reference builders' logic.
+
+**The live preview uses the real renderer, not a re-implementation.** The
+website's `patrik-components.js` is bundled verbatim at `public/patrik-components.js`;
+`lib/use-patrik-components.ts` loads it once and re-runs it over the preview
+subtree, so the preview is byte-identical to production output. The same file is
+offered as a download from the builder pages.
+
+The `<script src="…">` line written into every **generated snippet** is
+configurable via `BUILDER_SCRIPT_URL` (env `NEXT_PUBLIC_BUILDER_SCRIPT_URL`,
+default the bare relative path `patrik-components.js`) — it should point at
+wherever the site hosts the renderer. Role name is configurable via
+`NEXT_PUBLIC_BUILDER_ADMIN_ROLE_NAME` (default `"builder-admin"`). Both live in
+`lib/builder-role.ts`. To add a new section builder: bundle its renderer logic
+into `patrik-components.js`, then add a `/builder/<name>` page that drives
+`BuilderShell` (see the two existing builders as templates).
+
 ### API Routes (`app/api/admin/`)
 
 | Route | Methods | Notes |
@@ -309,6 +346,9 @@ NEXT_PUBLIC_DEV_ROLE_NAME    # Name of the dev role to hide (default: "dev")
 NEXT_PUBLIC_WARRANTY_ADMIN_ROLE_NAME  # Role whose members are warranty assignees (default: "warranty-admin")
 NEXT_PUBLIC_PARTNERS_ADMIN_ROLE_NAME  # Role that grants the Partners section (default: "partners-admin")
 NEXT_PUBLIC_PARTNER_ROLE_NAME         # Auth0 role that identifies a partner (default: "export")
+NEXT_PUBLIC_AUTOMATION_ADMIN_ROLE_NAME # Role that grants the Automation section (default: "automation-admin")
+NEXT_PUBLIC_BUILDER_ADMIN_ROLE_NAME  # Role that grants the Builder section (default: "builder-admin")
+NEXT_PUBLIC_BUILDER_SCRIPT_URL       # <script src> written into generated snippets (default: "patrik-components.js")
 AUTH0_BASE_URL               # Production base URL (set by docker-compose)
 ```
 

@@ -176,6 +176,58 @@
   .skeleton { animation: none; }
 }
 
+/* Sleek range slider used by the Section Builder. The blue fill up to the
+   thumb is set inline (background gradient) per-value; this styles the track
+   height and the thumb for both WebKit and Firefox. */
+.builder-range {
+  --br-accent: #2563eb;
+  --br-track: color-mix(in oklab, var(--muted-foreground) 20%, transparent);
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--br-track);
+  outline: none;
+}
+.dark .builder-range {
+  --br-accent: #3b82f6;
+}
+.builder-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--br-accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.builder-range::-webkit-slider-thumb:hover {
+  transform: scale(1.14);
+}
+.builder-range:active::-webkit-slider-thumb {
+  box-shadow: 0 0 0 5px color-mix(in oklab, var(--br-accent) 22%, transparent);
+}
+.builder-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 3px solid var(--br-accent);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+.builder-range::-moz-range-thumb:hover {
+  transform: scale(1.14);
+}
+.builder-range::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: transparent;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

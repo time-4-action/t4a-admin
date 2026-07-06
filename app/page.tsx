@@ -8,8 +8,7 @@ import {
   LayoutDashboard,
   BarChart3,
   Settings,
-  ArrowUpRight,
-  Bot,
+  ChevronRight,
   Wrench,
   Mail,
   Folder,
@@ -17,8 +16,12 @@ import {
   KeyRound,
   Cog,
   Handshake,
-  Warehouse,
   Boxes,
+  RefreshCw,
+  Zap,
+  Blocks,
+  Radar,
+  SlidersHorizontal,
 } from "lucide-react";
 
 const sections: {
@@ -59,7 +62,6 @@ const sections: {
     cards: [
       { href: "/ai/dashboard", icon: LayoutDashboard, title: "AI Dashboard", desc: "Usage overview and KPIs" },
       { href: "/ai/usage",     icon: BarChart3,       title: "AI Usage",     desc: "Detailed logs and costs" },
-      { href: "/ai/access",    icon: Bot,             title: "AI Access",    desc: "Manage AI access for users" },
     ],
   },
   {
@@ -80,27 +82,39 @@ const sections: {
     color: "text-indigo-500",
     bg: "bg-indigo-500/10",
     cards: [
-      { href: "/partners", icon: Handshake, title: "Partners", desc: "Accounts, activity and insights" },
+      { href: "/partners",      icon: Handshake,  title: "Partners",       desc: "Accounts, activity and insights" },
+      { href: "/partners/sync", icon: RefreshCw,  title: "Catalogue Sync", desc: "Shopify catalogue sync status" },
     ],
   },
   {
     label: "Automation",
     section: "automation",
-    icon: Warehouse,
-    color: "text-sky-500",
-    bg: "bg-sky-500/10",
+    icon: Zap,
+    color: "text-rose-500",
+    bg: "bg-rose-500/10",
     cards: [
       { href: "/automation", icon: Boxes, title: "Warehouse & Products", desc: "Metakocka sync schedules and runs" },
+    ],
+  },
+  {
+    label: "Builder",
+    section: "builder",
+    icon: Blocks,
+    color: "text-blue-600 dark:text-blue-500",
+    bg: "bg-blue-600/10",
+    cards: [
+      { href: "/builder/radar-chart", icon: Radar,             title: "Radar Chart",     desc: "Build a performance octagon" },
+      { href: "/builder/range-bars",  icon: SlidersHorizontal, title: "Range Bars",      desc: "Build feel / rider-goal bars" },
     ],
   },
   {
     label: "System",
     section: "system",
     icon: Cog,
-    color: "text-rose-500",
-    bg: "bg-rose-500/10",
+    color: "text-slate-500",
+    bg: "bg-slate-500/10",
     cards: [
-      { href: "/settings", icon: Settings, title: "Settings", desc: "App preferences" },
+      { href: "/settings", icon: Settings, title: "Settings", desc: "App preferences and configuration" },
     ],
   },
 ];
@@ -110,54 +124,65 @@ export default async function WelcomePage() {
   const roles = rolesFromIdToken(session?.tokenSet?.idToken);
   const visibleSections = sections.filter((s) => canSee(roles, s.section));
 
-  let cardIndex = 0;
+  const firstName = (session?.user?.name || session?.user?.email || "")
+    .toString()
+    .split(/[\s@]+/)[0];
+
   return (
     <div className="flex flex-col h-full">
       {/* Hero header */}
-      <div className="shrink-0 border-b border-border">
-        <div className="max-w-3xl mx-auto px-4 md:px-8 py-5 md:py-6">
-          <h1 className="text-xl md:text-2xl font-semibold text-foreground tracking-tight leading-none reveal">
-            Welcome
+      <div className="shrink-0 border-b border-border bg-gradient-to-b from-muted/30 to-transparent">
+        <div className="max-w-5xl mx-auto px-4 md:px-8 py-6 md:py-8">
+          <h1 className="font-display text-2xl md:text-3xl font-semibold text-foreground tracking-tight leading-none reveal">
+            {firstName ? `Welcome back, ${firstName}` : "Welcome"}
           </h1>
-          <p className="text-[13px] text-muted-foreground mt-1.5 reveal" style={{ animationDelay: "40ms" }}>
-            Select a section to get started.
+          <p className="text-[13px] text-muted-foreground mt-2 reveal" style={{ animationDelay: "40ms" }}>
+            Jump into any of the tools you have access to.
           </p>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 md:px-8 py-5 md:py-6">
-        <div className="max-w-3xl mx-auto space-y-6">
-          {visibleSections.map(({ label, icon: SectionIcon, color, bg, cards }) => (
-            <section key={label}>
-              {/* Section header: colored chip + label + hairline rule */}
-              <div className="flex items-center gap-2.5 mb-2.5">
-                <span className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${bg}`}>
-                  <SectionIcon className={`w-3.5 h-3.5 ${color}`} />
+      {/* Section panels — a balanced grid so single-link sections don't leave
+          big empty rows. */}
+      <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 md:py-8">
+        <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+          {visibleSections.map(({ label, icon: SectionIcon, color, bg, cards }, si) => (
+            <section
+              key={label}
+              className="bg-surface border border-border rounded-2xl shadow-sm overflow-hidden reveal"
+              style={{ animationDelay: `${si * 50}ms` }}
+            >
+              {/* Panel header */}
+              <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border/60 bg-muted/30">
+                <span className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${bg}`}>
+                  <SectionIcon className={`w-4 h-4 ${color}`} />
                 </span>
-                <h2 className="text-[13px] font-semibold text-foreground tracking-tight">{label}</h2>
-                <div className="flex-1 h-px bg-border" />
+                <h2 className="text-[13px] font-semibold text-foreground tracking-tight flex-1">{label}</h2>
+                <span className="text-[10px] font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full tabular-nums">
+                  {cards.length}
+                </span>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
-                {cards.map(({ href, icon: Icon, title, desc }) => {
-                  const i = cardIndex++;
-                  return (
-                    <Link
-                      key={href}
-                      href={href}
-                      className="group relative bg-surface border border-border rounded-xl p-3.5 flex items-center gap-3 hover:border-foreground/30 hover:shadow-sm transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background reveal"
-                      style={{ animationDelay: `${100 + i * 30}ms` }}
-                    >
-                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 transition-colors ${bg}`}>
-                        <Icon className={`w-[18px] h-[18px] transition-colors ${color}`} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[13px] font-semibold text-foreground leading-tight truncate">{title}</p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug truncate">{desc}</p>
-                      </div>
-                      <ArrowUpRight className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-foreground group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all duration-150 shrink-0" aria-hidden />
-                    </Link>
-                  );
-                })}
+
+              {/* Links */}
+              <div className="divide-y divide-border/50">
+                {cards.map(({ href, icon: Icon, title, desc }) => (
+                  <Link
+                    key={href}
+                    href={href}
+                    className="group flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors focus-visible:outline-none focus-visible:bg-muted/40"
+                  >
+                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${bg}`}>
+                      <Icon className={`w-[18px] h-[18px] ${color}`} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] font-semibold text-foreground leading-tight truncate group-hover:underline">
+                        {title}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug truncate">{desc}</p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-foreground group-hover:translate-x-0.5 transition-all duration-150 shrink-0" aria-hidden />
+                  </Link>
+                ))}
               </div>
             </section>
           ))}

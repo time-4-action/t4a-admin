@@ -1,7 +1,7 @@
 import { getMgmtClient } from "@/lib/mgmt";
 import { isDevRole } from "@/lib/ai-role";
 import { isSuperAdmin, isPrivilegedRoleName } from "@/lib/access";
-import { getCurrentRoles } from "@/lib/current-user";
+import { getCurrentRoles, getCurrentUserId } from "@/lib/current-user";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -41,6 +41,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json(
       { error: "Only an admin can assign or remove admin-level roles." },
       { status: 403 }
+    );
+  }
+
+  // Self-lockout guard: a super-admin cannot remove the "admin" role from
+  // themselves (it would drop them out of the portal). They must keep at least
+  // their own super-admin status; another admin can revoke it instead.
+  const adminRoleIds = new Set(
+    allRoles.filter((r: any) => r.name?.toLowerCase() === "admin").map((r: any) => r.id)
+  );
+  const removingOwnAdmin =
+    safeRemove.some((rid) => adminRoleIds.has(rid)) &&
+    userId === (await getCurrentUserId());
+  if (removingOwnAdmin) {
+    return NextResponse.json(
+      { error: "You can't remove your own super-admin role." },
+      { status: 400 }
     );
   }
 

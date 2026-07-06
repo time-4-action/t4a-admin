@@ -19,6 +19,7 @@ import {
   ArrowLeft,
   AlertCircle,
   UserRound,
+  ShieldCheck,
 } from "lucide-react";
 
 interface User {
@@ -34,7 +35,7 @@ interface Role {
   name: string;
 }
 
-export type AccessAccent = "indigo" | "amber";
+export type AccessAccent = "indigo" | "amber" | "rose" | "blue";
 
 // Full literal class strings per accent (Tailwind can't see interpolated names).
 const ACCENTS: Record<
@@ -91,6 +92,42 @@ const ACCENTS: Record<
     ack: "text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800",
     btn: "bg-amber-500 hover:bg-amber-600 border-amber-500 text-white",
   },
+  rose: {
+    iconText: "text-rose-600 dark:text-rose-500",
+    chip: "bg-rose-50 border-rose-200/70 dark:bg-rose-950/40 dark:border-rose-800/50",
+    switchOn: "bg-rose-500",
+    countBadge:
+      "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300",
+    accentBar: "bg-rose-500",
+    rowGranted: "bg-rose-50/50 dark:bg-rose-950/15",
+    badge:
+      "bg-rose-50 text-rose-700 border-rose-200/70 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/60",
+    panelOn:
+      "border-rose-300 bg-rose-50 dark:bg-rose-950/40 dark:border-rose-600/60",
+    iconOn: "bg-rose-500",
+    iconOff: "bg-rose-100 dark:bg-rose-900/50",
+    titleOn: "text-rose-700 dark:text-rose-300",
+    ack: "text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-800",
+    btn: "bg-rose-500 hover:bg-rose-600 border-rose-500 text-white",
+  },
+  blue: {
+    iconText: "text-blue-600 dark:text-blue-500",
+    chip: "bg-blue-50 border-blue-200/70 dark:bg-blue-950/40 dark:border-blue-800/50",
+    switchOn: "bg-blue-500",
+    countBadge:
+      "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300",
+    accentBar: "bg-blue-500",
+    rowGranted: "bg-blue-50/50 dark:bg-blue-950/15",
+    badge:
+      "bg-blue-50 text-blue-700 border-blue-200/70 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800/60",
+    panelOn:
+      "border-blue-300 bg-blue-50 dark:bg-blue-950/40 dark:border-blue-600/60",
+    iconOn: "bg-blue-500",
+    iconOff: "bg-blue-100 dark:bg-blue-900/50",
+    titleOn: "text-blue-700 dark:text-blue-300",
+    ack: "text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800",
+    btn: "bg-blue-500 hover:bg-blue-600 border-blue-500 text-white",
+  },
 };
 
 type Tab = "all" | "granted" | "none";
@@ -125,6 +162,7 @@ export function AccessManager({
 
   const [confirmUser, setConfirmUser] = useState<User | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -147,6 +185,35 @@ export function AccessManager({
     (u: User) => u.roles.some((r) => r.toLowerCase() === roleName.toLowerCase()),
     [roleName],
   );
+
+  // Super-admins (the "admin" role) always have access via that role — they
+  // can't be toggled here, so they're surfaced as a locked "full access" badge.
+  // EXCEPTION: when this page *manages the admin role itself* (the Super Admins
+  // page), admins must remain toggleable, so the lock is bypassed there.
+  const managingAdminRole = roleName.toLowerCase() === "admin";
+  const isAdmin = useCallback(
+    (u: User) =>
+      !managingAdminRole && u.roles.some((r) => r.toLowerCase() === "admin"),
+    [managingAdminRole],
+  );
+  const hasAccess = useCallback((u: User) => isAdmin(u) || has(u), [isAdmin, has]);
+
+  // On the Super Admins page, learn who we are so we can stop someone revoking
+  // their own admin role (the server enforces this too; this just disables the
+  // toggle up front).
+  useEffect(() => {
+    if (!managingAdminRole) return;
+    let cancelled = false;
+    fetch("/api/admin/me")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setCurrentUserId(d?.id ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [managingAdminRole]);
 
   function handleToggle(user: User) {
     if (!has(user)) {
@@ -231,23 +298,23 @@ export function AccessManager({
     );
   }, [users, q]);
 
-  const grantedAll = useMemo(() => users.filter(has).length, [users, has]);
+  const grantedAll = useMemo(() => users.filter(hasAccess).length, [users, hasAccess]);
   const grantedSearched = useMemo(
-    () => searched.filter(has).length,
-    [searched, has],
+    () => searched.filter(hasAccess).length,
+    [searched, hasAccess],
   );
 
   const visible = useMemo(() => {
     const list =
       tab === "granted"
-        ? searched.filter(has)
+        ? searched.filter(hasAccess)
         : tab === "none"
-          ? searched.filter((u) => !has(u))
+          ? searched.filter((u) => !hasAccess(u))
           : searched;
     return [...list].sort((x, y) =>
       (x.name || x.email || "").localeCompare(y.name || y.email || ""),
     );
-  }, [searched, tab, has]);
+  }, [searched, tab, hasAccess]);
 
   const tabs: { key: Tab; label: string; count: number }[] = [
     { key: "all", label: "All", count: searched.length },
@@ -417,6 +484,16 @@ export function AccessManager({
                   user={user}
                   roleName={roleName}
                   granted={has(user)}
+                  lockedLabel={
+                    isAdmin(user)
+                      ? "Admin · full access"
+                      : managingAdminRole &&
+                          has(user) &&
+                          !!currentUserId &&
+                          user.id === currentUserId
+                        ? "You · can't revoke your own access"
+                        : null
+                  }
                   pending={pending.has(user.id)}
                   saved={saved.has(user.id)}
                   onToggle={() => handleToggle(user)}
@@ -644,6 +721,7 @@ function UserRow({
   user,
   roleName,
   granted,
+  lockedLabel,
   pending,
   saved,
   onToggle,
@@ -653,25 +731,29 @@ function UserRow({
   user: User;
   roleName: string;
   granted: boolean;
+  // When set, the row shows a non-toggleable badge with this text instead of a
+  // switch (e.g. an admin's implicit access, or your own row you can't revoke).
+  lockedLabel: string | null;
   pending: boolean;
   saved: boolean;
   onToggle: () => void;
   accent: (typeof ACCENTS)[AccessAccent];
   animDelay: number;
 }) {
+  const accessible = !!lockedLabel || granted;
   return (
     <div
       className={cn(
         "reveal relative flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/40",
-        granted && accent.rowGranted,
+        accessible && accent.rowGranted,
       )}
       style={{ animationDelay: `${animDelay}ms` }}
     >
-      {granted && (
+      {accessible && (
         <span
           className={cn(
             "absolute left-0 top-2.5 bottom-2.5 w-[3px] rounded-r-full",
-            accent.accentBar,
+            lockedLabel ? "bg-muted-foreground/40" : accent.accentBar,
           )}
         />
       )}
@@ -686,28 +768,41 @@ function UserRow({
           </p>
         )}
       </div>
-      {granted && (
+      {lockedLabel ? (
+        // Locked: access is implicit / self-protected — no toggle.
         <span
-          className={cn(
-            "hidden sm:inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold max-w-[160px]",
-            accent.badge,
-          )}
+          className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground"
+          title={lockedLabel}
         >
-          <Check className="w-3 h-3 shrink-0" />
-          <span className="truncate">{roleName}</span>
+          <ShieldCheck className="w-3 h-3 shrink-0" />
+          <span className="truncate">{lockedLabel}</span>
         </span>
+      ) : (
+        <>
+          {granted && (
+            <span
+              className={cn(
+                "hidden sm:inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold max-w-[160px]",
+                accent.badge,
+              )}
+            >
+              <Check className="w-3 h-3 shrink-0" />
+              <span className="truncate">{roleName}</span>
+            </span>
+          )}
+          {saved && !pending && (
+            <span className="flex items-center gap-1 text-[10px] font-medium text-accent-brand">
+              <Check className="w-3 h-3" /> Saved
+            </span>
+          )}
+          <Switch
+            on={granted}
+            pending={pending}
+            onClick={onToggle}
+            accentOn={accent.switchOn}
+          />
+        </>
       )}
-      {saved && !pending && (
-        <span className="flex items-center gap-1 text-[10px] font-medium text-accent-brand">
-          <Check className="w-3 h-3" /> Saved
-        </span>
-      )}
-      <Switch
-        on={granted}
-        pending={pending}
-        onClick={onToggle}
-        accentOn={accent.switchOn}
-      />
     </div>
   );
 }

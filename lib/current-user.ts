@@ -10,3 +10,9 @@ export async function getCurrentRoles(): Promise<string[]> {
   const session = await auth0.getSession();
   return rolesFromIdToken(session?.tokenSet?.idToken);
 }
+
+// The calling user's Auth0 id (sub), or null if unauthenticated.
+export async function getCurrentUserId(): Promise<string | null> {
+  const session = await auth0.getSession();
+  return (session?.user?.sub as string | undefined) ?? null;
+}
