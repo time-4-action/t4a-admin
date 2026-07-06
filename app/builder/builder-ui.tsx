@@ -1,11 +1,13 @@
 "use client";
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
   type ElementType,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Copy, Check, Download, ArrowLeft, Plus, X, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -106,7 +108,7 @@ function CodePanel({ code }: { code: string }) {
         </button>
       </div>
       <pre
-        className="p-4 text-[11.5px] leading-relaxed font-mono text-foreground whitespace-pre-wrap break-words max-w-full"
+        className="p-4 text-[11.5px] leading-relaxed font-mono text-foreground whitespace-pre-wrap [overflow-wrap:anywhere] [word-break:break-word] max-w-full"
         // The generated snippet is escaped inside highlight(); this is not user input.
         dangerouslySetInnerHTML={{ __html: highlight(code) }}
       />
@@ -414,21 +416,42 @@ export function ColorField({
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+
+  // The popover is rendered in a portal with fixed positioning, clamped to the
+  // viewport — so it can never be clipped by a scroll/overflow container.
+  const place = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const width = 236;
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - width - 8);
+    const top = Math.min(r.bottom + 6, window.innerHeight - 8);
+    setPos({ top, left, width });
+  }, []);
 
   useEffect(() => {
     if (!open) return;
+    place();
     const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (triggerRef.current?.contains(t) || popRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, place]);
 
   const commit = (raw: string) => {
     let h = raw.trim();
@@ -437,11 +460,10 @@ export function ColorField({
     setDraft(null);
   };
 
-  const changed = onReset != null;
-
   return (
-    <div ref={wrapRef} className="relative">
+    <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={cn(
@@ -457,7 +479,7 @@ export function ColorField({
         <span className="text-[10.5px] font-mono uppercase text-foreground/80 shrink-0">{value}</span>
       </button>
 
-      {changed && (
+      {onReset != null && (
         <button
           type="button"
           onClick={onReset}
@@ -469,54 +491,60 @@ export function ColorField({
         </button>
       )}
 
-      {open && (
-        <div className="absolute z-30 mt-1.5 left-0 right-0 rounded-xl border border-border bg-popover shadow-lg p-2.5 space-y-2.5">
-          <div className="grid grid-cols-6 gap-1.5">
-            {SWATCHES.map((c) => {
-              const active = c.toLowerCase() === value.toLowerCase();
-              return (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => onChange(c)}
-                  title={c}
-                  className={cn(
-                    "aspect-square rounded-md ring-1 ring-inset ring-black/10 dark:ring-white/15 transition-transform hover:scale-110",
-                    active && "ring-2 ring-blue-500 ring-offset-1 ring-offset-popover scale-105",
-                  )}
-                  style={{ background: c }}
+      {open && pos &&
+        createPortal(
+          <div
+            ref={popRef}
+            style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
+            className="z-50 rounded-xl border border-border bg-popover shadow-xl p-2.5 space-y-2.5"
+          >
+            <div className="grid grid-cols-6 gap-1.5">
+              {SWATCHES.map((c) => {
+                const active = c.toLowerCase() === value.toLowerCase();
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => onChange(c)}
+                    title={c}
+                    className={cn(
+                      "aspect-square rounded-md ring-1 ring-inset ring-black/10 dark:ring-white/15 transition-transform hover:scale-110",
+                      active && "ring-2 ring-blue-500 ring-offset-1 ring-offset-popover scale-105",
+                    )}
+                    style={{ background: c }}
+                  />
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-2 pt-2 border-t border-border/60">
+              <label
+                className="relative w-7 h-7 rounded-md ring-1 ring-inset ring-black/10 dark:ring-white/15 shrink-0 cursor-pointer overflow-hidden"
+                title="Custom colour"
+                style={{ background: value }}
+              >
+                <input
+                  type="color"
+                  value={value}
+                  onChange={(e) => onChange(e.target.value)}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  aria-label={`${label} custom colour`}
                 />
-              );
-            })}
-          </div>
-          <div className="flex items-center gap-2 pt-2 border-t border-border/60">
-            <label
-              className="relative w-7 h-7 rounded-md ring-1 ring-inset ring-black/10 dark:ring-white/15 shrink-0 cursor-pointer overflow-hidden"
-              title="Custom colour"
-              style={{ background: value }}
-            >
+              </label>
               <input
-                type="color"
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                aria-label={`${label} custom colour`}
+                value={(draft ?? value).toUpperCase()}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={() => commit(draft ?? value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                }}
+                spellCheck={false}
+                placeholder="#RRGGBB"
+                className="flex-1 h-7 rounded-md border border-border bg-background text-[11px] font-mono uppercase text-foreground text-center px-1 focus:outline-none focus:ring-2 focus:ring-ring focus:border-blue-400"
               />
-            </label>
-            <input
-              value={(draft ?? value).toUpperCase()}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={() => commit(draft ?? value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-              }}
-              spellCheck={false}
-              placeholder="#RRGGBB"
-              className="flex-1 h-7 rounded-md border border-border bg-background text-[11px] font-mono uppercase text-foreground text-center px-1 focus:outline-none focus:ring-2 focus:ring-ring focus:border-blue-400"
-            />
-          </div>
-        </div>
-      )}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
