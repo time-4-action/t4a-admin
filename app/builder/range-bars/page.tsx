@@ -13,10 +13,39 @@ import {
   CheckRow,
   ColorField,
   AddButton,
+  IconButton,
+  RemoveIcon,
   SubCard,
 } from "../builder-ui";
 
 const DEF_RANGE = "#b4ff64";
+
+// A dropdown that picks one of the scale's stops by its 0-based index — used
+// for the band start/end when the band snaps to stops, so the values are the
+// actual labels rather than raw numbers.
+function StopSelect({
+  value,
+  stops,
+  onChange,
+}: {
+  value: number | "";
+  stops: string[];
+  onChange: (v: number) => void;
+}) {
+  return (
+    <select
+      value={value === "" ? 0 : value}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className="h-8 w-full rounded-md border border-border bg-background text-xs px-2 text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-blue-400"
+    >
+      {stops.map((s, i) => (
+        <option key={i} value={i}>
+          {i} · {s.trim() || "(blank)"}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 type BarMode = "two" | "scale";
 type Bar = {
@@ -119,7 +148,8 @@ export default function RangeBarsBuilder() {
       <Group num={2} title="Bars">
         <div className="space-y-3">
           {bars.map((bar, bi) => {
-            const unit = bar.scaleIndex ? "stop #" : "0–100%";
+            const stops = bar.scale.split(",");
+            const setStops = (next: string[]) => updateBar(bi, { scale: next.join(",") });
             return (
               <SubCard
                 key={bi}
@@ -172,25 +202,69 @@ export default function RangeBarsBuilder() {
                   </>
                 ) : (
                   <>
-                    <Field label="Stop labels" hint="(comma-separated)">
-                      <TextField
-                        value={bar.scale}
-                        onChange={(v) => updateBar(bi, { scale: v })}
-                        placeholder="Entry,Intermediate,Advanced,Pro"
-                      />
-                    </Field>
+                    <div>
+                      <span className="text-[11px] font-medium text-muted-foreground">
+                        Stops{" "}
+                        <span className="text-muted-foreground/60 font-normal">(left → right)</span>
+                      </span>
+                      <div className="space-y-1.5 mt-1.5">
+                        {stops.map((s, si) => (
+                          <div key={si} className="flex items-center gap-1.5">
+                            <span className="w-5 h-8 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px] font-bold flex items-center justify-center shrink-0 tabular-nums">
+                              {si}
+                            </span>
+                            <TextField
+                              value={s}
+                              onChange={(v) => setStops(stops.map((x, j) => (j === si ? v : x)))}
+                              placeholder={`Stop ${si + 1}`}
+                            />
+                            {stops.length > 2 && (
+                              <IconButton
+                                onClick={() => setStops(stops.filter((_, j) => j !== si))}
+                                title="Remove stop"
+                              >
+                                <RemoveIcon />
+                              </IconButton>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-1.5">
+                        <AddButton onClick={() => setStops([...stops, `Stop ${stops.length + 1}`])}>
+                          Add stop
+                        </AddButton>
+                      </div>
+                    </div>
+
                     <CheckRow
                       checked={bar.scaleIndex}
                       onChange={(v) => updateBar(bi, { scaleIndex: v })}
                     >
-                      Min / max are stop indexes (0-based)
+                      Band snaps to stops
                     </CheckRow>
+
                     <div className="grid grid-cols-2 gap-2">
-                      <Field label="Band start" hint={`(${unit})`}>
-                        <NumberField value={bar.min} onChange={(v) => updateBar(bi, { min: v })} />
+                      <Field label="Band start" hint={bar.scaleIndex ? undefined : "(0–100%)"}>
+                        {bar.scaleIndex ? (
+                          <StopSelect
+                            value={bar.min}
+                            stops={stops}
+                            onChange={(v) => updateBar(bi, { min: v })}
+                          />
+                        ) : (
+                          <NumberField value={bar.min} onChange={(v) => updateBar(bi, { min: v })} />
+                        )}
                       </Field>
-                      <Field label="Band end" hint={`(${unit})`}>
-                        <NumberField value={bar.max} onChange={(v) => updateBar(bi, { max: v })} />
+                      <Field label="Band end" hint={bar.scaleIndex ? undefined : "(0–100%)"}>
+                        {bar.scaleIndex ? (
+                          <StopSelect
+                            value={bar.max}
+                            stops={stops}
+                            onChange={(v) => updateBar(bi, { max: v })}
+                          />
+                        ) : (
+                          <NumberField value={bar.max} onChange={(v) => updateBar(bi, { max: v })} />
+                        )}
                       </Field>
                     </div>
                   </>
