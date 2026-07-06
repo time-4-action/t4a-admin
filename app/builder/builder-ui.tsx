@@ -116,6 +116,38 @@ function CodePanel({ code }: { code: string }) {
   );
 }
 
+// Compact copyable one-liner (used on the hub to show the loader script tag).
+export function CopyableCode({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <div className="relative rounded-lg border border-border bg-muted/40">
+      <pre className="p-3 pr-11 text-[11px] font-mono text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
+        {code}
+      </pre>
+      <button
+        type="button"
+        onClick={copy}
+        className={cn(
+          "absolute top-2 right-2 inline-flex items-center justify-center w-7 h-7 rounded-md border transition-colors",
+          copied
+            ? "border-emerald-300 text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800/60"
+            : "border-border text-muted-foreground hover:text-foreground hover:bg-muted bg-background",
+        )}
+        title={copied ? "Copied" : "Copy"}
+        aria-label={copied ? "Copied" : "Copy"}
+      >
+        {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+      </button>
+    </div>
+  );
+}
+
 /* ────────────────────────────── shell ──────────────────────────────────── */
 
 export function BuilderShell({

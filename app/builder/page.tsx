@@ -10,6 +10,7 @@ import {
   ClipboardCopy,
 } from "lucide-react";
 import { BUILDER_SCRIPT_URL } from "@/lib/builder-role";
+import { CopyableCode } from "./builder-ui";
 
 const builders = [
   {
@@ -116,13 +117,12 @@ export default function BuilderHubPage() {
                 </div>
               ))}
             </div>
-            <div className="mt-4 pt-4 border-t border-border/60 text-[11px] text-muted-foreground leading-relaxed">
-              Every page that uses these components must load the renderer once, near the end of{" "}
-              <code className="text-[11px] bg-muted px-1 py-0.5 rounded">&lt;body&gt;</code>. Generated
-              snippets reference it at{" "}
-              <code className="text-[11px] bg-muted px-1 py-0.5 rounded break-all">{BUILDER_SCRIPT_URL}</code>{" "}
-              (set via <code className="text-[11px] bg-muted px-1 py-0.5 rounded">NEXT_PUBLIC_BUILDER_SCRIPT_URL</code>).
-              It auto-renders every component on the page — no inline JavaScript needed.
+            <div className="mt-4 pt-4 border-t border-border/60 space-y-2">
+              <p className="text-[11px] text-muted-foreground">
+                Load the renderer once per page, right before{" "}
+                <code className="text-[11px] bg-muted px-1 py-0.5 rounded">&lt;/body&gt;</code>:
+              </p>
+              <CopyableCode code={`<script src="${BUILDER_SCRIPT_URL}"></script>`} />
             </div>
           </div>
         </div>
