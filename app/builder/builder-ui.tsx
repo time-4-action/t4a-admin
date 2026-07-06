@@ -414,14 +414,31 @@ export function CheckRow({
   children: ReactNode;
 }) {
   return (
-    <label className="flex items-center gap-2 cursor-pointer select-none">
+    <label className="group flex items-center gap-2.5 cursor-pointer select-none">
       <input
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="w-3.5 h-3.5 accent-blue-500 cursor-pointer"
+        className="peer sr-only"
       />
-      <span className="text-[12px] text-foreground">{children}</span>
+      <span
+        className={cn(
+          "relative w-[18px] h-[18px] rounded-[6px] border flex items-center justify-center shrink-0 transition-all duration-150",
+          "peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-1 peer-focus-visible:ring-offset-background",
+          checked
+            ? "bg-blue-600 border-blue-600 shadow-sm shadow-blue-600/25"
+            : "bg-background border-border group-hover:border-blue-400 group-hover:bg-blue-500/5",
+        )}
+      >
+        <Check
+          className={cn(
+            "w-3 h-3 text-white transition-all duration-150",
+            checked ? "opacity-100 scale-100" : "opacity-0 scale-50",
+          )}
+          strokeWidth={3.5}
+        />
+      </span>
+      <span className="text-[12px] text-foreground leading-tight">{children}</span>
     </label>
   );
 }
