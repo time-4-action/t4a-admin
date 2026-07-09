@@ -1,615 +1,52 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  RefreshCw,
-  Play,
-  Loader2,
-  AlertTriangle,
-  Warehouse,
-  Boxes,
-  Clock,
-  CheckCircle2,
-  XCircle,
-  CircleDashed,
-  Pencil,
-  CalendarClock,
-  ArrowRight,
-  ChevronRight,
-} from "lucide-react";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import Link from "next/link";
+import { RefreshCw, AlertTriangle, Warehouse, Boxes, Clock, ChevronRight, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { humanizeCron } from "@/lib/cron";
 import {
-  parseRunDetails,
-  type AutomationStatus,
-  type MkRun,
-  type MkSyncState,
-  type SyncType,
-} from "@/types/automation";
+  CronEditorModal,
+  RunDetailsModal,
+  RunHistoryTable,
+  StatusPill,
+  SyncCard,
+  useAutomation,
+  mergeRuns,
+  overallTone,
+} from "./automation-shared";
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// Automation overview — both syncs at a glance plus a combined run history. Each sync also
+// has its own dedicated page (/automation/warehouse, /automation/products) linked from here
+// and the nav.
+export default function AutomationOverviewPage() {
+  const {
+    status,
+    loading,
+    error,
+    actionError,
+    starting,
+    anyStarting,
+    load,
+    runNow,
+    editing,
+    setEditing,
+    savingCron,
+    cronError,
+    startEditing,
+    saveCron,
+    openRun,
+    setOpenRun,
+  } = useAutomation();
 
-function fmtDate(value?: string | null): string {
-  if (!value) return "—";
-  const d = new Date(parseSqlDate(value));
-  if (Number.isNaN(d.getTime())) return "—";
-  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(d);
-}
-
-// The service stores SQLite timestamps ("YYYY-MM-DD HH:MM:SS", UTC). Normalise to ISO so
-// the browser parses them as UTC, not local time. ISO strings pass through untouched.
-function parseSqlDate(value: string): string {
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) {
-    return value.replace(" ", "T") + "Z";
-  }
-  return value;
-}
-
-function relativeTime(value?: string | null): string {
-  if (!value) return "Never";
-  const d = new Date(parseSqlDate(value));
-  if (Number.isNaN(d.getTime())) return "—";
-  const diff = Date.now() - d.getTime();
-  const past = diff >= 0;
-  const min = Math.round(Math.abs(diff) / 60000);
-  const fmt = (n: number, u: string) => (past ? `${n}${u} ago` : `in ${n}${u}`);
-  if (min < 1) return past ? "just now" : "now";
-  if (min < 60) return fmt(min, "m");
-  const hr = Math.round(min / 60);
-  if (hr < 24) return fmt(hr, "h");
-  const day = Math.round(hr / 24);
-  if (day < 30) return fmt(day, "d");
-  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(d);
-}
-
-function fmtDuration(ms?: number | null): string {
-  if (ms == null || !Number.isFinite(ms)) return "—";
-  if (ms < 1000) return `${ms}ms`;
-  const s = Math.round(ms / 100) / 10;
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const rem = Math.round(s % 60);
-  return `${m}m ${rem}s`;
-}
-
-type Tone = "ok" | "error" | "running" | "idle";
-const TONE: Record<Tone, { dot: string; text: string; label: string }> = {
-  ok: { dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400", label: "Healthy" },
-  error: { dot: "bg-rose-500", text: "text-rose-600 dark:text-rose-400", label: "Error" },
-  running: { dot: "bg-amber-400 animate-pulse", text: "text-amber-600 dark:text-amber-400", label: "Running" },
-  idle: { dot: "bg-muted-foreground/40", text: "text-muted-foreground", label: "Idle" },
-};
-
-function StatusPill({ tone, label }: { tone: Tone; label?: string }) {
-  const t = TONE[tone];
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] font-medium">
-      <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", t.dot)} />
-      <span className={t.text}>{label ?? t.label}</span>
-    </span>
-  );
-}
-
-function resultIcon(result?: string | null) {
-  if (result === "ok") return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />;
-  if (result === "error") return <XCircle className="w-3.5 h-3.5 text-rose-500" />;
-  if (result === "running") return <Loader2 className="w-3.5 h-3.5 text-amber-500 animate-spin" />;
-  return <CircleDashed className="w-3.5 h-3.5 text-muted-foreground" />;
-}
-
-function stateTone(s?: MkSyncState, starting?: boolean): Tone {
-  if (s?.isRunning || starting) return "running";
-  if (s?.lastRun?.status === "error") return "error";
-  if (s?.lastRun?.status === "ok") return "ok";
-  return "idle";
-}
-
-function Stat({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-3 py-1 text-[12px]">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-foreground font-medium tabular-nums text-right truncate">{value}</span>
-    </div>
-  );
-}
-
-// ── cron editor ───────────────────────────────────────────────────────────────
-
-const PRESETS: { label: string; cron: string }[] = [
-  { label: "Every 15 min", cron: "*/15 * * * *" },
-  { label: "Every 30 min", cron: "*/30 * * * *" },
-  { label: "Hourly", cron: "0 * * * *" },
-  { label: "Every 2 hours", cron: "0 */2 * * *" },
-  { label: "Every 6 hours", cron: "0 */6 * * *" },
-  { label: "Daily 03:00", cron: "0 3 * * *" },
-];
-
-function CronEditorModal({
-  open,
-  title,
-  initial,
-  saving,
-  error,
-  onClose,
-  onSave,
-}: {
-  open: boolean;
-  title: string;
-  initial: string;
-  saving: boolean;
-  error: string | null;
-  onClose: () => void;
-  onSave: (cron: string) => void;
-}) {
-  const [value, setValue] = useState(initial);
-  useEffect(() => {
-    if (open) setValue(initial);
-  }, [open, initial]);
-
-  const parts = value.trim().split(/\s+/);
-  const looksValid = parts.length === 5 && parts.every(Boolean);
-  const preview = looksValid ? humanizeCron(value) : null;
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && !saving && onClose()}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <CalendarClock className="w-4 h-4 text-muted-foreground" />
-            {title}
-          </DialogTitle>
-          <DialogDescription>Pick how often this sync should run automatically.</DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-1.5">
-            {PRESETS.map((p) => (
-              <button
-                key={p.cron}
-                type="button"
-                onClick={() => setValue(p.cron)}
-                className={cn(
-                  "text-[11px] px-2 py-1 rounded-lg border transition-colors",
-                  value.trim() === p.cron
-                    ? "bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800/50"
-                    : "bg-background border-border text-muted-foreground hover:text-foreground hover:bg-muted",
-                )}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          <div>
-            <label className="text-[11px] font-medium text-muted-foreground">Cron expression</label>
-            <Input
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder="0 * * * *"
-              className="mt-1 font-mono text-xs"
-              spellCheck={false}
-            />
-            <p className={cn("mt-1.5 text-[12px]", preview ? "text-foreground" : "text-rose-600 dark:text-rose-400")}>
-              {preview ? (
-                <>
-                  <CalendarClock className="w-3 h-3 inline mr-1 -mt-0.5 text-muted-foreground" />
-                  {preview}
-                </>
-              ) : (
-                "Enter 5 space-separated fields (minute hour day month weekday)."
-              )}
-            </p>
-          </div>
-
-          {error && (
-            <div className="rounded-lg border border-rose-300/40 bg-rose-50 dark:bg-rose-950/30 px-3 py-2 text-[12px] text-rose-700 dark:text-rose-300">
-              {error}
-            </div>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={onClose} disabled={saving}>
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            className="h-8 text-xs gap-1.5"
-            onClick={() => onSave(value.trim())}
-            disabled={saving || !looksValid}
-          >
-            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-            Save schedule
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── run details modal ─────────────────────────────────────────────────────────
-
-// changes<Name> → "Updated in <Name>", newIn<Name> → "Created in <Name>".
-function bucketLabel(key: string): string {
-  if (key.startsWith("changes")) return `Updated in ${key.slice("changes".length)}`;
-  if (key.startsWith("newIn")) return `Created in ${key.slice("newIn".length)}`;
-  return key;
-}
-
-function RunDetailsModal({ run, onClose }: { run: MkRun | null; onClose: () => void }) {
-  const details = parseRunDetails(run?.details);
-  return (
-    <Dialog open={!!run} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        {run && (
-          <>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                {resultIcon(run.status)}
-                {run.type === "warehouse" ? "Warehouse sync" : "Products sync"}
-              </DialogTitle>
-              <DialogDescription>
-                {run.trigger === "manual" ? "Started manually" : "Ran automatically on schedule"} · {fmtDate(run.started_at)}
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4 max-h-[60vh] overflow-auto">
-              {/* summary */}
-              <div className="grid grid-cols-3 gap-2 text-[12px]">
-                <div className="rounded-lg border border-border bg-background/50 px-3 py-2">
-                  <p className="text-muted-foreground text-[10px] uppercase tracking-wide">Result</p>
-                  <p className={cn("font-medium mt-0.5", run.status === "error" ? "text-rose-600 dark:text-rose-400" : run.status === "ok" ? "text-emerald-600 dark:text-emerald-400" : "text-foreground")}>
-                    {run.status === "ok" ? "Success" : run.status === "error" ? "Failed" : run.status}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-border bg-background/50 px-3 py-2">
-                  <p className="text-muted-foreground text-[10px] uppercase tracking-wide">Duration</p>
-                  <p className="font-medium mt-0.5 tabular-nums">{fmtDuration(run.duration_ms)}</p>
-                </div>
-                <div className="rounded-lg border border-border bg-background/50 px-3 py-2">
-                  <p className="text-muted-foreground text-[10px] uppercase tracking-wide">Items</p>
-                  <p className="font-medium mt-0.5 tabular-nums">{run.item_count ?? "—"}</p>
-                </div>
-              </div>
-
-              {/* A fatal error (the sync threw before completing) — shown only when there is no
-                  per-item error list to display instead. */}
-              {run.status === "error" && run.error && !(details?.type === "products" && details.errorCount > 0) && (
-                <div className="rounded-lg border border-rose-300/40 bg-rose-50 dark:bg-rose-950/30 px-3 py-2 text-[12px] text-rose-700 dark:text-rose-300 break-words">
-                  {run.error}
-                </div>
-              )}
-
-              {/* warehouse breakdown — each source written to its own CREAGLOBE warehouse */}
-              {details?.type === "warehouse" && (
-                <div className="space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Warehouses written</p>
-                  {details.warehouses.map((w, i) => (
-                    <div key={i} className="rounded-lg border border-border bg-background/50 px-3 py-2 flex items-center gap-2 text-[12px]">
-                      <span className="text-foreground font-medium">{w.source}</span>
-                      <ArrowRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                      <span className="text-muted-foreground">{w.target}</span>
-                      <span className="ml-auto tabular-nums font-medium text-foreground">{w.count ?? "—"} items</span>
-                    </div>
-                  ))}
-                  <p className="text-[11px] text-muted-foreground">
-                    Stock from each source warehouse is written into its own matching virtual warehouse in CREAGLOBE — kept separate, not merged.
-                  </p>
-                </div>
-              )}
-
-              {/* product change buckets */}
-              {details?.type === "products" && (
-                <>
-                  {details.buckets.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Changes applied</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        {details.buckets.map((b) => (
-                          <div key={b.key} className="rounded-lg border border-border bg-background/50 px-3 py-2 flex items-center justify-between text-[12px]">
-                            <span className="text-muted-foreground truncate">{bucketLabel(b.key)}</span>
-                            <span className="tabular-nums font-medium text-foreground">{b.count}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* the actual per-item errors */}
-                  {details.errorCount > 0 ? (
-                    <div className="space-y-2">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">
-                        {details.errorCount} item error{details.errorCount === 1 ? "" : "s"}
-                        {details.errors.length < details.errorCount && ` (showing first ${details.errors.length})`}
-                      </p>
-                      <div className="rounded-lg border border-border divide-y divide-border/60 overflow-hidden">
-                        {details.errors.map((e, i) => (
-                          <div key={i} className="px-3 py-2 text-[12px]">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {e.product_code && <span className="font-mono text-foreground">{e.product_code}</span>}
-                              {e.action && (
-                                <span className="text-[10px] uppercase tracking-wide text-muted-foreground border border-border rounded px-1">{e.action}</span>
-                              )}
-                              {e.system && <span className="text-[10px] text-muted-foreground">in {e.system}</span>}
-                            </div>
-                            <p className="text-rose-600 dark:text-rose-400 mt-0.5 break-words">{e.message}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    run.status === "ok" && (
-                      <p className="text-[12px] text-emerald-600 dark:text-emerald-400">All changes applied without errors.</p>
-                    )
-                  )}
-                </>
-              )}
-
-              {!details && (
-                <div className="rounded-lg border border-border bg-background/50 px-3 py-2 text-[12px] text-muted-foreground">
-                  {run.status === "error"
-                    ? "This run was recorded before per-item error capture was added, so the individual failures weren't saved. Run the sync again to see exactly which items failed and why."
-                    : "No detailed breakdown was recorded for this run."}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── sync card ─────────────────────────────────────────────────────────────────
-
-function SyncCard({
-  icon: Icon,
-  title,
-  description,
-  itemLabel,
-  state,
-  starting,
-  onRun,
-  onEdit,
-  onViewDetails,
-}: {
-  icon: React.ElementType;
-  title: string;
-  description: string;
-  itemLabel: string;
-  state?: MkSyncState;
-  starting: boolean;
-  onRun: () => void;
-  onEdit: () => void;
-  onViewDetails: (run: MkRun) => void;
-}) {
-  const tone = stateTone(state, starting);
-  const running = state?.isRunning || starting;
-  const last = state?.lastRun;
-
-  return (
-    <div className="bg-surface border border-border rounded-xl p-4 flex flex-col gap-3">
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="w-8 h-8 rounded-lg border bg-sky-500/10 border-sky-500/20 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0">
-              <Icon className="w-4 h-4" />
-            </span>
-            <h2 className="text-[13px] font-medium text-foreground truncate">{title}</h2>
-          </div>
-          <StatusPill tone={tone} />
-        </div>
-        <p className="text-[11px] leading-relaxed text-muted-foreground">{description}</p>
-      </div>
-
-      <div className="divide-y divide-border/60">
-        <div className="flex items-center justify-between gap-3 py-1 text-[12px]">
-          <span className="text-muted-foreground">Runs</span>
-          <span className="flex items-center gap-1.5 min-w-0">
-            <span className="text-foreground font-medium truncate" title={state?.schedule}>
-              {state ? humanizeCron(state.schedule) : "—"}
-            </span>
-            <button
-              type="button"
-              onClick={onEdit}
-              className="text-muted-foreground hover:text-foreground shrink-0"
-              title="Edit schedule"
-              aria-label="Edit schedule"
-            >
-              <Pencil className="w-3 h-3" />
-            </button>
-          </span>
-        </div>
-        <Stat label="Next run" value={<span title={fmtDate(state?.nextRun)}>{relativeTime(state?.nextRun)}</span>} />
-        <Stat label="Last run" value={<span title={fmtDate(last?.finished_at ?? last?.started_at)}>{relativeTime(last?.finished_at ?? last?.started_at)}</span>} />
-        <Stat label="Took" value={fmtDuration(last?.duration_ms)} />
-        <Stat
-          label="Last outcome"
-          value={
-            running ? (
-              <span className="text-amber-600 dark:text-amber-400">Running…</span>
-            ) : last?.status === "error" ? (
-              <button
-                type="button"
-                onClick={() => last && onViewDetails(last)}
-                className="text-rose-600 dark:text-rose-400 hover:underline"
-              >
-                Failed{last.error ? ` · ${last.error}` : ""}
-              </button>
-            ) : last?.status === "ok" ? (
-              `${(last.item_count ?? 0).toLocaleString()} ${itemLabel}`
-            ) : (
-              "—"
-            )
-          }
-        />
-      </div>
-
-      <div className="flex items-center gap-2 mt-auto pt-1">
-        <Button size="sm" className="h-8 text-xs gap-1.5 flex-1" onClick={onRun} disabled={running}>
-          {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-          {running ? "Running…" : "Run now"}
-        </Button>
-        {last && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs gap-1"
-            onClick={() => onViewDetails(last)}
-            title="View last run details"
-          >
-            Details
-            <ChevronRight className="w-3.5 h-3.5" />
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── page ────────────────────────────────────────────────────────────────────
-
-export default function AutomationPage() {
-  const [status, setStatus] = useState<AutomationStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [starting, setStarting] = useState<Record<SyncType, boolean>>({ warehouse: false, products: false });
-  const [editing, setEditing] = useState<SyncType | null>(null);
-  const [savingCron, setSavingCron] = useState(false);
-  const [cronError, setCronError] = useState<string | null>(null);
-  const [openRun, setOpenRun] = useState<MkRun | null>(null);
-  const mounted = useRef(true);
-
-  const load = useCallback(async () => {
-    try {
-      const r = await fetch("/api/automation/status", { cache: "no-store" });
-      const data = await r.json();
-      if (!mounted.current) return;
-      if (!r.ok || data?.reachable === false) {
-        // Keep any previously loaded status on a transient blip; just surface the error.
-        setError(data?.error ?? "Couldn't reach the automation service");
-        return;
-      }
-      setError(null);
-      setStatus(data as AutomationStatus);
-    } catch (e) {
-      if (mounted.current) setError(e instanceof Error ? e.message : "Couldn't load automation status");
-    } finally {
-      if (mounted.current) {
-        setLoading(false);
-        setStarting({ warehouse: false, products: false });
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    mounted.current = true;
-    load();
-    return () => {
-      mounted.current = false;
-    };
-  }, [load]);
-
-  const anyRunning = !!(status?.warehouse.isRunning || status?.products.isRunning);
-  const anyStarting = starting.warehouse || starting.products;
-  useEffect(() => {
-    if (!anyRunning && !anyStarting) return;
-    const id = setInterval(load, 4000);
-    return () => clearInterval(id);
-  }, [anyRunning, anyStarting, load]);
-
-  const runNow = useCallback(
-    async (type: SyncType) => {
-      setStarting((s) => ({ ...s, [type]: true }));
-      setActionError(null);
-      try {
-        const r = await fetch(`/api/automation/${type}/run`, { method: "POST" });
-        const data = await r.json();
-        if (!r.ok) {
-          setActionError(data?.error ?? "Failed to start the sync");
-          setStarting((s) => ({ ...s, [type]: false }));
-          return;
-        }
-        await load();
-      } catch (e) {
-        setActionError(e instanceof Error ? e.message : "Failed to start the sync");
-        setStarting((s) => ({ ...s, [type]: false }));
-      }
-    },
-    [load],
-  );
-
-  const saveCron = useCallback(
-    async (cron: string) => {
-      if (!editing) return;
-      setSavingCron(true);
-      setCronError(null);
-      try {
-        const r = await fetch(`/api/automation/schedules/${editing}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cron }),
-        });
-        const data = await r.json();
-        if (!r.ok) {
-          setCronError(data?.error ?? "Failed to save the schedule");
-          return;
-        }
-        setEditing(null);
-        await load();
-      } catch (e) {
-        setCronError(e instanceof Error ? e.message : "Failed to save the schedule");
-      } finally {
-        setSavingCron(false);
-      }
-    },
-    [editing, load],
-  );
-
-  const overallTone: Tone = anyRunning || anyStarting
-    ? "running"
-    : status && (status.warehouse.lastRun?.status === "error" || status.products.lastRun?.status === "error")
-      ? "error"
-      : status
-        ? "ok"
-        : "idle";
-
-  // Merge both run lists for the combined history table, newest first.
-  const allRuns: MkRun[] = status
-    ? [...status.runs.warehouse, ...status.runs.products].sort((a, b) => {
-        const ta = new Date(parseSqlDate(a.started_at ?? "")).getTime() || 0;
-        const tb = new Date(parseSqlDate(b.started_at ?? "")).getTime() || 0;
-        return tb - ta;
-      })
-    : [];
+  const tone = overallTone(status, anyStarting);
+  const allRuns = mergeRuns(status);
 
   return (
     <div className="flex flex-col h-full">
       <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="h-14 flex items-center justify-between px-4 md:px-8">
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
-            <h1 className="font-display text-lg font-medium tracking-tight text-foreground shrink-0">
-              Warehouse &amp; Products Sync
-            </h1>
-            {status && <StatusPill tone={overallTone} />}
+            <h1 className="font-display text-lg font-medium tracking-tight text-foreground shrink-0">Automation</h1>
+            {status && <StatusPill tone={tone} />}
           </div>
           <Button variant="outline" size="sm" onClick={() => load()} disabled={loading} className="h-8 text-xs gap-1.5">
             <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} />
@@ -621,9 +58,10 @@ export default function AutomationPage() {
       <div className="flex-1 min-h-0 overflow-auto p-4 md:p-8 space-y-6">
         <p className="text-[12px] text-muted-foreground max-w-3xl -mt-1">
           Bridges the two Metakocka companies (T4A and CREAGLOBE). <span className="text-foreground font-medium">Warehouse sync</span> reads
-          available stock from each source warehouse and writes it into its <em>own matching</em> virtual warehouse in CREAGLOBE — kept
-          separate, never merged. <span className="text-foreground font-medium">Products sync</span> mirrors product data between the two
-          companies. Each runs on its own schedule — edit it, open any run to see exactly what happened, or run one right now.
+          available stock from the T4A warehouse and writes it into its matching virtual warehouse in CREAGLOBE.{" "}
+          <span className="text-foreground font-medium">Products sync</span> mirrors the product catalogue one way — T4A is the source of
+          truth, CREAGLOBE is updated to match. <span className="text-foreground font-medium">Customers sync</span> does the same for
+          customers (partners), matched by tax number then name. Open a sync for its own page, edit a schedule, or run one right now.
         </p>
 
         {error && (
@@ -653,113 +91,73 @@ export default function AutomationPage() {
         ) : (
           status && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <SyncCard
-                icon={Warehouse}
-                title="Warehouse Sync"
-                description="Reads available (free) stock from the T4A and ProMode (Germany) warehouses and writes each into its own matching virtual warehouse inside the CREAGLOBE Metakocka company — the two are kept separate, not merged."
-                itemLabel="items synced"
-                state={status.warehouse}
-                starting={starting.warehouse}
-                onRun={() => runNow("warehouse")}
-                onEdit={() => { setCronError(null); setEditing("warehouse"); }}
-                onViewDetails={setOpenRun}
-              />
-              <SyncCard
-                icon={Boxes}
-                title="Products Sync"
-                description="Compares the product catalogues of the T4A and CREAGLOBE companies and mirrors changes both ways — updating existing products and creating any that are missing."
-                itemLabel="products changed"
-                state={status.products}
-                starting={starting.products}
-                onRun={() => runNow("products")}
-                onEdit={() => { setCronError(null); setEditing("products"); }}
-                onViewDetails={setOpenRun}
-              />
+              <div className="space-y-1.5">
+                <SyncCard
+                  icon={Warehouse}
+                  title="Warehouse Sync"
+                  description="Reads available (free) stock from the T4A warehouse and writes it into its matching virtual warehouse inside the CREAGLOBE Metakocka company. The ProMode / Germany source is retired."
+                  itemLabel="items synced"
+                  state={status.warehouse}
+                  starting={starting.warehouse}
+                  onRun={() => runNow("warehouse")}
+                  onEdit={() => startEditing("warehouse")}
+                  onViewDetails={setOpenRun}
+                />
+                <Link href="/automation/warehouse" className="flex items-center justify-end gap-1 text-[11px] text-muted-foreground hover:text-foreground px-1">
+                  Open warehouse page <ChevronRight className="w-3 h-3" />
+                </Link>
+              </div>
+              <div className="space-y-1.5">
+                <SyncCard
+                  icon={Boxes}
+                  title="Products Sync"
+                  description="Mirrors the product catalogue one way — T4A is the source of truth and CREAGLOBE is updated to match: differing fields are overwritten and any missing products are created. T4A is never modified."
+                  itemLabel="products changed"
+                  state={status.products}
+                  starting={starting.products}
+                  onRun={() => runNow("products")}
+                  onEdit={() => startEditing("products")}
+                  onViewDetails={setOpenRun}
+                />
+                <Link href="/automation/products" className="flex items-center justify-end gap-1 text-[11px] text-muted-foreground hover:text-foreground px-1">
+                  Open products page <ChevronRight className="w-3 h-3" />
+                </Link>
+              </div>
+              <div className="space-y-1.5">
+                <SyncCard
+                  icon={Users}
+                  title="Customers Sync"
+                  description="Mirrors customers (partners) one way — T4A is the source of truth and CREAGLOBE is updated to match. Matched by tax number then name; missing customers are created, existing ones updated."
+                  itemLabel="customers changed"
+                  state={status.customers}
+                  starting={starting.customers}
+                  onRun={() => runNow("customers")}
+                  onEdit={() => startEditing("customers")}
+                  onViewDetails={setOpenRun}
+                />
+                <Link href="/automation/customers" className="flex items-center justify-end gap-1 text-[11px] text-muted-foreground hover:text-foreground px-1">
+                  Open customers page <ChevronRight className="w-3 h-3" />
+                </Link>
+              </div>
             </div>
           )
         )}
 
-        {/* ── run history ── */}
+        {/* ── combined run history ── */}
         {status && (
           <section className="space-y-2">
             <div className="flex items-center gap-2 px-0.5">
               <Clock className="w-3.5 h-3.5 text-muted-foreground" />
               <h2 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Run history</h2>
             </div>
-            <div className="bg-surface border border-border rounded-xl overflow-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent border-b border-border">
-                    <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9 pl-5">When</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">What</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">How</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Outcome</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Took</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Items</TableHead>
-                    <TableHead className="h-9 w-[40px] pr-5" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {allRuns.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center text-[12px] text-muted-foreground py-8">
-                        No runs yet — press <span className="font-medium text-foreground">Run now</span> on a sync above.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    allRuns.map((run) => (
-                      <TableRow
-                        key={`${run.type}-${run.id}`}
-                        className="border-b border-border/60 cursor-pointer hover:bg-muted/40"
-                        onClick={() => setOpenRun(run)}
-                      >
-                        <TableCell className="pl-5 py-2.5 text-[12px] text-foreground" title={fmtDate(run.started_at)}>
-                          {fmtDate(run.started_at)}
-                        </TableCell>
-                        <TableCell className="py-2.5 text-[12px] text-foreground capitalize">{run.type}</TableCell>
-                        <TableCell className="py-2.5">
-                          <span className={cn(
-                            "text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border",
-                            run.trigger === "manual"
-                              ? "bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800/50"
-                              : "bg-muted text-muted-foreground border-border",
-                          )}>
-                            {run.trigger === "manual" ? "Manual" : "Scheduled"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="py-2.5">
-                          <span className="inline-flex items-center gap-1.5 text-[12px]">
-                            {resultIcon(run.status)}
-                            <span className={run.status === "error" ? "text-rose-600 dark:text-rose-400" : "text-foreground"}>
-                              {run.status === "ok" ? "Success" : run.status === "error" ? "Failed" : run.status === "running" ? "Running" : run.status}
-                            </span>
-                          </span>
-                          {run.status === "error" && run.error && (
-                            <span className="block text-[10px] text-rose-500/80 truncate max-w-[260px]" title={run.error}>
-                              {run.error}
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="py-2.5 text-[12px] text-muted-foreground tabular-nums">{fmtDuration(run.duration_ms)}</TableCell>
-                        <TableCell className="py-2.5 text-[12px] text-muted-foreground tabular-nums">
-                          {run.item_count ?? "—"}
-                        </TableCell>
-                        <TableCell className="pr-5 py-2.5 text-right">
-                          <ChevronRight className="w-4 h-4 text-muted-foreground/60 inline" />
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+            <RunHistoryTable runs={allRuns} onOpen={setOpenRun} showType />
           </section>
         )}
       </div>
 
       <CronEditorModal
         open={editing !== null}
-        title={editing === "warehouse" ? "Edit schedule — Warehouse sync" : "Edit schedule — Products sync"}
+        title={`Edit schedule — ${editing === "warehouse" ? "Warehouse sync" : editing === "customers" ? "Customers sync" : "Products sync"}`}
         initial={(editing && status?.[editing]?.schedule) || ""}
         saving={savingCron}
         error={cronError}

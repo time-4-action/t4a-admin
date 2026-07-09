@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import Nav from "@/components/nav";
+import AppShell from "@/components/app-shell";
 import { CurrencyProvider } from "@/lib/currency-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { auth0 } from "@/lib/auth";
@@ -42,10 +42,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       >
         <ThemeProvider>
           <CurrencyProvider>
-            <Nav user={user} roles={roles} />
-            <main className="flex-1 min-w-0 overflow-hidden bg-background pt-12 md:pt-0">
+            <AppShell user={user} roles={roles}>
               {children}
-            </main>
+            </AppShell>
           </CurrencyProvider>
         </ThemeProvider>
       </body>

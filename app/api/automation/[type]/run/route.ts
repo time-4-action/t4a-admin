@@ -9,13 +9,18 @@ type RouteParams = { params: Promise<{ type: string }> };
 const RUN_PATH: Record<string, string> = {
   warehouse: "/api/v1/warehouse/sync",
   products: "/api/v1/products/sync",
+  customers: "/api/v1/customers/sync",
 };
 
 // POST — trigger a sync now. The service responds 202 (started) or 409 (already running).
-export async function POST(_request: Request, { params }: RouteParams) {
+// `?dryRun=true` is forwarded to the service (customer sync only) to preview without writing.
+export async function POST(request: Request, { params }: RouteParams) {
   const { type } = await params;
-  const path = RUN_PATH[type];
+  let path = RUN_PATH[type];
   if (!path) return NextResponse.json({ error: "Unknown sync type" }, { status: 400 });
+
+  const dryRun = new URL(request.url).searchParams.get("dryRun");
+  if (dryRun === "true" || dryRun === "1") path += "?dryRun=true";
 
   const result = await callMkAutomation(path, { method: "POST" });
   if (!result.ok) {

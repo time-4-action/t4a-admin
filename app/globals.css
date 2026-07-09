@@ -263,3 +263,37 @@
     font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
   }
 }
+
+/* Rendered HTML notes from Metakocka documents (sanitized server-side). Gives
+   the raw MK markup sane, theme-aware typography inside the notes card. */
+.doc-notes {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--foreground);
+  word-break: break-word;
+}
+.doc-notes > :first-child { margin-top: 0; }
+.doc-notes > :last-child { margin-bottom: 0; }
+.doc-notes p { margin: 0 0 0.55em; }
+.doc-notes ul, .doc-notes ol { margin: 0.25em 0 0.6em; padding-left: 1.3em; }
+.doc-notes ul { list-style: disc; }
+.doc-notes ol { list-style: decimal; }
+.doc-notes li { margin: 0.15em 0; }
+.doc-notes a { color: #0d9488; text-decoration: underline; text-underline-offset: 2px; }
+.dark .doc-notes a { color: #2dd4bf; }
+.doc-notes strong, .doc-notes b { font-weight: 600; color: var(--foreground); }
+.doc-notes h3, .doc-notes h4, .doc-notes h5 { font-weight: 600; margin: 0.6em 0 0.3em; }
+.doc-notes blockquote {
+  margin: 0.4em 0;
+  padding-left: 0.8em;
+  border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
+}
+.doc-notes hr { margin: 0.7em 0; border: 0; border-top: 1px solid var(--border); }
+.doc-notes table { border-collapse: collapse; width: 100%; margin: 0.4em 0; }
+.doc-notes th, .doc-notes td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+}
+.doc-notes th { background: color-mix(in oklab, var(--muted-foreground) 8%, transparent); font-weight: 600; }

@@ -7,10 +7,11 @@ export const dynamic = "force-dynamic";
 
 // Combined automation status: live schedule/last-run state + recent run history per type.
 export async function GET() {
-  const [status, whRuns, prRuns] = await Promise.all([
+  const [status, whRuns, prRuns, custRuns] = await Promise.all([
     callMkAutomation("/api/v1/status"),
     callMkAutomation("/api/v1/runs?type=warehouse&limit=20"),
     callMkAutomation("/api/v1/runs?type=products&limit=20"),
+    callMkAutomation("/api/v1/runs?type=customers&limit=20"),
   ]);
 
   if (!status.ok) {
@@ -26,6 +27,7 @@ export async function GET() {
     runs: {
       warehouse: (whRuns.ok ? (whRuns.data as MkRun[]) : []) ?? [],
       products: (prRuns.ok ? (prRuns.data as MkRun[]) : []) ?? [],
+      customers: (custRuns.ok ? (custRuns.data as MkRun[]) : []) ?? [],
     },
     reachable: true,
   });

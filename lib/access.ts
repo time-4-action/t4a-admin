@@ -19,6 +19,7 @@ export const SECTION_ROLES = {
   partners: ["admin", "partners-admin"],
   automation: ["admin", "automation-admin"],
   builder: ["admin", "builder-admin"],
+  documents: ["admin", "documents-admin"],
   system: ["admin"],
 } as const;
 
@@ -86,6 +87,7 @@ export const ROUTE_RULES: { prefix: string; section: SectionKey }[] = [
   { prefix: "/partners", section: "partners" },
   { prefix: "/automation", section: "automation" },
   { prefix: "/builder", section: "builder" },
+  { prefix: "/documents", section: "documents" },
   { prefix: "/roles", section: "access" },
   { prefix: "/ai", section: "ai" },
   { prefix: "/users", section: "general" },
@@ -94,6 +96,7 @@ export const ROUTE_RULES: { prefix: string; section: SectionKey }[] = [
   { prefix: "/api/warranty", section: "warranty" },
   { prefix: "/api/partners", section: "partners" },
   { prefix: "/api/automation", section: "automation" },
+  { prefix: "/api/admin/documents", section: "documents" },
   { prefix: "/api/admin/roles", section: "access" },
   { prefix: "/api/admin/resource-servers", section: "access" },
   { prefix: "/api/admin/stats", section: "ai" },
@@ -105,4 +108,16 @@ export function sectionForPath(pathname: string): SectionKey | null {
     (r) => pathname === r.prefix || pathname.startsWith(r.prefix + "/")
   );
   return rule ? rule.section : null;
+}
+
+// The B2B customer portal. These paths are open to ANY authenticated user (they
+// are not admin-gated): a customer's identity is their email, matched to a
+// Metakocka partner inside the portal itself. Not listed in ROUTE_RULES.
+export function isPortalPath(pathname: string): boolean {
+  return (
+    pathname === "/portal" ||
+    pathname.startsWith("/portal/") ||
+    pathname === "/api/portal" ||
+    pathname.startsWith("/api/portal/")
+  );
 }

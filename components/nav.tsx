@@ -33,6 +33,8 @@ import {
   Blocks,
   Radar,
   SlidersHorizontal,
+  Boxes,
+  FileText,
 } from "lucide-react";
 
 type NavLinkDef = {
@@ -94,8 +96,11 @@ const sections: NavSection[] = [
     label: "Automation",
     section: "automation",
     links: [
-      { href: "/automation",        label: "Warehouse & Products", icon: Warehouse, matchPrefix: true },
-      { href: "/automation/access", label: "Automation Access",    icon: ShieldCheck, superAdminOnly: true },
+      { href: "/automation",           label: "Overview",          icon: LayoutDashboard },
+      { href: "/automation/warehouse", label: "Warehouse",         icon: Warehouse, matchPrefix: true },
+      { href: "/automation/products",  label: "Products",          icon: Boxes, matchPrefix: true },
+      { href: "/automation/customers", label: "Customers",         icon: Users, matchPrefix: true },
+      { href: "/automation/access",    label: "Automation Access", icon: ShieldCheck, superAdminOnly: true },
     ],
   },
   {
@@ -106,6 +111,13 @@ const sections: NavSection[] = [
       { href: "/builder/radar-chart", label: "Radar Chart",     icon: Radar },
       { href: "/builder/range-bars",  label: "Range Bars",      icon: SlidersHorizontal },
       { href: "/builder/access",      label: "Builder Access",  icon: ShieldCheck, superAdminOnly: true },
+    ],
+  },
+  {
+    label: "Documents",
+    section: "documents",
+    links: [
+      { href: "/documents", label: "Customer Docs", icon: FileText, matchPrefix: true },
     ],
   },
 ];
@@ -120,6 +132,7 @@ const SECTION_STYLE: Record<SectionKey, { icon: React.ElementType; color: string
   partners:   { icon: Handshake, color: "text-indigo-500",  bg: "bg-indigo-500/10" },
   automation: { icon: Zap,       color: "text-rose-500",    bg: "bg-rose-500/10" },
   builder:    { icon: Blocks,    color: "text-blue-600 dark:text-blue-500", bg: "bg-blue-600/10" },
+  documents:  { icon: FileText,  color: "text-teal-500",    bg: "bg-teal-500/10" },
   system:     { icon: Cog,       color: "text-slate-500",   bg: "bg-slate-500/10" },
 };
 

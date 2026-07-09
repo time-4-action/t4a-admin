@@ -18,10 +18,12 @@ import {
   Handshake,
   Boxes,
   RefreshCw,
+  Warehouse,
   Zap,
   Blocks,
   Radar,
   SlidersHorizontal,
+  FileText,
 } from "lucide-react";
 
 const sections: {
@@ -93,7 +95,9 @@ const sections: {
     color: "text-rose-500",
     bg: "bg-rose-500/10",
     cards: [
-      { href: "/automation", icon: Boxes, title: "Warehouse & Products", desc: "Metakocka sync schedules and runs" },
+      { href: "/automation",           icon: LayoutDashboard, title: "Overview",  desc: "Both syncs + combined run history" },
+      { href: "/automation/warehouse", icon: Warehouse,       title: "Warehouse", desc: "T4A stock → CREAGLOBE" },
+      { href: "/automation/products",  icon: Boxes,           title: "Products",  desc: "One-way catalogue sync T4A → CREAGLOBE" },
     ],
   },
   {
@@ -105,6 +109,16 @@ const sections: {
     cards: [
       { href: "/builder/radar-chart", icon: Radar,             title: "Radar Chart",     desc: "Build a performance octagon" },
       { href: "/builder/range-bars",  icon: SlidersHorizontal, title: "Range Bars",      desc: "Build feel / rider-goal bars" },
+    ],
+  },
+  {
+    label: "Documents",
+    section: "documents",
+    icon: FileText,
+    color: "text-teal-500",
+    bg: "bg-teal-500/10",
+    cards: [
+      { href: "/documents", icon: FileText, title: "Customer Documents", desc: "Browse any customer's offers, orders and invoices" },
     ],
   },
   {
