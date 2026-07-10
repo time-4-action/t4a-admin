@@ -39,6 +39,14 @@ export interface IPreorderSubmission extends Document {
   // Customer-initiated request to unlock a submitted preorder for further edits.
   unlockRequestNote?: string | null;
   unlockRequestedAt?: Date | null;
+  // The Metakocka sales order created from this submission (once an admin pushes it).
+  mkSalesOrder?: {
+    mkId: string;
+    countCode: string;
+    totalPrice?: string | null;
+    createdAt?: Date | null;
+    createdBy?: string | null;
+  } | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -99,6 +107,19 @@ const PreorderSubmissionSchema = new Schema<IPreorderSubmission>(
     submittedAt: { type: Date, default: null },
     unlockRequestNote: { type: String, default: null },
     unlockRequestedAt: { type: Date, default: null },
+    mkSalesOrder: {
+      type: new Schema(
+        {
+          mkId: { type: String, required: true },
+          countCode: { type: String, required: true },
+          totalPrice: { type: String, default: null },
+          createdAt: { type: Date, default: null },
+          createdBy: { type: String, default: null },
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
   },
   { timestamps: true },
 );

@@ -32,6 +32,7 @@ import {
   PreorderGridTab,
   PreorderGuidedTab,
   OrderSummaryPanel,
+  PreorderReviewModal,
 } from "@/app/preorder/preorder-shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,6 +61,7 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
   }, []);
   const [busy, setBusy] = useState<null | "save" | "submit">(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   useEffect(() => {
     fetch(`/api/admin/preorder/campaigns/${campaignId}`)
@@ -238,9 +240,8 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
                     {partner.emails?.[0] && <div className="text-[11px] text-muted-foreground truncate">{partner.emails[0]}</div>}
                   </div>
                 </div>
-                <Button className="w-full" onClick={() => submitFor("submit")} disabled={busy !== null}>
-                  {busy === "submit" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  Submit preorder
+                <Button className="w-full" onClick={() => setReviewOpen(true)} disabled={busy !== null}>
+                  <Eye className="w-4 h-4" /> Preview &amp; submit
                 </Button>
                 <Button variant="outline" className="w-full" onClick={() => submitFor("save")} disabled={busy !== null}>
                   {busy === "save" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
@@ -273,6 +274,23 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
           </aside>
         </div>
       </div>
+
+      {partner && (
+        <PreorderReviewModal
+          open={reviewOpen}
+          onClose={() => setReviewOpen(false)}
+          campaign={campaign}
+          quantities={quantities}
+          terms={terms}
+          submitting={busy === "submit"}
+          title={`Review preorder for ${partner.name}`}
+          submitLabel="Submit for customer"
+          onSubmit={async () => {
+            await submitFor("submit");
+            setReviewOpen(false);
+          }}
+        />
+      )}
 
       <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
         <DialogContent className="sm:max-w-md">

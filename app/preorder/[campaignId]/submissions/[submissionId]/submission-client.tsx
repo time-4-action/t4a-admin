@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -9,7 +10,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, Loader2, Check, CheckCheck, Mail, Phone, MapPin, Truck, MessageSquare, Lock, LockOpen, Minus, Plus, RotateCcw } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ArrowLeft, Loader2, Check, CheckCheck, Mail, Phone, MapPin, Truck, MessageSquare, Lock, LockOpen, Minus, Plus, RotateCcw, ShoppingCart, ExternalLink, Trash2, MoreVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TabBar, PreorderGridTab, OrderSummaryPanel } from "@/app/preorder/preorder-shared";
 import {
@@ -70,6 +77,14 @@ export default function SubmissionClient({
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
+  const [soDialogOpen, setSoDialogOpen] = useState(false);
+  const [creatingSO, setCreatingSO] = useState(false);
+  const [soError, setSoError] = useState<string | null>(null);
+
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const router = useRouter();
+
   useEffect(() => {
     Promise.all([
       fetch(`/api/admin/preorder/campaigns/${campaignId}`).then((r) => r.json()),
@@ -107,6 +122,35 @@ export default function SubmissionClient({
     () => (campaign ? computeConfirmedTotals(campaign, quantities, fulfil) : { qty: 0, amount: 0 }),
     [campaign, quantities, fulfil],
   );
+
+  // The SAVED confirmed lines — what a Metakocka sales order would actually contain
+  // (the server reads from the DB, not the unsaved edits).
+  const savedConfirmed = useMemo(() => {
+    let qty = 0;
+    let lines = 0;
+    for (const l of submission?.lines ?? []) {
+      if (l.lineStatus !== "confirmed") continue;
+      const c = l.confirmedQty ?? l.qty;
+      if (c > 0) {
+        qty += c;
+        lines += 1;
+      }
+    }
+    return { qty, lines };
+  }, [submission]);
+
+  // Unsaved edits (fulfilment or submission status) vs the saved submission — drives
+  // autosave, and the sales order uses saved data so we gate on it too.
+  const dirty = useMemo(() => {
+    if (submission && status !== submission.status) return true;
+    for (const l of submission?.lines ?? []) {
+      const f = fulfil[l.rowId];
+      if (!f) continue;
+      if (f.lineStatus !== (l.lineStatus ?? "pending")) return true;
+      if ((f.confirmedQty ?? null) !== (l.confirmedQty ?? null)) return true;
+    }
+    return false;
+  }, [submission, fulfil, status]);
 
   // Only tabs that actually contain ordered items — the rest are noise on review.
   const filledTabs = useMemo(
@@ -162,6 +206,24 @@ export default function SubmissionClient({
     [submission, submissionId, fulfil, status],
   );
 
+  // Autosave: persist fulfilment / status ~900ms after the last change (no manual Save
+  // button). `save` re-identifies on every edit (it closes over fulfil/status), so this
+  // effect re-arms the timer per change, debouncing to one write once edits settle.
+  useEffect(() => {
+    if (!dirty || saving) return;
+    const t = setTimeout(() => { void save(); }, 900);
+    return () => clearTimeout(t);
+  }, [dirty, saving, save]);
+
+  // Best-effort flush if the tab is closed mid-debounce with unsaved edits.
+  const dirtyRef = useRef(false);
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+  useEffect(() => {
+    const onLeave = () => { if (dirtyRef.current) void save(); };
+    window.addEventListener("beforeunload", onLeave);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, [save]);
+
   // Unlock a submitted preorder → revert to draft so the customer can edit & resubmit,
   // and reset all fulfilment back to pending (a fresh start for the amended order).
   const unlock = useCallback(async () => {
@@ -178,6 +240,42 @@ export default function SubmissionClient({
     setStatus("draft");
     await save("draft", resetLines);
   }, [save, submission]);
+
+  // Push the saved confirmed lines to Metakocka as a sales order (one-shot).
+  const createSalesOrder = useCallback(async () => {
+    setCreatingSO(true);
+    setSoError(null);
+    try {
+      const r = await fetch(`/api/admin/preorder/submissions/${submissionId}/sales-order`, {
+        method: "POST",
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error ?? "Failed to create sales order");
+      setSubmission(data.submission);
+      setSoDialogOpen(false);
+    } catch (e) {
+      setSoError(e instanceof Error ? e.message : "Failed to create sales order");
+    } finally {
+      setCreatingSO(false);
+    }
+  }, [submissionId]);
+
+  // Delete this partner's submission entirely, then return to the campaign overview.
+  const deleteSubmission = useCallback(async () => {
+    setDeleting(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/admin/preorder/submissions/${submissionId}`, { method: "DELETE" });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(data?.error ?? "Delete failed");
+      }
+      router.push(`/preorder/${campaignId}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed");
+      setDeleting(false);
+    }
+  }, [submissionId, campaignId, router]);
 
   const isLocked = status === "submitted" || status === "confirmed";
 
@@ -278,31 +376,62 @@ export default function SubmissionClient({
           </Link>
           <div className="min-w-0">
             <h1 className="text-[15px] font-semibold text-foreground truncate leading-tight">{submission.partnerName}</h1>
-            <div className="text-[11px] text-muted-foreground truncate">{campaign.title}</div>
+            <div className="text-[11px] text-muted-foreground truncate flex items-center gap-1.5">
+              <span className="truncate">{campaign.title}</span>
+              {isLocked && (
+                <span className="inline-flex items-center gap-1 shrink-0">
+                  <span className="text-muted-foreground/40">·</span>
+                  <Lock className="w-3 h-3" /> Locked to customer
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex-1" />
-          {isLocked && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground rounded-full bg-muted px-2 py-0.5">
-              <Lock className="w-3 h-3" /> Locked to customer
-            </span>
-          )}
-          {savedAt && !saving && <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1"><Check className="w-3.5 h-3.5 text-lime-600" /> Saved</span>}
-          <Button variant="outline" size="sm" onClick={confirmAll} disabled={saving} className="h-8" title="Confirm every ordered line">
-            <CheckCheck className="w-3.5 h-3.5" /> Confirm all
-          </Button>
-          <Button variant="ghost" size="sm" onClick={resetFulfilment} disabled={saving} className="h-8" title="Reset all fulfilment to match the customer's order">
-            <RotateCcw className="w-3.5 h-3.5" /> Reset
-          </Button>
-          {isLocked && (
-            <Button variant="outline" size="sm" onClick={unlock} disabled={saving} className="h-8" title="Revert to draft so the customer can edit">
-              <LockOpen className="w-3.5 h-3.5" /> Unlock
+          <span
+            className="hidden sm:inline-flex text-[11px] text-muted-foreground items-center gap-1 min-w-[68px] justify-end"
+            title="Changes save automatically"
+          >
+            {saving ? (
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</>
+            ) : dirty ? (
+              <><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Unsaved</>
+            ) : savedAt ? (
+              <><Check className="w-3.5 h-3.5 text-lime-600" /> Saved</>
+            ) : null}
+          </span>
+
+          {/* Fulfilment helpers, grouped */}
+          <div className="flex items-center rounded-lg border border-border overflow-hidden">
+            <Button variant="ghost" size="sm" onClick={confirmAll} disabled={saving} className="h-8 rounded-none border-0" title="Confirm every ordered line">
+              <CheckCheck className="w-3.5 h-3.5" /> Confirm all
             </Button>
-          )}
+            <span className="w-px self-stretch bg-border" />
+            <Button variant="ghost" size="sm" onClick={resetFulfilment} disabled={saving} className="h-8 rounded-none border-0 text-muted-foreground" title="Reset all fulfilment to match the customer's order">
+              <RotateCcw className="w-3.5 h-3.5" /> Reset
+            </Button>
+          </div>
+
           <SubmissionStatusPicker value={status} onChange={setStatus} />
-          <Button size="sm" onClick={() => save()} disabled={saving} className="h-8">
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-            Save
-          </Button>
+
+          <MoreMenu>
+            {(close) => (
+              <>
+                {isLocked && (
+                  <MenuItem
+                    icon={LockOpen}
+                    label="Unlock for customer"
+                    onClick={() => { close(); unlock(); }}
+                  />
+                )}
+                <MenuItem
+                  icon={Trash2}
+                  label="Delete submission"
+                  destructive
+                  onClick={() => { close(); setDeleteDialogOpen(true); }}
+                />
+              </>
+            )}
+          </MoreMenu>
         </div>
         <div className="px-4 md:px-6 pb-2">
           <TabBar tabs={filledTabs} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
@@ -349,6 +478,49 @@ export default function SubmissionClient({
           <aside className="lg:sticky lg:top-4 space-y-3">
             <OrderSummaryPanel campaign={campaign} quantities={quantities} currency={currency} confirmed={confirmedTotals} />
 
+            {/* Metakocka sales order */}
+            <div className="rounded-xl border border-border bg-surface p-4 space-y-2.5 text-[12px]">
+              <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Metakocka</div>
+              {submission.mkSalesOrder ? (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-lime-700 dark:text-lime-300 font-medium">
+                    <Check className="w-4 h-4 shrink-0" /> Sales order created
+                  </div>
+                  <Link
+                    href={`/documents/${encodeURIComponent(submission.partnerMkId)}/order/${encodeURIComponent(submission.mkSalesOrder.mkId)}`}
+                    className="flex w-fit items-center gap-1.5 font-mono text-foreground hover:text-lime-600"
+                  >
+                    {submission.mkSalesOrder.countCode} <ExternalLink className="w-3 h-3 shrink-0" />
+                  </Link>
+                  {submission.mkSalesOrder.createdAt && (
+                    <div className="text-[11px] text-muted-foreground">
+                      {new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(submission.mkSalesOrder.createdAt))}
+                      {submission.mkSalesOrder.createdBy ? ` · ${submission.mkSalesOrder.createdBy}` : ""}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-muted-foreground">
+                    Push the {savedConfirmed.lines} confirmed line{savedConfirmed.lines === 1 ? "" : "s"} ({savedConfirmed.qty} pcs) to Metakocka as a sales order.
+                  </p>
+                  {dirty && (
+                    <p className="text-amber-600 dark:text-amber-400">Save your changes first — the order uses saved confirmed lines.</p>
+                  )}
+                  {soError && <p className="text-destructive">{soError}</p>}
+                  <Button
+                    size="sm"
+                    className="w-full"
+                    disabled={savedConfirmed.lines === 0 || dirty || saving}
+                    onClick={() => { setSoError(null); setSoDialogOpen(true); }}
+                    title={savedConfirmed.lines === 0 ? "Confirm at least one line first" : "Create a Metakocka sales order"}
+                  >
+                    <ShoppingCart className="w-3.5 h-3.5" /> Create sales order
+                  </Button>
+                </div>
+              )}
+            </div>
+
             {/* Partner details */}
             <div className="rounded-xl border border-border bg-surface p-4 space-y-2 text-[12px]">
               <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Partner details</div>
@@ -366,7 +538,130 @@ export default function SubmissionClient({
           </aside>
         </div>
       </div>
+
+      <Dialog open={soDialogOpen} onOpenChange={(o) => !o && setSoDialogOpen(false)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShoppingCart className="w-4 h-4 text-lime-600" /> Create Metakocka sales order
+            </DialogTitle>
+          </DialogHeader>
+          <div className="text-[13px] text-muted-foreground space-y-2">
+            <p>
+              This creates a <strong className="text-foreground">real sales order in Metakocka</strong> for{" "}
+              <strong className="text-foreground">{submission.partnerName}</strong> with the{" "}
+              <strong className="text-foreground">{savedConfirmed.lines}</strong> confirmed line
+              {savedConfirmed.lines === 1 ? "" : "s"} ({savedConfirmed.qty} pcs).
+            </p>
+            <p>
+              Order title: <span className="font-medium text-foreground">{campaign.season?.trim() || campaign.title}</span>.
+            </p>
+          </div>
+          {soError && <p className="text-[12px] text-destructive">{soError}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={() => setSoDialogOpen(false)} disabled={creatingSO}>Cancel</Button>
+            <Button size="sm" onClick={createSalesOrder} disabled={creatingSO}>
+              {creatingSO ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShoppingCart className="w-3.5 h-3.5" />}
+              Create sales order
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteDialogOpen} onOpenChange={(o) => !o && setDeleteDialogOpen(false)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="w-4 h-4" /> Delete submission
+            </DialogTitle>
+          </DialogHeader>
+          <div className="text-[13px] text-muted-foreground space-y-2">
+            <p>
+              Permanently delete <strong className="text-foreground">{submission.partnerName}</strong>&rsquo;s
+              submission for <strong className="text-foreground">{campaign.title}</strong>? This can&rsquo;t be undone.
+            </p>
+            <p>The partner can then start a fresh preorder for this campaign.</p>
+            {submission.mkSalesOrder && (
+              <p className="text-amber-600 dark:text-amber-400">
+                Note: the Metakocka sales order ({submission.mkSalesOrder.countCode}) already created from it is
+                <strong> not</strong> deleted.
+              </p>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>Cancel</Button>
+            <Button variant="destructive" size="sm" onClick={deleteSubmission} disabled={deleting}>
+              {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+}
+
+// Lightweight overflow menu (no dropdown lib in the project): a toggle button + a
+// positioned panel that closes on outside-click / Escape. Keeps rare actions
+// (Unlock, Delete) out of the crowded toolbar.
+function MoreMenu({ children }: { children: (close: () => void) => ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+  return (
+    <div className="relative" ref={ref}>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={() => setOpen((o) => !o)}
+        aria-label="More actions"
+        aria-expanded={open}
+      >
+        <MoreVertical className="w-4 h-4" />
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1.5 z-30 w-max min-w-[200px] rounded-lg border border-border bg-background shadow-lg p-1">
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({
+  icon: Icon,
+  label,
+  onClick,
+  destructive,
+}: {
+  icon: React.ElementType;
+  label: string;
+  onClick: () => void;
+  destructive?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-full flex items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-[13px] text-left transition-colors",
+        destructive ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-muted",
+      )}
+    >
+      <Icon className="w-3.5 h-3.5 shrink-0" /> {label}
+    </button>
   );
 }
 

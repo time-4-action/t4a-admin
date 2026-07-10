@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   ArrowLeft,
   Plus,
@@ -28,6 +35,8 @@ import {
   Upload,
   FileSpreadsheet,
   LayoutDashboard,
+  Tag,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type {
@@ -37,6 +46,7 @@ import type {
   PreorderGroup,
   CampaignStatus,
 } from "@/types/preorder";
+import type { MkPricelist } from "@/types/documents";
 
 type RowDraft = Omit<PreorderRow, "id" | "order">;
 type GroupDraft = {
@@ -83,6 +93,9 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   const [productPickerTab, setProductPickerTab] = useState<string | null>(null);
   const [csvTab, setCsvTab] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [pricelists, setPricelists] = useState<MkPricelist[]>([]);
+  const [repricing, setRepricing] = useState(false);
+  const [repricedAt, setRepricedAt] = useState<number | null>(null);
 
   const toggleCollapse = (groupId: string) =>
     setCollapsed((prev) => {
@@ -104,7 +117,23 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
       .finally(() => setLoading(false));
   }, [campaignId]);
 
+  // Metakocka sales price lists → the RRP / partner-price selectors.
+  useEffect(() => {
+    fetch(`/api/admin/preorder/pricelists`)
+      .then((r) => r.json())
+      .then((data) => setPricelists(data.pricelists ?? []))
+      .catch(() => setPricelists([]));
+  }, []);
+
+  // Bumped on every edit — lets an in-flight autosave tell whether the sheet was
+  // touched again before it resolved (so it doesn't wrongly clear the dirty flag).
+  const editSeqRef = useRef(0);
+  // Mirror of `dirty` for the beforeunload handler (which can't read fresh state).
+  const dirtyRef = useRef(false);
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+
   const mutate = useCallback((fn: (c: PreorderCampaign) => PreorderCampaign) => {
+    editSeqRef.current += 1;
     setCampaign((prev) => (prev ? fn(prev) : prev));
     setDirty(true);
   }, []);
@@ -203,6 +232,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   const save = useCallback(
     async (statusOverride?: CampaignStatus) => {
       if (!campaign) return;
+      const seqAtSave = editSeqRef.current;
       setSaving(true);
       setError(null);
       const tabs = campaign.tabs.map((t, ti) => ({
@@ -223,14 +253,20 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
             season: campaign.season,
             currency: campaign.currency,
             deadline: campaign.deadline,
+            rrpPricelist: campaign.rrpPricelist ?? null,
+            partnerPricelist: campaign.partnerPricelist ?? null,
             ...(statusOverride ? { status: statusOverride } : {}),
             tabs,
           }),
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data?.error ?? "Save failed");
-        setCampaign(data.campaign);
-        setDirty(false);
+        // Don't replace the whole campaign from the response — that would clobber any
+        // keystrokes made while the request was in flight. Only reflect the server
+        // status (publish/unpublish). Local edits remain the source of truth.
+        setCampaign((prev) => (prev ? { ...prev, status: data.campaign.status } : data.campaign));
+        // Only mark clean if nothing was edited since this save started.
+        if (editSeqRef.current === seqAtSave) setDirty(false);
         setSavedAt(Date.now());
       } catch (e) {
         setError(e instanceof Error ? e.message : "Save failed");
@@ -240,6 +276,70 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
     },
     [campaign, campaignId],
   );
+
+  // Autosave: persist ~900ms after the last edit. `save` re-identifies on every
+  // edit (it closes over `campaign`), so this effect re-arms the timer per keystroke,
+  // debouncing to one write after typing settles.
+  useEffect(() => {
+    if (!dirty || saving) return;
+    const t = setTimeout(() => { void save(); }, 900);
+    return () => clearTimeout(t);
+  }, [dirty, saving, save]);
+
+  // Best-effort flush if the tab is closed with unsaved edits mid-debounce.
+  useEffect(() => {
+    const onLeave = () => {
+      if (dirtyRef.current) void save();
+    };
+    window.addEventListener("beforeunload", onLeave);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, [save]);
+
+  // Re-apply the selected price lists to every catalogue row already on the sheet.
+  // Manual products are left untouched. Marks the sheet dirty so it can be saved.
+  const reprice = useCallback(async () => {
+    if (!campaign) return;
+    const codes = new Set<string>();
+    for (const t of campaign.tabs)
+      for (const g of t.groups)
+        for (const r of g.rows) if (r.source === "catalogue" && r.code) codes.add(r.code);
+    if (codes.size === 0) return;
+    setRepricing(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/preorder/products/reprice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          codes: Array.from(codes),
+          rrpPricelist: campaign.rrpPricelist ?? null,
+          partnerPricelist: campaign.partnerPricelist ?? null,
+        }),
+      });
+      const data = await res.json();
+      const prices: Record<string, { rrp: number | null; partnerPrice: number | null }> =
+        data.prices ?? {};
+      mutate((c) => ({
+        ...c,
+        tabs: c.tabs.map((t) => ({
+          ...t,
+          groups: t.groups.map((g) => ({
+            ...g,
+            rows: g.rows.map((row) => {
+              if (row.source !== "catalogue") return row;
+              const p = prices[row.code];
+              return p ? { ...row, rrp: p.rrp, partnerPrice: p.partnerPrice } : row;
+            }),
+          })),
+        })),
+      }));
+      setRepricedAt(Date.now());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Re-pricing failed");
+    } finally {
+      setRepricing(false);
+    }
+  }, [campaign, mutate]);
 
   const activeTab = useMemo(
     () => campaign?.tabs.find((t) => t.id === activeTabId) ?? null,
@@ -288,21 +388,24 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
             {campaign.status}
           </span>
           <div className="flex-1" />
-          {savedAt && !dirty && !saving && (
-            <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1">
-              <Check className="w-3.5 h-3.5 text-lime-600" /> Saved
-            </span>
-          )}
+          <span
+            className="text-[11px] text-muted-foreground inline-flex items-center gap-1 min-w-[70px] justify-end"
+            title="Changes save automatically"
+          >
+            {saving ? (
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</>
+            ) : dirty ? (
+              <><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Unsaved</>
+            ) : savedAt ? (
+              <><Check className="w-3.5 h-3.5 text-lime-600" /> Saved</>
+            ) : null}
+          </span>
           <Link href={`/preorder/${campaignId}/preview`} className="hidden md:inline-flex" title="Preview as partner">
             <Button variant="ghost" size="sm" className="h-8"><Eye className="w-3.5 h-3.5" /> Preview</Button>
           </Link>
           <Link href={`/preorder/${campaignId}`} className="hidden lg:inline-flex" title="Campaign overview">
             <Button variant="ghost" size="sm" className="h-8"><LayoutDashboard className="w-3.5 h-3.5" /> Overview</Button>
           </Link>
-          <Button variant="outline" size="sm" onClick={() => save()} disabled={saving} className="h-8">
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-            Save
-          </Button>
           {campaign.status === "open" ? (
             <Button variant="outline" size="sm" onClick={() => save("draft")} disabled={saving} className="h-8"><EyeOff className="w-3.5 h-3.5" /> Unpublish</Button>
           ) : (
@@ -318,6 +421,37 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
             Deadline
             <Input type="date" value={campaign.deadline ? campaign.deadline.slice(0, 10) : ""} onChange={(e) => mutate((c) => ({ ...c, deadline: e.target.value ? new Date(e.target.value).toISOString() : null }))} className="h-7 w-40 text-xs bg-background" />
           </label>
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <Tag className="w-3.5 h-3.5 opacity-60" />
+            <PricelistSelect
+              label="RRP list"
+              value={campaign.rrpPricelist ?? null}
+              pricelists={pricelists}
+              onChange={(v) => mutate((c) => ({ ...c, rrpPricelist: v }))}
+            />
+            <PricelistSelect
+              label="Partner list"
+              value={campaign.partnerPricelist ?? null}
+              pricelists={pricelists}
+              onChange={(v) => mutate((c) => ({ ...c, partnerPricelist: v }))}
+            />
+            <Button
+              variant="ghost"
+              size="xs"
+              className="h-7 text-muted-foreground"
+              onClick={reprice}
+              disabled={repricing}
+              title="Re-apply the selected price lists to every catalogue row on the sheet"
+            >
+              {repricing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              Re-price
+            </Button>
+            {repricedAt && !repricing && (
+              <span className="text-[11px] text-lime-600 dark:text-lime-400 inline-flex items-center gap-1">
+                <Check className="w-3 h-3" /> Repriced
+              </span>
+            )}
+          </div>
         </div>
       </header>
 
@@ -461,12 +595,16 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
 
       {productPickerTab && (
         <ProductPickerDialog
+          rrpPricelist={campaign.rrpPricelist ?? null}
+          partnerPricelist={campaign.partnerPricelist ?? null}
           onClose={() => setProductPickerTab(null)}
           onAddGroup={(g) => addGroups(productPickerTab, [g])}
         />
       )}
       {csvTab && (
         <CsvImportDialog
+          rrpPricelist={campaign.rrpPricelist ?? null}
+          partnerPricelist={campaign.partnerPricelist ?? null}
           onClose={() => setCsvTab(null)}
           onAddGroups={(gs) => addGroups(csvTab, gs)}
         />
@@ -531,12 +669,55 @@ function RowEditor({
   );
 }
 
+// ── Price-list selector: pick which Metakocka list feeds a price column ──
+const PL_NONE = "__none__";
+function PricelistSelect({
+  label, value, pricelists, onChange,
+}: {
+  label: string;
+  value: string | null;
+  pricelists: MkPricelist[];
+  onChange: (v: string | null) => void;
+}) {
+  // Keep the current value selectable even if it's no longer in the MK list
+  // (e.g. a renamed/removed price list) so it isn't silently dropped.
+  const known = pricelists.some((p) => p.title === value);
+  return (
+    <Select
+      value={value ?? PL_NONE}
+      onValueChange={(v) => onChange(v === PL_NONE ? null : v)}
+    >
+      <SelectTrigger size="sm" className="h-7 w-[150px] text-xs bg-background">
+        <SelectValue placeholder={label} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={PL_NONE} className="text-xs text-muted-foreground">
+          {label}: auto
+        </SelectItem>
+        {value && !known && (
+          <SelectItem value={value} className="text-xs">
+            {value}
+          </SelectItem>
+        )}
+        {pricelists.map((p) => (
+          <SelectItem key={p.code} value={p.title} className="text-xs">
+            {p.title}
+            {p.currency ? <span className="text-muted-foreground"> · {p.currency}</span> : null}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 // ── Product picker: search catalogue, add the parent + all its variants as a group ──
 type Hit = { code: string; name: string; image?: string | null };
 
 function ProductPickerDialog({
-  onClose, onAddGroup,
+  rrpPricelist, partnerPricelist, onClose, onAddGroup,
 }: {
+  rrpPricelist: string | null;
+  partnerPricelist: string | null;
   onClose: () => void;
   onAddGroup: (g: GroupDraft) => void;
 }) {
@@ -570,7 +751,7 @@ function ProductPickerDialog({
       const r = await fetch(`/api/admin/preorder/products/resolve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: h.code }),
+        body: JSON.stringify({ code: h.code, rrpPricelist, partnerPricelist }),
       });
       const data = await r.json();
       if (r.ok && data.group) {
@@ -622,8 +803,10 @@ function ProductPickerDialog({
 
 // ── CSV / SKU import: paste codes, resolve, add grouped by parent ──
 function CsvImportDialog({
-  onClose, onAddGroups,
+  rrpPricelist, partnerPricelist, onClose, onAddGroups,
 }: {
+  rrpPricelist: string | null;
+  partnerPricelist: string | null;
   onClose: () => void;
   onAddGroups: (gs: GroupDraft[]) => void;
 }) {
@@ -660,7 +843,7 @@ function CsvImportDialog({
       const r = await fetch(`/api/admin/preorder/products/resolve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ codes }),
+        body: JSON.stringify({ codes, rrpPricelist, partnerPricelist }),
       });
       const data = await r.json();
       const groups: GroupDraft[] = data.groups ?? [];

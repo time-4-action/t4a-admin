@@ -51,6 +51,42 @@ export type MkPartner = {
   addresses?: MkAddress[];
 };
 
+// A sales price list defined in Metakocka (a "cenik"). MK has no endpoint that
+// lists price lists on their own; they are collected from products' pricelist[]
+// arrays (json/product_list with return_pricelist). `title` is the human name the
+// catalogue also syncs onto ProductPrice.name; `code` is MK's sales_pricelist_code.
+export type MkPricelist = {
+  code: string;
+  title: string;
+  currency?: string;
+};
+
+// One product's price in one Metakocka price list, read straight from MK
+// (json/product_list return_pricelist). `price` is price_def.price; `discount`
+// is the list's percentage off it; `effective` is the price after that discount —
+// the number to actually show/charge. The catalogue's flat {name,price} can't
+// carry `discount`, so tiered lists (PP GOLD, etc.) must be read from MK.
+export type MkProductPrice = {
+  listCode: string; // the price list's count_code
+  title: string; // the price list's name (matches campaign rrp/partnerPricelist)
+  price: number; // base price_def.price
+  discount?: number; // percentage off, if any
+  effective: number; // net price after discount
+  currency?: string;
+  tax?: string; // MK tax code (e.g. "EX4") from price_def.tax, when present
+  taxRate?: number; // VAT % from price_def.tax_desc (e.g. 22), when present
+  // Whether this list is priced NET (a tax was declared → add VAT for the gross
+  // price). Lists without a tax are already gross (consumer/RRP prices).
+  net: boolean;
+};
+
+// The result of creating a Metakocka sales order via put_document.
+export type MkSalesOrderResult = {
+  mkId: string;
+  countCode: string;
+  totalPrice?: string;
+};
+
 export type DocLine = {
   // A descriptive / text line (MK "Add text to document" / "Add a descriptive
   // line") rather than a real product — no product id, price or quantity. Its

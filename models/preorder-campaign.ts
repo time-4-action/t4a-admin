@@ -47,6 +47,11 @@ export interface IPreorderCampaign extends Document {
   currency: string;
   status: CampaignStatus;
   deadline?: Date | null;
+  // Metakocka price-list titles that feed the two price columns when catalogue
+  // products are added/repriced (matched against ProductPrice.name). Null → fall
+  // back to the built-in name heuristic in products/resolve.
+  rrpPricelist?: string | null;
+  partnerPricelist?: string | null;
   tabs: IPreorderTab[];
   createdBy?: string | null;
   createdAt: Date;
@@ -108,6 +113,8 @@ const PreorderCampaignSchema = new Schema<IPreorderCampaign>(
       default: "draft",
     },
     deadline: { type: Date, default: null },
+    rrpPricelist: { type: String, default: null },
+    partnerPricelist: { type: String, default: null },
     tabs: { type: [TabSchema], default: [] },
     createdBy: { type: String, default: null },
   },

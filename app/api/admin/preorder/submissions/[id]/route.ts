@@ -83,3 +83,15 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   await doc.save();
   return NextResponse.json({ submission: toSubmissionView(doc) });
 }
+
+// DELETE /api/admin/preorder/submissions/[id] — remove a partner's submission
+// entirely (admin action). Frees the (campaignId, partnerMkId) slot so the partner
+// can start over. Does not touch any Metakocka sales order already created from it.
+export async function DELETE(_req: Request, { params }: RouteParams) {
+  const { id } = await params;
+  if (!toObjectId(id)) return NextResponse.json({ error: "not found" }, { status: 404 });
+  await connectDB();
+  const doc = await PreorderSubmission.findByIdAndDelete(id).exec();
+  if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
+  return NextResponse.json({ ok: true });
+}

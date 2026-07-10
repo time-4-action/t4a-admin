@@ -22,6 +22,9 @@ import type {
   DocSummary,
   MkPartner,
   MkPartnerRef,
+  MkPricelist,
+  MkProductPrice,
+  MkSalesOrderResult,
   PaymentState,
 } from "@/types/documents";
 
@@ -505,6 +508,256 @@ function reportIdForKind(kind: DocKind): string | undefined {
 
 export function pdfSupported(kind: DocKind): boolean {
   return !!reportIdForKind(kind);
+}
+
+// ── sales price lists ─────────────────────────────────────────────────────────
+
+// MK exposes no "list price lists" endpoint. The closest source of truth is
+// json/product_list with return_pricelist: every product carries a pricelist[]
+// of the lists it participates in ({ count_code, title, currency_code,
+// sales_purchase }). Global lists (RRP, partner) sit on essentially every sales
+// product, so a bounded scan surfaces them reliably. Result is cached (lists
+// change rarely) and deduped by count_code; purchase-only lists are dropped.
+const PRICELIST_SCAN_LIMIT = 120;
+const PRICELIST_TTL_MS = 30 * 60 * 1000;
+let pricelistCache: { at: number; value: MkPricelist[] } | null = null;
+
+export async function listSalesPricelists(): Promise<MkPricelist[]> {
+  if (pricelistCache && Date.now() - pricelistCache.at < PRICELIST_TTL_MS) {
+    return pricelistCache.value;
+  }
+  const res = await callMetakocka("json/product_list", {
+    sales: "true",
+    return_pricelist: "true",
+    limit: String(PRICELIST_SCAN_LIMIT),
+  });
+  if (!res.ok) return pricelistCache?.value ?? [];
+
+  // product_list is an array (many products) or a single object (when count_code
+  // is given) — normalize to an array.
+  const raw = res.data.product_list;
+  const products = Array.isArray(raw)
+    ? (raw as Record<string, unknown>[])
+    : raw && typeof raw === "object"
+      ? [raw as Record<string, unknown>]
+      : [];
+
+  const byCode = new Map<string, MkPricelist>();
+  for (const p of products) {
+    const pl = Array.isArray(p.pricelist) ? (p.pricelist as Record<string, unknown>[]) : [];
+    for (const entry of pl) {
+      // Skip purchase-only lists; keep sales (or unspecified, which MK treats as both).
+      if (str(entry.sales_purchase) === "purchase") continue;
+      const code = str(entry.count_code);
+      if (!code || byCode.has(code)) continue;
+      byCode.set(code, {
+        code,
+        title: str(entry.title) ?? code,
+        currency: str(entry.currency_code),
+      });
+    }
+  }
+  const value = Array.from(byCode.values()).sort((a, b) => a.title.localeCompare(b.title));
+  pricelistCache = { at: Date.now(), value };
+  return value;
+}
+
+// ── per-product prices (read straight from MK) ─────────────────────────────────
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+// Metakocka rejects a bare ISO date (yyyy-mm-dd) for doc_date on put_document; it
+// accepts the dd.mm.yyyy form (per the API examples). Local-time "today".
+function mkDocDate(): string {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dd}.${mm}.${d.getFullYear()}`;
+}
+
+// Run an async fn over items with bounded concurrency (MK is per-product, so a
+// wide sheet would otherwise fire hundreds of parallel calls).
+async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) {
+      const idx = i++;
+      out[idx] = await fn(items[idx]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+// Parse one product's pricelist[] into sales price entries with the effective
+// (post-discount) price computed. Purchase-only lists are dropped.
+function parseProductPrices(prod: Record<string, unknown>): MkProductPrice[] {
+  const pl = Array.isArray(prod.pricelist) ? (prod.pricelist as Record<string, unknown>[]) : [];
+  const entries: MkProductPrice[] = [];
+  for (const e of pl) {
+    if (str(e.sales_purchase) === "purchase") continue;
+    const def =
+      e.price_def && typeof e.price_def === "object"
+        ? (e.price_def as Record<string, unknown>)
+        : {};
+    const base = num(def.price);
+    if (base === undefined) continue;
+    const discount = num(def.discount);
+    const effective = discount ? round2(base * (1 - discount / 100)) : base;
+    const tax = str(def.tax);
+    entries.push({
+      listCode: str(e.count_code) ?? "",
+      title: str(e.title) ?? "",
+      price: base,
+      discount,
+      effective,
+      currency: str(e.currency_code),
+      tax,
+      taxRate: num(def.tax_desc),
+      net: !!tax,
+    });
+  }
+  return entries;
+}
+
+// Fetch the sales price lists (with effective prices) for a set of product codes,
+// straight from MK. One json/product_list call per code (fast — ~8ms each), bounded
+// concurrency. Codes that don't resolve are simply absent from the result.
+const MK_PRICE_CONCURRENCY = 10;
+export async function getMkProductPrices(
+  codes: string[],
+): Promise<Record<string, MkProductPrice[]>> {
+  const unique = Array.from(new Set(codes.map((c) => c.trim()).filter(Boolean)));
+  const out: Record<string, MkProductPrice[]> = {};
+  await mapLimit(unique, MK_PRICE_CONCURRENCY, async (code) => {
+    const res = await callMetakocka("json/product_list", {
+      code,
+      return_pricelist: "true",
+    });
+    if (!res.ok) return;
+    const raw = res.data.product_list;
+    const products = Array.isArray(raw)
+      ? (raw as Record<string, unknown>[])
+      : raw && typeof raw === "object"
+        ? [raw as Record<string, unknown>]
+        : [];
+    const prod = products.find((p) => str(p.code) === code) ?? products[0];
+    if (prod) out[code] = parseProductPrices(prod);
+  });
+  return out;
+}
+
+// Pick the effective (net, post-discount) price for a price-list title from a
+// product's price entries. Returns null when the title isn't priced for this product.
+export function pickMkListPrice(
+  entries: MkProductPrice[] | undefined,
+  title: string | null | undefined,
+): number | null {
+  if (!entries || !title) return null;
+  const want = title.trim().toLowerCase();
+  const hit = entries.find((e) => e.title.trim().toLowerCase() === want);
+  return hit ? hit.effective : null;
+}
+
+// The product's VAT rate (%), taken from whichever of its price lists declares a tax;
+// falls back to MK_DEFAULT_VAT_RATE / 22 (SI standard). Tier lists (PP GOLD, etc.)
+// carry no tax of their own, so we read it from a sibling list on the same product.
+export function productVatRate(entries: MkProductPrice[] | undefined): number {
+  const fromList = entries?.find((e) => e.taxRate !== undefined)?.taxRate;
+  return fromList ?? (Number(process.env.MK_DEFAULT_VAT_RATE) || 22);
+}
+
+// Pick a price-list title's GROSS price (discount + VAT included) — the "real" price
+// to display and to send as price_with_tax. `untaxedIsNet` decides how to treat a
+// list that declares no tax: partner/tier lists are net (add VAT); RRP lists are
+// already gross (consumer prices) so use as-is.
+export function pickMkListGrossPrice(
+  entries: MkProductPrice[] | undefined,
+  title: string | null | undefined,
+  opts: { untaxedIsNet: boolean },
+): number | null {
+  if (!entries || !title) return null;
+  const want = title.trim().toLowerCase();
+  const hit = entries.find((e) => e.title.trim().toLowerCase() === want);
+  if (!hit) return null;
+  const rate = hit.taxRate ?? productVatRate(entries);
+  if (hit.net) return round2(hit.effective * (1 + rate / 100));
+  return opts.untaxedIsNet ? round2(hit.effective * (1 + productVatRate(entries) / 100)) : hit.effective;
+}
+
+// MK's put_document requires an explicit `tax` code per line (it doesn't fall back
+// to the product master for API-created lines). Take it from whichever of the
+// product's price lists carries one; else a configurable default (SI standard 22%
+// slot is "EX4" on this account).
+export function productTaxCode(entries: MkProductPrice[] | undefined): string {
+  const fromList = entries?.find((e) => e.tax)?.tax;
+  return fromList || process.env.MK_DEFAULT_TAX_CODE || "EX4";
+}
+
+// ── sales order creation ───────────────────────────────────────────────────────
+
+export type SalesOrderInput = {
+  partner: MkPartner;
+  title: string; // becomes the MK sales order title (the campaign season)
+  currencyCode: string;
+  notes?: string;
+  // Each line references an existing product by code with an EXPLICIT GROSS unit price
+  // (priceWithTax = discount + VAT included, retrieved from the partner price list and
+  // locked at order time — we don't put a price list on the document) and a tax code
+  // (put_document requires tax per line; MK backs out the net/VAT from the gross).
+  lines: { code: string; amount: number; priceWithTax: number; tax: string }[];
+};
+
+// Create a Metakocka sales order via put_document. Outward-facing + hard to
+// reverse — callers gate it behind an explicit admin action.
+export async function createSalesOrder(
+  input: SalesOrderInput,
+): Promise<{ ok: true; order: MkSalesOrderResult } | { ok: false; error: string; status: number }> {
+  const { partner, title, currencyCode, notes, lines } = input;
+  if (lines.length === 0) return { ok: false, error: "No lines to order", status: 400 };
+
+  const addr = partner.address ?? {};
+  const body: Record<string, unknown> = {
+    doc_type: "sales_order",
+    doc_date: mkDocDate(),
+    title,
+    currency_code: currencyCode,
+    status_code: "created",
+    partner: {
+      business_entity: partner.businessEntity ? "true" : "false",
+      tax_id_number: partner.taxId ?? "",
+      customer: partner.name,
+      street: addr.street ?? "",
+      post_number: addr.postNumber ?? "",
+      place: addr.city ?? partner.city ?? "",
+      country: addr.country ?? "",
+    },
+    // Explicit GROSS price + tax per line (price_with_tax already includes the partner
+    // discount and VAT; tax gives MK the rate to back out net). No price list on the doc.
+    product_list: lines.map((l) => ({
+      code: l.code,
+      amount: String(l.amount),
+      price_with_tax: String(l.priceWithTax),
+      tax: l.tax,
+    })),
+  };
+  if (notes) body.notes = notes;
+
+  const res = await callMetakocka("put_document", body);
+  if (!res.ok) return { ok: false, error: res.error, status: res.status };
+  const mkId = str(res.data.mk_id);
+  if (!mkId) return { ok: false, error: "metakocka: no document id returned", status: 502 };
+  return {
+    ok: true,
+    order: {
+      mkId,
+      countCode: str(res.data.count_code) ?? mkId,
+      totalPrice: str(res.data.total_price),
+    },
+  };
 }
 
 // Render a document PDF via /report. Returns the raw PDF bytes, or an error.

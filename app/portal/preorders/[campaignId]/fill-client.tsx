@@ -24,13 +24,14 @@ import {
   Eye,
 } from "lucide-react";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
-import { rowUnitPrice, computeTotals, computeConfirmedTotals } from "@/types/preorder";
+import { computeConfirmedTotals } from "@/types/preorder";
 import { cn } from "@/lib/utils";
 import {
   TabBar,
   PreorderGridTab,
   PreorderGuidedTab,
   OrderSummaryPanel,
+  PreorderReviewModal,
 } from "@/app/preorder/preorder-shared";
 import {
   LINE_STATUS_LABELS,
@@ -434,7 +435,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
         </div>
       </div>
 
-      <ReviewModal
+      <PreorderReviewModal
         open={reviewOpen}
         onClose={() => setReviewOpen(false)}
         campaign={campaign}
@@ -478,101 +479,6 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
         </DialogContent>
       </Dialog>
     </div>
-  );
-}
-
-// Review-before-submit: shows ONLY what the customer ordered (like the locked view) so
-// they can confirm exactly what's going to be submitted.
-function ReviewModal({
-  open,
-  onClose,
-  campaign,
-  quantities,
-  terms,
-  submitting,
-  onSubmit,
-}: {
-  open: boolean;
-  onClose: () => void;
-  campaign: PreorderCampaign;
-  quantities: Record<string, number>;
-  terms: PreorderTerms;
-  submitting: boolean;
-  onSubmit: () => void;
-}) {
-  const currency = campaign.currency;
-  const ordered = campaign.tabs
-    .map((tab) => ({
-      tab,
-      groups: tab.groups
-        .map((g) => ({ g, rows: g.rows.filter((r) => (quantities[r.id] || 0) > 0) }))
-        .filter((x) => x.rows.length > 0),
-    }))
-    .filter((t) => t.groups.length > 0);
-  const totals = computeTotals(campaign, quantities);
-  const empty = totals.qty === 0;
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Eye className="w-4 h-4 text-lime-600" /> Review your preorder
-          </DialogTitle>
-        </DialogHeader>
-
-        {empty ? (
-          <p className="text-[13px] text-muted-foreground py-6 text-center">
-            You haven&rsquo;t added any quantities yet. Close this and add products first.
-          </p>
-        ) : (
-          <div className="max-h-[55vh] overflow-y-auto -mx-1 px-1 space-y-4">
-            {ordered.map(({ tab, groups }) => (
-              <div key={tab.id}>
-                <div className="text-[11px] uppercase tracking-wider font-semibold text-lime-700 dark:text-lime-400 mb-1">{tab.name}</div>
-                {groups.map(({ g, rows }) => (
-                  <div key={g.id} className="mb-2">
-                    <div className="text-[11px] font-medium text-muted-foreground">{g.name}</div>
-                    <ul className="mt-0.5 divide-y divide-border/50">
-                      {rows.map((r) => {
-                        const qty = quantities[r.id] || 0;
-                        const line = qty * rowUnitPrice(r);
-                        return (
-                          <li key={r.id} className="flex items-center gap-2 py-1 text-[12px]">
-                            <span className="flex-1 truncate text-foreground">{r.name}</span>
-                            <span className="tabular-nums text-muted-foreground">{qty} ×</span>
-                            <span className="tabular-nums text-muted-foreground w-20 text-right">{fmtMoney(rowUnitPrice(r), currency)}</span>
-                            <span className="tabular-nums font-medium w-24 text-right">{fmtMoney(line, currency)}</span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {!empty && (
-          <div className="flex items-center justify-between border-t border-border pt-3 text-[13px]">
-            <span className="text-muted-foreground">Total · {totals.qty} item{totals.qty === 1 ? "" : "s"}</span>
-            <span className="text-[16px] font-bold tabular-nums text-foreground">{fmtMoney(totals.amount, currency)}</span>
-          </div>
-        )}
-        {terms.shippingAddress && (
-          <p className="text-[11px] text-muted-foreground">Ship to: {terms.shippingAddress}</p>
-        )}
-
-        <DialogFooter>
-          <Button variant="outline" size="sm" onClick={onClose} disabled={submitting}>Keep editing</Button>
-          <Button size="sm" onClick={onSubmit} disabled={submitting || empty}>
-            {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-            Submit preorder
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 

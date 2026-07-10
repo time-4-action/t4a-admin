@@ -40,6 +40,8 @@ export function toCampaignView(doc: IPreorderCampaign): CampaignView {
     currency: doc.currency,
     status: doc.status,
     deadline: iso(doc.deadline),
+    rrpPricelist: doc.rrpPricelist ?? null,
+    partnerPricelist: doc.partnerPricelist ?? null,
     tabs: doc.tabs as unknown as PreorderTab[],
     createdBy: doc.createdBy ?? null,
     createdAt: iso(doc.createdAt),
@@ -94,6 +96,15 @@ export function toSubmissionView(doc: IPreorderSubmission): SubmissionView {
     updatedAt: iso(doc.updatedAt),
     unlockRequest: doc.unlockRequestedAt
       ? { note: doc.unlockRequestNote ?? "", requestedAt: iso(doc.unlockRequestedAt) }
+      : null,
+    mkSalesOrder: doc.mkSalesOrder
+      ? {
+          mkId: doc.mkSalesOrder.mkId,
+          countCode: doc.mkSalesOrder.countCode,
+          totalPrice: doc.mkSalesOrder.totalPrice ?? null,
+          createdAt: iso(doc.mkSalesOrder.createdAt),
+          createdBy: doc.mkSalesOrder.createdBy ?? null,
+        }
       : null,
   };
 }

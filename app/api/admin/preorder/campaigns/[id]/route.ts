@@ -34,6 +34,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     currency?: string;
     status?: CampaignStatus;
     deadline?: string | null;
+    rrpPricelist?: string | null;
+    partnerPricelist?: string | null;
     tabs?: PreorderTab[];
   };
   await connectDB();
@@ -49,6 +51,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     doc.status = body.status;
   }
   if ("deadline" in body) doc.deadline = body.deadline ? new Date(body.deadline) : null;
+  if ("rrpPricelist" in body) doc.rrpPricelist = body.rrpPricelist?.trim() || null;
+  if ("partnerPricelist" in body) doc.partnerPricelist = body.partnerPricelist?.trim() || null;
   if (Array.isArray(body.tabs)) {
     // Trust the admin-authored structure; mongoose coerces/validates on save.
     doc.tabs = body.tabs as unknown as typeof doc.tabs;

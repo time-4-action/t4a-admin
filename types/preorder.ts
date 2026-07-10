@@ -74,6 +74,10 @@ export type PreorderCampaign = {
   currency: string;
   status: CampaignStatus;
   deadline?: string | null; // ISO
+  // Metakocka price-list titles feeding the RRP / partner price columns when
+  // catalogue products are added or repriced.
+  rrpPricelist?: string | null;
+  partnerPricelist?: string | null;
   tabs: PreorderTab[];
   createdBy?: string | null;
   createdAt?: string | null;
@@ -104,6 +108,15 @@ export type PreorderSubmissionTotals = {
   amount: number;
 };
 
+// A Metakocka sales order created from this submission (once pushed by an admin).
+export type SalesOrderRef = {
+  mkId: string;
+  countCode: string;
+  totalPrice?: string | null;
+  createdAt?: string | null; // ISO
+  createdBy?: string | null;
+};
+
 // One partner's response to a campaign.
 export type PreorderSubmission = {
   id: string;
@@ -120,6 +133,8 @@ export type PreorderSubmission = {
   updatedAt?: string | null;
   // A pending customer request to unlock this (submitted) preorder for edits.
   unlockRequest?: { note: string; requestedAt: string | null } | null;
+  // The Metakocka sales order created from this submission, if any.
+  mkSalesOrder?: SalesOrderRef | null;
 };
 
 // Admin overview list row (per partner response).
