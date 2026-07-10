@@ -203,6 +203,35 @@ export type ClaimNote = {
 };
 
 // ----------------------------------------------------------------------------
+// Audit log (change history)
+// ----------------------------------------------------------------------------
+// Records who changed what, when, and (optionally) why. Owned and stored by the
+// warranty service; this admin only forwards the actor + message on writes and
+// proxies the reads. Mirrors the warranty service's audit shape — keep in sync.
+
+export type AuditEntityType = "claim" | "settings";
+
+// One field that changed, with human-readable before/after values.
+export type AuditChange = {
+  field: string;
+  label: string;
+  from: string;
+  to: string;
+};
+
+export type AuditEntry = {
+  id: string;
+  entityType: AuditEntityType;
+  entityId: string;
+  actorId: string;
+  actorName: string;
+  actorEmail: string;
+  message: string;
+  changes: AuditChange[];
+  createdAt: string;
+};
+
+// ----------------------------------------------------------------------------
 // Email field catalogues (unchanged from v1)
 // ----------------------------------------------------------------------------
 

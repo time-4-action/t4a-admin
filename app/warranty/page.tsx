@@ -11,13 +11,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { WarrantyStatusBadge } from "@/components/warranty-status-badge";
 import {
   REJECTED_KEY,
@@ -31,7 +24,14 @@ import {
   type WarrantyStatus,
   type WarrantySubmission,
 } from "@/types/warranty";
-import { useWarrantyAssignees, assigneeOptions } from "./use-assignees";
+import { useWarrantyAssignees } from "./use-assignees";
+import {
+  AssigneePicker,
+  AssigneeAvatar,
+  adminPicture,
+  AssigneeFilterPicker,
+} from "./assignee-picker";
+import type { WarrantyAdmin } from "@/types/warranty";
 import {
   Search,
   ShieldCheck,
@@ -39,12 +39,12 @@ import {
   Settings,
   MessageSquare,
   Loader2,
+  ChevronsUpDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type StatusFilter = "all" | WarrantyStatus | RejectedKey;
 type AssigneeFilter = "all" | "unassigned" | Assignee;
-const ASSIGNEE_NONE = "__none__";
 
 // Per-status palette for the count strip, mirroring the status badge colours.
 // `dot` is the resting colour chip; `rail` is the active tab underline;
@@ -165,7 +165,7 @@ export default function ClaimsPage() {
   const debouncedSearch = useDebouncedValue(search, 250);
   const [status, setStatus] = useState<StatusFilter>("all");
   const [assignee, setAssignee] = useState<AssigneeFilter>("all");
-  const { names: assigneeNames } = useWarrantyAssignees();
+  const { admins, loading: assigneesLoading } = useWarrantyAssignees();
   const [countsLoading, setCountsLoading] = useState(true);
   const [counts, setCounts] = useState<Record<StatusFilter, number>>({
     all: 0,
@@ -310,23 +310,12 @@ export default function ClaimsPage() {
             onSelect={setStatus}
           />
 
-          <Select
+          <AssigneeFilterPicker
             value={assignee}
-            onValueChange={(v) => setAssignee(v as AssigneeFilter)}
-          >
-            <SelectTrigger className="h-8 text-[11px] w-[140px] shrink-0">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper" align="start" sideOffset={4}>
-              <SelectItem value="all">All assignees</SelectItem>
-              <SelectItem value="unassigned">Unassigned</SelectItem>
-              {assigneeOptions(assigneeNames, assignee === "all" || assignee === "unassigned" ? null : assignee).map((a) => (
-                <SelectItem key={a} value={a}>
-                  {a}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            onChange={(v) => setAssignee(v as AssigneeFilter)}
+            admins={admins}
+            loading={assigneesLoading}
+          />
         </div>
       </header>
 
@@ -346,7 +335,8 @@ export default function ClaimsPage() {
         <ClaimsTable
           items={filtered}
           loading={loading}
-          assigneeNames={assigneeNames}
+          admins={admins}
+          assigneesLoading={assigneesLoading}
           onAssigneeChange={(updated) =>
             setItems((prev) =>
               prev.map((p) =>
@@ -462,12 +452,14 @@ const ROW_HEIGHT_ESTIMATE = 56;
 function ClaimsTable({
   items,
   loading,
-  assigneeNames,
+  admins,
+  assigneesLoading,
   onAssigneeChange,
 }: {
   items: WarrantySubmission[];
   loading: boolean;
-  assigneeNames: string[];
+  admins: WarrantyAdmin[];
+  assigneesLoading: boolean;
   onAssigneeChange: (updated: WarrantySubmission) => void;
 }) {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -548,7 +540,8 @@ function ClaimsTable({
               <ClaimRow
                 key={item.submissionId}
                 item={item}
-                assigneeNames={assigneeNames}
+                admins={admins}
+                assigneesLoading={assigneesLoading}
                 onAssigneeChange={onAssigneeChange}
                 rowRef={rowVirtualizer.measureElement}
                 rowIndex={virtualRow.index}
@@ -576,13 +569,15 @@ function ClaimsTable({
 
 function ClaimRow({
   item,
-  assigneeNames,
+  admins,
+  assigneesLoading,
   onAssigneeChange,
   rowRef,
   rowIndex,
 }: {
   item: WarrantySubmission;
-  assigneeNames: string[];
+  admins: WarrantyAdmin[];
+  assigneesLoading: boolean;
   onAssigneeChange: (updated: WarrantySubmission) => void;
   rowRef?: (el: HTMLElement | null) => void;
   rowIndex?: number;
@@ -631,7 +626,7 @@ function ClaimRow({
         </Link>
       </TableCell>
       <TableCell>
-        <InlineAssigneePicker item={item} assigneeNames={assigneeNames} onChange={onAssigneeChange} />
+        <InlineAssigneePicker item={item} admins={admins} loading={assigneesLoading} onChange={onAssigneeChange} />
       </TableCell>
       <TableCell className="text-[12px] text-foreground whitespace-nowrap">
         {item.warrantyType ? (
@@ -668,15 +663,18 @@ function ClaimRow({
 
 function InlineAssigneePicker({
   item,
-  assigneeNames,
+  admins,
+  loading,
   onChange,
 }: {
   item: WarrantySubmission;
-  assigneeNames: string[];
+  admins: WarrantyAdmin[];
+  loading: boolean;
   onChange: (updated: WarrantySubmission) => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
+  const [open, setOpen] = useState(false);
 
   async function save(next: Assignee | null) {
     setSaving(true);
@@ -700,42 +698,47 @@ function InlineAssigneePicker({
   }
 
   return (
-    <Select
-      value={item.assignee ?? ASSIGNEE_NONE}
-      onValueChange={(v) => save(v === ASSIGNEE_NONE ? null : (v as Assignee))}
-      disabled={saving}
-    >
-      <SelectTrigger
+    <>
+      <button
+        type="button"
+        disabled={saving}
+        onClick={() => setOpen(true)}
         className={cn(
-          "h-7 w-[140px] text-[12px] gap-1.5 px-2",
-          error && "border-destructive ring-destructive/30",
+          "flex h-7 w-[150px] items-center gap-1.5 rounded-md border border-input bg-transparent px-2 text-[12px] transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60",
+          error && "border-destructive ring-1 ring-destructive/30",
         )}
       >
         {saving ? (
           <span className="flex items-center gap-1.5 text-muted-foreground">
-            <Loader2 className="w-3 h-3 animate-spin" aria-hidden />
+            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
             Saving…
           </span>
         ) : item.assignee ? (
-          <span className="flex items-center gap-1.5">
-            <span className="w-4 h-4 rounded-full bg-muted border border-border/60 flex items-center justify-center text-[9px] font-bold">
-              {item.assignee[0]}
-            </span>
-            {item.assignee}
-          </span>
+          <>
+            <AssigneeAvatar
+              name={item.assignee}
+              picture={adminPicture(admins, item.assignee)}
+              className="h-4 w-4 text-[9px]"
+            />
+            <span className="truncate">{item.assignee}</span>
+          </>
         ) : (
           <span className="text-muted-foreground italic">Unassigned</span>
         )}
-      </SelectTrigger>
-      <SelectContent position="popper" align="start" sideOffset={4}>
-        <SelectItem value={ASSIGNEE_NONE}>Unassigned</SelectItem>
-        {assigneeOptions(assigneeNames, item.assignee).map((a) => (
-          <SelectItem key={a} value={a}>
-            {a}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+        <ChevronsUpDown
+          className="ml-auto h-3 w-3 shrink-0 text-muted-foreground"
+          aria-hidden
+        />
+      </button>
+      <AssigneePicker
+        open={open}
+        onOpenChange={setOpen}
+        admins={admins}
+        loading={loading}
+        value={item.assignee}
+        onSelect={(name) => save(name)}
+      />
+    </>
   );
 }
 
