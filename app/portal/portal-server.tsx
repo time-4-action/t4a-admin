@@ -2,11 +2,13 @@ import { redirect, notFound } from "next/navigation";
 import { getSessionPartner } from "@/lib/portal";
 import { getDocument, pdfSupported } from "@/lib/metakocka";
 import { DocumentList, DocumentDetail } from "@/app/documents/documents-shared";
+import { CustomerInfoStrip } from "@/app/documents/customer-header";
 import { DOC_KIND_LABELS, type DocKind } from "@/types/documents";
 
 // Server building blocks for the customer portal so each route file is a one-liner.
 // Both resolve the partner from the session email and redirect unmatched users to
-// the no-account page.
+// the no-account page. Design mirrors the admin document pages 1:1 (compact header,
+// full-width content, same list/detail components).
 
 function slugFor(kind: DocKind): string {
   return DOC_KIND_LABELS[kind].plural.toLowerCase(); // invoices | offers | orders
@@ -18,16 +20,16 @@ export async function PortalListPage({ kind }: { kind: DocKind }) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="shrink-0 border-b border-border bg-gradient-to-b from-muted/30 to-transparent">
-        <div className="max-w-5xl mx-auto px-4 md:px-8 py-6">
-          <h1 className="font-display text-2xl font-semibold text-foreground tracking-tight leading-none">
+      <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
+        <div className="h-14 flex items-center justify-between px-4 md:px-8">
+          <h1 className="font-display text-lg font-medium tracking-tight text-foreground truncate">
             {DOC_KIND_LABELS[kind].plural}
           </h1>
-          <p className="text-[13px] text-muted-foreground mt-2">{partner.name}</p>
         </div>
-      </div>
+      </header>
       <div className="flex-1 overflow-y-auto py-6">
-        <div className="max-w-5xl mx-auto px-4 md:px-8">
+        <div className="px-4 md:px-8 space-y-4">
+          <CustomerInfoStrip customer={partner} />
           <DocumentList kind={kind} listUrl="/api/portal/documents" hrefBase={`/portal/${slugFor(kind)}`} />
         </div>
       </div>
@@ -49,7 +51,7 @@ export async function PortalDetailPage({ kind, mkId }: { kind: DocKind; mkId: st
 
   return (
     <div className="h-full">
-      <DocumentDetail detail={detail} pdfHref={pdfHref} backHref={`/portal/${slugFor(kind)}`} />
+      <DocumentDetail detail={detail} pdfHref={pdfHref} backHref={`/portal/${slugFor(kind)}`} wide />
     </div>
   );
 }
