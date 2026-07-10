@@ -35,7 +35,7 @@ interface Role {
   name: string;
 }
 
-export type AccessAccent = "indigo" | "amber" | "rose" | "blue";
+export type AccessAccent = "indigo" | "amber" | "rose" | "blue" | "teal" | "lime";
 
 // Full literal class strings per accent (Tailwind can't see interpolated names).
 const ACCENTS: Record<
@@ -127,6 +127,42 @@ const ACCENTS: Record<
     titleOn: "text-blue-700 dark:text-blue-300",
     ack: "text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800",
     btn: "bg-blue-500 hover:bg-blue-600 border-blue-500 text-white",
+  },
+  teal: {
+    iconText: "text-teal-600 dark:text-teal-500",
+    chip: "bg-teal-50 border-teal-200/70 dark:bg-teal-950/40 dark:border-teal-800/50",
+    switchOn: "bg-teal-500",
+    countBadge:
+      "bg-teal-100 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300",
+    accentBar: "bg-teal-500",
+    rowGranted: "bg-teal-50/50 dark:bg-teal-950/15",
+    badge:
+      "bg-teal-50 text-teal-700 border-teal-200/70 dark:bg-teal-950/40 dark:text-teal-300 dark:border-teal-800/60",
+    panelOn:
+      "border-teal-300 bg-teal-50 dark:bg-teal-950/40 dark:border-teal-600/60",
+    iconOn: "bg-teal-500",
+    iconOff: "bg-teal-100 dark:bg-teal-900/50",
+    titleOn: "text-teal-700 dark:text-teal-300",
+    ack: "text-teal-600 dark:text-teal-400 border-teal-200 dark:border-teal-800",
+    btn: "bg-teal-500 hover:bg-teal-600 border-teal-500 text-white",
+  },
+  lime: {
+    iconText: "text-lime-600 dark:text-lime-500",
+    chip: "bg-lime-50 border-lime-200/70 dark:bg-lime-950/40 dark:border-lime-800/50",
+    switchOn: "bg-lime-500",
+    countBadge:
+      "bg-lime-100 text-lime-700 dark:bg-lime-900/50 dark:text-lime-300",
+    accentBar: "bg-lime-500",
+    rowGranted: "bg-lime-50/50 dark:bg-lime-950/15",
+    badge:
+      "bg-lime-50 text-lime-700 border-lime-200/70 dark:bg-lime-950/40 dark:text-lime-300 dark:border-lime-800/60",
+    panelOn:
+      "border-lime-300 bg-lime-50 dark:bg-lime-950/40 dark:border-lime-600/60",
+    iconOn: "bg-lime-500",
+    iconOff: "bg-lime-100 dark:bg-lime-900/50",
+    titleOn: "text-lime-700 dark:text-lime-300",
+    ack: "text-lime-600 dark:text-lime-400 border-lime-200 dark:border-lime-800",
+    btn: "bg-lime-500 hover:bg-lime-600 border-lime-500 text-white",
   },
 };
 

@@ -38,6 +38,7 @@ import {
   ReceiptText,
   ClipboardList,
   Building2,
+  ShoppingCart,
 } from "lucide-react";
 
 type NavLinkDef = {
@@ -124,6 +125,15 @@ const sections: NavSection[] = [
       { href: "/documents/invoices", label: "Invoices", icon: ReceiptText,   matchPrefix: true },
       { href: "/documents/offers",   label: "Offers",   icon: FileText,      matchPrefix: true },
       { href: "/documents/orders",   label: "Orders",   icon: ClipboardList, matchPrefix: true },
+      { href: "/documents/access",   label: "Documents Access", icon: ShieldCheck, superAdminOnly: true },
+    ],
+  },
+  {
+    label: "Preorder",
+    section: "preorder",
+    links: [
+      { href: "/preorder",        label: "Campaigns",       icon: ClipboardList, matchPrefix: true },
+      { href: "/preorder/access", label: "Preorder Access", icon: ShieldCheck, superAdminOnly: true },
     ],
   },
 ];
@@ -139,6 +149,7 @@ const SECTION_STYLE: Record<SectionKey, { icon: React.ElementType; color: string
   automation: { icon: Zap,       color: "text-rose-500",    bg: "bg-rose-500/10" },
   builder:    { icon: Blocks,    color: "text-blue-600 dark:text-blue-500", bg: "bg-blue-600/10" },
   documents:  { icon: FileText,  color: "text-teal-500",    bg: "bg-teal-500/10" },
+  preorder:   { icon: ShoppingCart, color: "text-lime-600 dark:text-lime-500", bg: "bg-lime-600/10" },
   system:     { icon: Cog,       color: "text-slate-500",   bg: "bg-slate-500/10" },
 };
 

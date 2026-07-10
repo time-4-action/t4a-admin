@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { ReceiptText, ClipboardList, FileText, Building2, LogOut, Menu, X } from "lucide-react";
+import { ReceiptText, ClipboardList, FileText, Building2, LogOut, Menu, X, ShoppingCart } from "lucide-react";
 
 // The B2B customer portal shell. Shown to any authenticated non-admin (they hold
 // no role; their documents are matched by email inside the portal). Deliberately
@@ -13,6 +13,7 @@ import { ReceiptText, ClipboardList, FileText, Building2, LogOut, Menu, X } from
 type PortalUser = { name?: string | null; email?: string | null; picture?: string | null };
 
 const links = [
+  { href: "/portal/preorders", label: "Preorders", icon: ShoppingCart },
   { href: "/portal/invoices", label: "Invoices", icon: ReceiptText },
   { href: "/portal/offers", label: "Offers", icon: FileText },
   { href: "/portal/orders", label: "Orders", icon: ClipboardList },

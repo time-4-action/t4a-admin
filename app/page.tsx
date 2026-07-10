@@ -27,6 +27,7 @@ import {
   ReceiptText,
   ClipboardList,
   Building2,
+  ShoppingCart,
 } from "lucide-react";
 
 const sections: {
@@ -125,6 +126,16 @@ const sections: {
       { href: "/documents/invoices", icon: ReceiptText,    title: "Invoices", desc: "Browse any customer's invoices" },
       { href: "/documents/offers",   icon: FileText,       title: "Offers",   desc: "Browse any customer's offers" },
       { href: "/documents/orders",   icon: ClipboardList,  title: "Orders",   desc: "Browse any customer's orders" },
+    ],
+  },
+  {
+    label: "Preorder",
+    section: "preorder",
+    icon: ShoppingCart,
+    color: "text-lime-600 dark:text-lime-500",
+    bg: "bg-lime-600/10",
+    cards: [
+      { href: "/preorder", icon: ClipboardList, title: "Campaigns", desc: "Build order sheets and review preorders" },
     ],
   },
   {

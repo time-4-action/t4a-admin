@@ -176,6 +176,21 @@
   .skeleton { animation: none; }
 }
 
+/* Hide the native number-input spinners app-wide (we use our own +/- steppers). */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+.no-spinner,
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 /* Sleek range slider used by the Section Builder. The blue fill up to the
    thumb is set inline (background gradient) per-value; this styles the track
    height and the thumb for both WebKit and Firefox. */

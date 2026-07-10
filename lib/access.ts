@@ -20,6 +20,7 @@ export const SECTION_ROLES = {
   automation: ["admin", "automation-admin"],
   builder: ["admin", "builder-admin"],
   documents: ["admin", "documents-admin"],
+  preorder: ["admin", "preorder-admin"],
   system: ["admin"],
 } as const;
 
@@ -82,12 +83,15 @@ export const ROUTE_RULES: { prefix: string; section: SectionKey }[] = [
   { prefix: "/partners/access", section: "system" },
   { prefix: "/automation/access", section: "system" },
   { prefix: "/builder/access", section: "system" },
+  { prefix: "/documents/access", section: "system" },
+  { prefix: "/preorder/access", section: "system" },
   // pages
   { prefix: "/warranty", section: "warranty" },
   { prefix: "/partners", section: "partners" },
   { prefix: "/automation", section: "automation" },
   { prefix: "/builder", section: "builder" },
   { prefix: "/documents", section: "documents" },
+  { prefix: "/preorder", section: "preorder" },
   { prefix: "/roles", section: "access" },
   { prefix: "/ai", section: "ai" },
   { prefix: "/users", section: "general" },
@@ -97,6 +101,7 @@ export const ROUTE_RULES: { prefix: string; section: SectionKey }[] = [
   { prefix: "/api/partners", section: "partners" },
   { prefix: "/api/automation", section: "automation" },
   { prefix: "/api/admin/documents", section: "documents" },
+  { prefix: "/api/admin/preorder", section: "preorder" },
   { prefix: "/api/admin/roles", section: "access" },
   { prefix: "/api/admin/resource-servers", section: "access" },
   { prefix: "/api/admin/stats", section: "ai" },

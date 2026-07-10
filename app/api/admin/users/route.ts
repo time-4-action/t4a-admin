@@ -2,44 +2,40 @@ import { connectDB } from "@/lib/mongodb";
 import { UserUsage } from "@/models/user-usage";
 import { UserLimit } from "@/models/user-limit";
 import { getMgmtClient } from "@/lib/mgmt";
-import { getDevUserIds } from "@/lib/dev-users";
+import { listAllUsers, getRolesByUserId } from "@/lib/auth0-mgmt";
+import { isDevRole } from "@/lib/ai-role";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET() {
   try {
     await connectDB();
-    const mgmt = getMgmtClient();
 
-    const [auth0UsersPage, usageDocs, limitDocs, devUserIds] = await Promise.all([
-      mgmt.users.list({ per_page: 100 }),
+    // Roles are resolved via a single inverted walk over the (few) roles rather
+    // than one call per user, so the result is complete and doesn't rate-limit.
+    const [auth0Users, usageDocs, limitDocs, { rolesByUser }] = await Promise.all([
+      listAllUsers(),
       UserUsage.aggregate([
         { $group: { _id: "$userId", totalCostUsd: { $sum: "$totalCostUsd" } } },
       ]),
       UserLimit.find({}),
-      getDevUserIds(),
+      getRolesByUserId(),
     ]);
-    const auth0Users = (auth0UsersPage as any).data as any[];
 
     const usageMap = Object.fromEntries(usageDocs.map((u) => [u._id, u.totalCostUsd]));
     const limitMap = Object.fromEntries(limitDocs.map((l) => [l.userId, l]));
 
-    // Only fetch roles for non-dev users (dev users are filtered out)
-    const visibleUsers = auth0Users.filter((u) => !devUserIds.has(u.user_id));
-    const rolesResults = await Promise.all(
-      visibleUsers.map((u) =>
-        mgmt.users.roles.list(u.user_id).then((p) => ((p as any).data as any[]).map((r: any) => r.name)).catch(() => [])
-      )
-    );
-
-    const users = visibleUsers.map((u, i) => ({
-      id:           u.user_id,
-      name:         u.name,
-      email:        u.email,
-      picture:      u.picture,
-      totalCostUsd: usageMap[u.user_id!] ?? 0,
-      limit:        limitMap[u.user_id!] ?? null,
-      roles:        rolesResults[i],
-    }));
+    // Dev users are hidden from the list; derived from the same role map.
+    const users = auth0Users
+      .filter((u) => !(rolesByUser.get(u.user_id) ?? []).some(isDevRole))
+      .map((u) => ({
+        id:           u.user_id,
+        name:         u.name,
+        email:        u.email,
+        picture:      u.picture,
+        totalCostUsd: usageMap[u.user_id!] ?? 0,
+        limit:        limitMap[u.user_id!] ?? null,
+        roles:        rolesByUser.get(u.user_id) ?? [],
+      }));
 
     return NextResponse.json(users);
   } catch (err) {

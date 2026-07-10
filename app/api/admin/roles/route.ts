@@ -1,11 +1,11 @@
 import { getMgmtClient } from "@/lib/mgmt";
+import { listAllRoles } from "@/lib/auth0-mgmt";
 import { isDevRole } from "@/lib/ai-role";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET() {
   try {
-    const mgmt = getMgmtClient();
-    const roles = (((await mgmt.roles.list()) as any).data as any[])
+    const roles = (await listAllRoles())
       .filter((r: any) => !isDevRole(r.name))
       .map((r: any) => ({ id: r.id, name: r.name, description: r.description ?? "" }));
     return NextResponse.json(roles);
