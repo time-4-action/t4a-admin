@@ -35,6 +35,9 @@ import {
   SlidersHorizontal,
   Boxes,
   FileText,
+  ReceiptText,
+  ClipboardList,
+  Building2,
 } from "lucide-react";
 
 type NavLinkDef = {
@@ -117,7 +120,10 @@ const sections: NavSection[] = [
     label: "Documents",
     section: "documents",
     links: [
-      { href: "/documents", label: "Customer Docs", icon: FileText, matchPrefix: true },
+      { href: "/documents/customer", label: "Customer", icon: Building2,     matchPrefix: true },
+      { href: "/documents/invoices", label: "Invoices", icon: ReceiptText,   matchPrefix: true },
+      { href: "/documents/offers",   label: "Offers",   icon: FileText,      matchPrefix: true },
+      { href: "/documents/orders",   label: "Orders",   icon: ClipboardList, matchPrefix: true },
     ],
   },
 ];

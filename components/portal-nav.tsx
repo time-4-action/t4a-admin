@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { ReceiptText, ClipboardList, FileText, LogOut, Menu, X } from "lucide-react";
+import { ReceiptText, ClipboardList, FileText, Building2, LogOut, Menu, X } from "lucide-react";
 
 // The B2B customer portal shell. Shown to any authenticated non-admin (they hold
 // no role; their documents are matched by email inside the portal). Deliberately
@@ -16,6 +16,7 @@ const links = [
   { href: "/portal/invoices", label: "Invoices", icon: ReceiptText },
   { href: "/portal/offers", label: "Offers", icon: FileText },
   { href: "/portal/orders", label: "Orders", icon: ClipboardList },
+  { href: "/portal/account", label: "My Account", icon: Building2 },
 ];
 
 const BRAND = "Time 4 Action B2B";

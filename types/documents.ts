@@ -20,15 +20,35 @@ export type MkPartnerRef = {
   taxId?: string;
 };
 
-// A partner resolved from /get_partner (used for email→partner mapping and the
-// admin partner picker).
+export type MkContact = { email?: string; phone?: string; address?: string };
+export type MkAddress = {
+  type?: string;
+  street?: string;
+  postNumber?: string;
+  city?: string;
+  country?: string;
+  paymentDueDays?: string;
+  currency?: string;
+  language?: string;
+};
+
+// A partner resolved from /get_partner (used for email→partner mapping, the
+// admin partner picker, the customer header, and the full customer profile).
 export type MkPartner = {
   mkId: string;
   countCode?: string;
   name: string;
   taxId?: string;
   emails: string[];
+  phone?: string;
   city?: string;
+  address?: { street?: string; postNumber?: string; city?: string; country?: string };
+  paymentDueDays?: string;
+  currency?: string;
+  language?: string;
+  businessEntity?: boolean;
+  contacts?: MkContact[];
+  addresses?: MkAddress[];
 };
 
 export type DocLine = {

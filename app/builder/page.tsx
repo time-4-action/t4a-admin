@@ -1,6 +1,5 @@
 import Link from "next/link";
 import {
-  Blocks,
   Radar,
   SlidersHorizontal,
   ChevronRight,
@@ -41,7 +40,6 @@ export default function BuilderHubPage() {
       <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="h-14 flex items-center justify-between gap-3 px-4 md:px-8">
           <div className="flex items-center gap-2 min-w-0">
-            <Blocks className="w-4 h-4 text-blue-500 shrink-0" />
             <h1 className="font-display text-lg font-medium tracking-tight text-foreground">
               Section Builder
             </h1>

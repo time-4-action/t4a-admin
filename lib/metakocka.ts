@@ -199,16 +199,47 @@ function mapPartner(raw: Record<string, unknown>): MkPartner {
   const emails = contacts
     .map((c) => str(c.email))
     .filter((e): e is string => !!e);
+  const phone = contacts.map((c) => str(c.gsm)).find(Boolean);
   const addrs = Array.isArray(raw.partner_delivery_address_list)
     ? (raw.partner_delivery_address_list as Record<string, unknown>[])
     : [];
+  // Prefer the billing address ("Račun"), else the first one.
+  const billing =
+    addrs.find((a) => (str(a.address_type) ?? "").toLowerCase().startsWith("ra")) ?? addrs[0];
+  const address = billing
+    ? {
+        street: str(billing.street),
+        postNumber: str(billing.post_number),
+        city: str(billing.city),
+        country: str(billing.country),
+      }
+    : undefined;
   return {
     mkId: String(raw.mk_id),
     countCode: str(raw.count_code),
     name: str(raw.customer) ?? String(raw.mk_id),
     taxId: str(raw.tax_id_number) ?? str(raw.partner_tax_number),
     emails,
-    city: str(addrs[0]?.city),
+    phone,
+    city: address?.city,
+    address,
+    paymentDueDays: str(billing?.payment_due_days),
+    currency: str(billing?.currency),
+    language: str(billing?.language),
+    businessEntity: raw.business_entity === "true" || raw.business_entity === true,
+    contacts: contacts
+      .map((c) => ({ email: str(c.email), phone: str(c.gsm), address: str(c.contact_address) }))
+      .filter((c) => c.email || c.phone || c.address),
+    addresses: addrs.map((a) => ({
+      type: str(a.address_type),
+      street: str(a.street),
+      postNumber: str(a.post_number),
+      city: str(a.city),
+      country: str(a.country),
+      paymentDueDays: str(a.payment_due_days),
+      currency: str(a.currency),
+      language: str(a.language),
+    })),
   };
 }
 

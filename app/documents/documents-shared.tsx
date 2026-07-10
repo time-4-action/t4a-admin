@@ -14,6 +14,9 @@ import {
   FileMinus,
   Building2,
   Globe,
+  Image as ImageIcon,
+  Truck,
+  X,
 } from "lucide-react";
 import type {
   DocDetail,
@@ -372,6 +375,102 @@ function lineTotal(l: DocLine): string | undefined {
   return (qty * unit * (1 - disc / 100)).toFixed(2);
 }
 
+// Tiny product thumbnail resolved from the product catalogue (by SKU/code) via
+// our server proxy. Shipping/freight lines get a truck icon; products with an
+// image open a full-screen lightbox on click; otherwise a placeholder is shown.
+// Results are cached per code for the session.
+const productImgCache = new Map<string, string | null>();
+
+function isShippingCode(code?: string): boolean {
+  return !!code && /shipping|freight|postnina|dostav/i.test(code);
+}
+
+function ProductThumb({ code, name }: { code?: string; name?: string }) {
+  const shipping = isShippingCode(code) || isShippingCode(name);
+  const [src, setSrc] = useState<string | null>(
+    code && productImgCache.has(code) ? productImgCache.get(code)! : null,
+  );
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (shipping || !code || productImgCache.has(code)) return;
+    let cancelled = false;
+    fetch(`/api/portal/product-image?code=${encodeURIComponent(code)}`)
+      .then((r) => r.json())
+      .then((b) => {
+        const url = typeof b?.image === "string" ? b.image : null;
+        productImgCache.set(code, url);
+        if (!cancelled) setSrc(url);
+      })
+      .catch(() => {
+        productImgCache.set(code, null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [code, shipping]);
+
+  if (shipping) {
+    return (
+      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-sky-500/10 shrink-0 border border-border/60">
+        <Truck className="h-5 w-5 text-sky-500" />
+      </span>
+    );
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => src && setOpen(true)}
+        disabled={!src}
+        className={cn(
+          "flex h-10 w-10 items-center justify-center rounded-lg bg-muted overflow-hidden shrink-0 border border-border/60",
+          src ? "cursor-zoom-in hover:opacity-90 transition-opacity" : "cursor-default",
+        )}
+      >
+        {src ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={src}
+            alt=""
+            className="h-full w-full object-contain"
+            onError={() => {
+              if (code) productImgCache.set(code, null);
+              setSrc(null);
+            }}
+          />
+        ) : (
+          <ImageIcon className="h-4 w-4 text-muted-foreground/40" />
+        )}
+      </button>
+
+      {open && src && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6"
+          onClick={() => setOpen(false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            aria-label="Close"
+            className="absolute top-4 right-4 p-2 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <div className="flex flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={src} alt={name ?? ""} className="max-h-[82vh] max-w-[88vw] object-contain rounded-xl shadow-2xl" />
+            {name && <p className="text-[13px] text-white/80">{name}</p>}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // Friendly label + icon for a raw MK doc_type (used by "related documents").
 // Order matters — the more specific patterns must come first.
 const DOC_TYPE_META: { test: RegExp; label: string; icon: React.ElementType }[] = [
@@ -460,11 +559,13 @@ export function DocumentDetail({
   pdfHref,
   backHref,
   showPartner = false,
+  wide = false,
 }: {
   detail: DocDetail;
   pdfHref?: string;
   backHref?: string;
   showPartner?: boolean;
+  wide?: boolean;
 }) {
   const isInvoice = detail.kind === "invoice";
   const currency = detail.currency;
@@ -474,7 +575,7 @@ export function DocumentDetail({
   const productCount = detail.lines.filter((l) => !l.isText).length;
 
   return (
-    <div className="max-w-5xl mx-auto px-4 md:px-8 py-6 md:py-8 space-y-4 overflow-y-auto h-full">
+    <div className={cn("px-4 md:px-8 py-6 md:py-8 space-y-4 overflow-y-auto h-full", wide ? "" : "max-w-5xl mx-auto")}>
       {backHref && (
         <Link href={backHref} className="inline-block text-[12px] text-muted-foreground hover:text-foreground">
           ← Back
@@ -530,7 +631,7 @@ export function DocumentDetail({
       {showPartner && detail.partner && (
         <div className="rounded-2xl border border-border bg-surface px-4 py-3 flex items-center gap-3">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted shrink-0">
-            <Building2 className="h-4.5 w-4.5 text-muted-foreground" />
+            <Building2 className="h-4 w-4 text-muted-foreground" />
           </span>
           <div className="min-w-0">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Customer</p>
@@ -544,14 +645,18 @@ export function DocumentDetail({
       {detail.lines.length > 0 && (
         <div className="rounded-2xl border border-border bg-surface overflow-hidden">
           <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
-            <span className="text-[12px] font-semibold text-foreground">Items</span>
+            <span className="text-[12px] font-semibold text-foreground">Products</span>
             <span className="text-[11px] font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full tabular-nums">
               {productCount}
             </span>
           </div>
+          {/* Column header — right-side columns line up with the product rows. */}
           <div className="flex items-center gap-3 px-4 py-2 text-[10px] uppercase tracking-wide text-muted-foreground border-b border-border/40">
-            <span className="flex-1">Item</span>
-            <span className="w-24 text-right">Total</span>
+            <span className="flex-1 min-w-0">Product</span>
+            <span className="hidden sm:block w-16 text-right shrink-0">Qty</span>
+            <span className="hidden sm:block w-24 text-right shrink-0">Price</span>
+            <span className="hidden sm:block w-14 text-right shrink-0">Disc</span>
+            <span className="w-24 text-right shrink-0">Total</span>
           </div>
           <div className="divide-y divide-border/50">
             {detail.lines.map((l, i) => {
@@ -565,19 +670,33 @@ export function DocumentDetail({
                 );
               }
               const disc = toNum(l.discount) ?? 0;
-              const meta = [
-                l.code,
-                l.amount ? `${l.amount}${l.unit ? ` ${l.unit}` : ""} × ${fmtMoney(l.price ?? l.priceWithTax, currency)}` : undefined,
-                disc > 0 ? `−${disc}%` : undefined,
-              ]
-                .filter(Boolean)
-                .join("  ·  ");
               return (
-                <div key={i} className="flex items-baseline gap-3 px-4 py-3">
+                <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                  <ProductThumb code={l.code} name={l.name} />
                   <div className="min-w-0 flex-1">
-                    <p className="text-[13px] text-foreground">{l.name || l.code || "—"}</p>
-                    {meta && <p className="text-[11px] text-muted-foreground mt-0.5">{meta}</p>}
+                    <p className="text-[13px] text-foreground truncate">{l.name || l.code || "—"}</p>
+                    {l.code && l.name && <p className="text-[11px] text-muted-foreground truncate">{l.code}</p>}
+                    {/* On mobile the qty/price/disc columns are hidden — show them inline. */}
+                    <p className="sm:hidden text-[11px] text-muted-foreground mt-0.5">
+                      {l.amount ?? "—"}
+                      {l.unit ? ` ${l.unit}` : ""} × {fmtMoney(l.price ?? l.priceWithTax, currency)}
+                      {disc > 0 ? ` · −${disc}%` : ""}
+                    </p>
                   </div>
+                  <span className="hidden sm:block w-16 text-right text-[12px] text-muted-foreground tabular-nums shrink-0">
+                    {l.amount ?? "—"}
+                    {l.unit ? ` ${l.unit}` : ""}
+                  </span>
+                  <span className="hidden sm:block w-24 text-right text-[12px] text-muted-foreground tabular-nums shrink-0">
+                    {fmtMoney(l.price ?? l.priceWithTax, currency)}
+                  </span>
+                  <span className="hidden sm:block w-14 text-right text-[12px] tabular-nums shrink-0">
+                    {disc > 0 ? (
+                      <span className="text-amber-600 dark:text-amber-400">−{disc}%</span>
+                    ) : (
+                      <span className="text-muted-foreground/40">—</span>
+                    )}
+                  </span>
                   <span className="w-24 text-right text-[13px] font-medium text-foreground tabular-nums shrink-0">
                     {fmtMoney(lineTotal(l), currency)}
                   </span>

@@ -24,6 +24,9 @@ import {
   Radar,
   SlidersHorizontal,
   FileText,
+  ReceiptText,
+  ClipboardList,
+  Building2,
 } from "lucide-react";
 
 const sections: {
@@ -118,7 +121,10 @@ const sections: {
     color: "text-teal-500",
     bg: "bg-teal-500/10",
     cards: [
-      { href: "/documents", icon: FileText, title: "Customer Documents", desc: "Browse any customer's offers, orders and invoices" },
+      { href: "/documents/customer", icon: Building2,      title: "Customer", desc: "Customer details and account" },
+      { href: "/documents/invoices", icon: ReceiptText,    title: "Invoices", desc: "Browse any customer's invoices" },
+      { href: "/documents/offers",   icon: FileText,       title: "Offers",   desc: "Browse any customer's offers" },
+      { href: "/documents/orders",   icon: ClipboardList,  title: "Orders",   desc: "Browse any customer's orders" },
     ],
   },
   {
