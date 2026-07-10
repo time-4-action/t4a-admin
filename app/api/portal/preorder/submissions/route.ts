@@ -7,6 +7,7 @@ import {
   toCampaignView,
   toSubmissionView,
   toObjectId,
+  partnerHasCampaignAccess,
 } from "@/lib/preorder";
 import { computeTotals, flattenRows } from "@/types/preorder";
 import type { PreorderTerms } from "@/types/preorder";
@@ -38,6 +39,12 @@ export async function POST(request: Request) {
   const campaignDoc = await PreorderCampaign.findById(campaignId).exec();
   if (!campaignDoc || campaignDoc.status !== "open") {
     return NextResponse.json({ error: "campaign not open" }, { status: 404 });
+  }
+
+  // Invite boundary: only a partner who unlocked the campaign (or already has a
+  // submission) may fill it — guards against filling a campaign id you weren't invited to.
+  if (!(await partnerHasCampaignAccess(campaignDoc._id, partner.mkId))) {
+    return NextResponse.json({ error: "no-access" }, { status: 403 });
   }
 
   const view = toCampaignView(campaignDoc);

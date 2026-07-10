@@ -30,6 +30,8 @@ import {
   Trash2,
   AlertTriangle,
   Eye,
+  Link2,
+  Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -65,6 +67,23 @@ export default function PreorderCampaignsPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<PreorderCampaignSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Fetch the campaign's magic invite link (token ensured server-side) and copy it.
+  async function copyInvite(id: string) {
+    try {
+      const r = await fetch(`/api/admin/preorder/campaigns/${id}/invite`);
+      const d = await r.json();
+      if (d?.path) {
+        await navigator.clipboard.writeText(`${window.location.origin}${d.path}`);
+        setCopiedId(id);
+        setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1800);
+      }
+    } catch {
+      /* clipboard blocked / fetch failed — ignore */
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -186,7 +205,7 @@ export default function PreorderCampaignsPage() {
                 <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Deadline</TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Sheet</TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Preorders</TableHead>
-                <TableHead className="h-9 w-[150px]" />
+                <TableHead className="h-9 w-[184px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -239,6 +258,18 @@ export default function PreorderCampaignsPage() {
                       </TableCell>
                       <TableCell className="pr-4">
                         <div className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => copyInvite(c.id)}
+                            aria-label="Copy invite link"
+                            title="Copy customer invite link"
+                            className={cn(
+                              "p-1.5 rounded-md hover:bg-muted transition-colors",
+                              copiedId === c.id ? "text-lime-600" : "text-muted-foreground hover:text-foreground",
+                            )}
+                          >
+                            {copiedId === c.id ? <Check className="w-3.5 h-3.5" /> : <Link2 className="w-3.5 h-3.5" />}
+                          </button>
                           <Link
                             href={`/preorder/${c.id}/preview`}
                             aria-label="Preview"

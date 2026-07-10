@@ -71,8 +71,10 @@ export default function PortalPreordersPage() {
           {!loading && !noAccount && campaigns.length === 0 && (
             <div className="rounded-xl border border-border bg-surface p-8 text-center">
               <ShoppingCart className="w-6 h-6 mx-auto mb-3 text-muted-foreground/50" />
-              <p className="text-[14px] font-medium text-foreground">No open preorders</p>
-              <p className="text-[13px] text-muted-foreground mt-1">There are no preorder campaigns open right now. Check back later.</p>
+              <p className="text-[14px] font-medium text-foreground">No preorders yet</p>
+              <p className="text-[13px] text-muted-foreground mt-1">
+                Preorders are unlocked by invitation. Open the link your rep shared with you to add one here.
+              </p>
             </div>
           )}
 

@@ -137,6 +137,14 @@ export type PreorderSubmission = {
   mkSalesOrder?: SalesOrderRef | null;
 };
 
+// A partner who has unlocked (been granted access to) a campaign via its invite link.
+export type PreorderAccessSummary = {
+  partnerMkId: string;
+  partnerName: string;
+  partnerEmail?: string;
+  grantedAt?: string | null;
+};
+
 // Admin overview list row (per partner response).
 export type PreorderSubmissionSummary = {
   id: string;

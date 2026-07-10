@@ -5,6 +5,7 @@ import "server-only";
 // Shared by both the admin (/api/admin/preorder) and portal (/api/portal/preorder)
 // route groups.
 
+import { randomBytes } from "crypto";
 import { Types } from "mongoose";
 import { connectDB } from "@/lib/mongodb";
 import { PreorderCampaign, type IPreorderCampaign } from "@/models/preorder-campaign";
@@ -12,15 +13,55 @@ import {
   PreorderSubmission,
   type IPreorderSubmission,
 } from "@/models/preorder-submission";
+import { PreorderAccess, type IPreorderAccess } from "@/models/preorder-access";
 import type {
   PreorderCampaign as CampaignView,
   PreorderCampaignSummary,
   PreorderSubmission as SubmissionView,
   PreorderSubmissionSummary,
+  PreorderAccessSummary,
   PreorderTab,
 } from "@/types/preorder";
 
 export { connectDB };
+
+// A URL-safe secret for a campaign's invite link.
+export function genShareToken(): string {
+  return randomBytes(18).toString("base64url");
+}
+
+// Ensure a campaign has an invite token (backfills legacy campaigns), returning it.
+export async function ensureShareToken(doc: IPreorderCampaign): Promise<string> {
+  if (!doc.shareToken) {
+    doc.shareToken = genShareToken();
+    await doc.save();
+  }
+  return doc.shareToken;
+}
+
+// Whether a partner may see/fill a campaign: they hold an access grant OR already
+// have a submission on it.
+export async function partnerHasCampaignAccess(
+  campaignId: Types.ObjectId | string,
+  partnerMkId: string,
+): Promise<boolean> {
+  const oid = typeof campaignId === "string" ? toObjectId(campaignId) : campaignId;
+  if (!oid) return false;
+  const [access, sub] = await Promise.all([
+    PreorderAccess.exists({ campaignId: oid, partnerMkId }),
+    PreorderSubmission.exists({ campaignId: oid, partnerMkId }),
+  ]);
+  return !!(access || sub);
+}
+
+export function toAccessSummary(doc: IPreorderAccess): PreorderAccessSummary {
+  return {
+    partnerMkId: doc.partnerMkId,
+    partnerName: doc.partnerName,
+    partnerEmail: doc.partnerEmail,
+    grantedAt: iso(doc.grantedAt),
+  };
+}
 
 function iso(d?: Date | null): string | null {
   return d ? new Date(d).toISOString() : null;
@@ -145,4 +186,4 @@ export function toObjectId(id: string): Types.ObjectId | null {
   return Types.ObjectId.isValid(id) ? new Types.ObjectId(id) : null;
 }
 
-export { PreorderCampaign, PreorderSubmission };
+export { PreorderCampaign, PreorderSubmission, PreorderAccess };

@@ -3,12 +3,15 @@ import {
   connectDB,
   PreorderCampaign,
   PreorderSubmission,
+  PreorderAccess,
   toCampaignView,
   toSubmissionSummary,
+  toAccessSummary,
   toObjectId,
 } from "@/lib/preorder";
 import { flattenRows, rowUnitPrice } from "@/types/preorder";
 import type { IPreorderSubmission } from "@/models/preorder-submission";
+import type { IPreorderAccess } from "@/models/preorder-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,10 +27,13 @@ export async function GET(_req: Request, { params }: RouteParams) {
   if (!oid) return NextResponse.json({ submissions: [] });
   await connectDB();
 
-  const [campaignDoc, docs] = await Promise.all([
+  const [campaignDoc, docs, grants] = await Promise.all([
     PreorderCampaign.findById(oid).exec(),
     PreorderSubmission.find({ campaignId: oid }).sort({ updatedAt: -1 }).exec() as Promise<
       IPreorderSubmission[]
+    >,
+    PreorderAccess.find({ campaignId: oid }).sort({ grantedAt: -1 }).exec() as Promise<
+      IPreorderAccess[]
     >,
   ]);
 
@@ -48,5 +54,12 @@ export async function GET(_req: Request, { params }: RouteParams) {
     return { ...toSubmissionSummary(d), confirmedTotals: { qty, amount } };
   });
 
-  return NextResponse.json({ submissions });
+  // Partners who UNLOCKED the campaign (via the invite link) but haven't started a
+  // submission yet — so the admin can see who has the link.
+  const submittedPartners = new Set(docs.map((d) => d.partnerMkId));
+  const unlocked = grants
+    .filter((g) => !submittedPartners.has(g.partnerMkId))
+    .map(toAccessSummary);
+
+  return NextResponse.json({ submissions, unlocked });
 }

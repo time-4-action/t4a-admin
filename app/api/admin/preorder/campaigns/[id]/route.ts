@@ -3,6 +3,7 @@ import {
   connectDB,
   PreorderCampaign,
   PreorderSubmission,
+  PreorderAccess,
   toCampaignView,
   toObjectId,
 } from "@/lib/preorder";
@@ -69,6 +70,9 @@ export async function DELETE(_req: Request, { params }: RouteParams) {
   await connectDB();
   const doc = await PreorderCampaign.findByIdAndDelete(id).exec();
   if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
-  await PreorderSubmission.deleteMany({ campaignId: oid }).exec();
+  await Promise.all([
+    PreorderSubmission.deleteMany({ campaignId: oid }).exec(),
+    PreorderAccess.deleteMany({ campaignId: oid }).exec(),
+  ]);
   return NextResponse.json({ ok: true });
 }

@@ -4,6 +4,7 @@ import {
   connectDB,
   PreorderCampaign,
   PreorderSubmission,
+  PreorderAccess,
   toCampaignView,
   toSubmissionView,
   toObjectId,
@@ -32,6 +33,15 @@ export async function GET(_req: Request, { params }: RouteParams) {
     campaignId: campaignDoc._id,
     partnerMkId: partner.mkId,
   }).exec();
+
+  // Invite boundary: the partner must have UNLOCKED this campaign (access grant) or
+  // already have a submission on it. Otherwise it's invisible to them.
+  const hasAccess =
+    !!subDoc ||
+    !!(await PreorderAccess.exists({ campaignId: campaignDoc._id, partnerMkId: partner.mkId }));
+  if (!hasAccess) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
 
   // A partner may always review their own submission (even after the campaign closes),
   // but a campaign with no submission is only visible while it's open to fill.

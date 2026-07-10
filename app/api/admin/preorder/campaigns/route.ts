@@ -6,6 +6,7 @@ import {
   submissionCountsByCampaign,
   toCampaignSummary,
   toCampaignView,
+  genShareToken,
 } from "@/lib/preorder";
 import type { IPreorderCampaign } from "@/models/preorder-campaign";
 
@@ -44,6 +45,7 @@ export async function POST(request: Request) {
     deadline: body.deadline ? new Date(body.deadline) : null,
     status: "draft",
     tabs: [],
+    shareToken: genShareToken(),
     createdBy: session?.user?.email ?? null,
   });
   return NextResponse.json({ campaign: toCampaignView(doc) }, { status: 201 });

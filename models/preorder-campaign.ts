@@ -52,6 +52,9 @@ export interface IPreorderCampaign extends Document {
   // back to the built-in name heuristic in products/resolve.
   rrpPricelist?: string | null;
   partnerPricelist?: string | null;
+  // Secret token for the customer invite ("magic") link. A partner who opens the
+  // link is granted access to this campaign. Generated at create, backfilled lazily.
+  shareToken?: string | null;
   tabs: IPreorderTab[];
   createdBy?: string | null;
   createdAt: Date;
@@ -115,6 +118,7 @@ const PreorderCampaignSchema = new Schema<IPreorderCampaign>(
     deadline: { type: Date, default: null },
     rrpPricelist: { type: String, default: null },
     partnerPricelist: { type: String, default: null },
+    shareToken: { type: String, default: null, index: true },
     tabs: { type: [TabSchema], default: [] },
     createdBy: { type: String, default: null },
   },

@@ -22,6 +22,10 @@ import {
   Eye,
   UserPlus,
   LockOpen,
+  Link2,
+  Copy,
+  Check,
+  Mail,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
@@ -30,6 +34,7 @@ import {
   SUBMISSION_STATUS_LABELS,
   type PreorderCampaign,
   type PreorderSubmissionSummary,
+  type PreorderAccessSummary,
   type SubmissionStatus,
 } from "@/types/preorder";
 
@@ -49,8 +54,11 @@ function fmtDate(v?: string | null): string {
 export default function OverviewClient({ campaignId }: { campaignId: string }) {
   const [campaign, setCampaign] = useState<PreorderCampaign | null>(null);
   const [subs, setSubs] = useState<PreorderSubmissionSummary[]>([]);
+  const [unlocked, setUnlocked] = useState<PreorderAccessSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -61,10 +69,32 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
         if (c?.campaign) setCampaign(c.campaign);
         else setError(c?.error ?? "Campaign not found");
         setSubs(s?.submissions ?? []);
+        setUnlocked(s?.unlocked ?? []);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Error"))
       .finally(() => setLoading(false));
   }, [campaignId]);
+
+  // The magic invite link (token ensured server-side); URL built from the browser origin.
+  useEffect(() => {
+    fetch(`/api/admin/preorder/campaigns/${campaignId}/invite`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.path) setInviteUrl(`${window.location.origin}${d.path}`);
+      })
+      .catch(() => {});
+  }, [campaignId]);
+
+  const copyInvite = async () => {
+    if (!inviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      /* clipboard blocked — ignore */
+    }
+  };
 
   const currency = campaign?.currency ?? "EUR";
 
@@ -73,8 +103,10 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
     const totalQty = submitted.reduce((n, s) => n + s.totals.qty, 0);
     const totalAmount = submitted.reduce((n, s) => n + s.totals.amount, 0);
     const confirmedAmount = subs.reduce((n, s) => n + (s.confirmedTotals?.amount ?? 0), 0);
-    return { count: subs.length, submitted: submitted.length, totalQty, totalAmount, confirmedAmount };
-  }, [subs]);
+    // Everyone with access = submitters (all hold access) + unlocked-not-started.
+    const unlockedCount = subs.length + unlocked.length;
+    return { count: subs.length, submitted: submitted.length, totalQty, totalAmount, confirmedAmount, unlockedCount };
+  }, [subs, unlocked]);
 
   if (loading) {
     return (
@@ -121,6 +153,9 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
             </div>
           </div>
           <div className="flex-1" />
+          <Button variant="outline" size="sm" className="h-8" onClick={copyInvite} disabled={!inviteUrl} title={inviteUrl ?? "Invite link"}>
+            {copied ? <><Check className="w-3.5 h-3.5 text-lime-600" /> Copied</> : <><Link2 className="w-3.5 h-3.5" /> Copy invite link</>}
+          </Button>
           <Link href={`/preorder/${campaignId}/preview`}>
             <Button variant="ghost" size="sm" className="h-8"><Eye className="w-3.5 h-3.5" /> Preview</Button>
           </Link>
@@ -136,7 +171,8 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
       <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
         <div className="space-y-5">
           {/* KPIs */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <Kpi icon={Link2} label="Unlocked" value={String(kpis.unlockedCount)} />
             <Kpi icon={Users} label="Preorders" value={String(kpis.count)} />
             <Kpi icon={CheckCircle2} label="Submitted" value={String(kpis.submitted)} />
             <Kpi icon={Package} label="Items" value={String(kpis.totalQty)} />
@@ -193,11 +229,30 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
                     </TableCell>
                   </TableRow>
                 ))}
-                {subs.length === 0 && (
+                {/* Partners who unlocked the link but haven't started a preorder. */}
+                {unlocked.map((u) => (
+                  <TableRow key={`u-${u.partnerMkId}`} className="border-b border-border/60">
+                    <TableCell className="pl-5 py-2.5">
+                      <div className="text-[13px] font-medium text-foreground truncate">{u.partnerName}</div>
+                      {u.partnerEmail && <div className="text-[11px] text-muted-foreground truncate">{u.partnerEmail}</div>}
+                    </TableCell>
+                    <TableCell>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 px-2 py-0.5 text-[11px] font-medium">
+                        <Mail className="w-2.5 h-2.5" /> Invited
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right text-[12px] text-muted-foreground">—</TableCell>
+                    <TableCell className="text-right text-[12px] text-muted-foreground">—</TableCell>
+                    <TableCell className="text-right text-[12px] text-muted-foreground">—</TableCell>
+                    <TableCell className="text-[12px] text-muted-foreground">not started</TableCell>
+                    <TableCell className="pr-4" />
+                  </TableRow>
+                ))}
+                {subs.length === 0 && unlocked.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center text-[13px] text-muted-foreground py-14">
                       <Users className="w-5 h-5 mx-auto mb-2 text-muted-foreground/50" />
-                      No preorders submitted yet.
+                      No one has unlocked this preorder yet. Copy the invite link and share it with customers.
                     </TableCell>
                   </TableRow>
                 )}
