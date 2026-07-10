@@ -3,6 +3,7 @@ import { UserUsage } from "@/models/user-usage";
 import { UserLimit } from "@/models/user-limit";
 import { getMgmtClient } from "@/lib/mgmt";
 import { listAllUsers, getRolesByUserId } from "@/lib/auth0-mgmt";
+import { invalidateAuth0Cache } from "@/lib/auth0-cache";
 import { isDevRole } from "@/lib/ai-role";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -55,6 +56,7 @@ export async function POST(req: NextRequest) {
       email,
       password,
     });
+    invalidateAuth0Cache();
     return NextResponse.json(created, { status: 201 });
   } catch (err) {
     console.error("POST /api/admin/users error:", err);

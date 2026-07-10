@@ -1,4 +1,5 @@
 import { getMgmtClient } from "@/lib/mgmt";
+import { invalidateAuth0Cache } from "@/lib/auth0-cache";
 import { isDevRole } from "@/lib/ai-role";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -12,6 +13,7 @@ export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: "This role cannot be modified." }, { status: 403 });
     }
     await mgmt.roles.delete(roleId);
+    invalidateAuth0Cache();
     return NextResponse.json({ ok: true });
   } catch (err: any) {
     console.error("[DELETE /api/admin/roles]", err);
@@ -34,6 +36,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "This role name is reserved." }, { status: 400 });
     }
     const data = await mgmt.roles.update(roleId, { name, description });
+    invalidateAuth0Cache();
     return NextResponse.json({ id: (data as any).id, name: (data as any).name, description: (data as any).description ?? "" });
   } catch (err: any) {
     console.error("[PATCH /api/admin/roles]", err);

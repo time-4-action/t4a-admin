@@ -21,6 +21,15 @@
 //      calls scales with role count, not user count.
 
 import { getMgmtClient } from "@/lib/mgmt";
+import { cached } from "@/lib/auth0-cache";
+
+// Cache TTLs. Roles change rarely (longer); user lists + role membership can change via
+// this admin, but a short window is plenty to absorb the burst of page loads and is
+// invalidated immediately on any mutation (see invalidateAuth0Cache).
+const TTL_USERS = 60_000;
+const TTL_ROLES = 300_000;
+const TTL_ROLE_MEMBERS = 60_000;
+const TTL_ROLES_BY_USER = 60_000;
 
 // Drains an Auth0 v5 `Page` (any endpoint's pagination scheme) into one array.
 async function drain<T>(page: AsyncIterable<T>): Promise<T[]> {
@@ -50,24 +59,30 @@ async function mapLimit<T, R>(
   return results;
 }
 
-/** Every Auth0 user, across all pages (offset paging, 100 per request). */
+/** Every Auth0 user, across all pages (offset paging, 100 per request). Cached. */
 export async function listAllUsers(): Promise<any[]> {
-  const mgmt = getMgmtClient();
-  return drain((await mgmt.users.list({ per_page: 100 })) as AsyncIterable<any>);
+  return cached("users", TTL_USERS, async () => {
+    const mgmt = getMgmtClient();
+    return drain((await mgmt.users.list({ per_page: 100 })) as AsyncIterable<any>);
+  });
 }
 
-/** Every Auth0 role, across all pages (offset paging, 100 per request). */
+/** Every Auth0 role, across all pages (offset paging, 100 per request). Cached. */
 export async function listAllRoles(): Promise<any[]> {
-  const mgmt = getMgmtClient();
-  return drain((await mgmt.roles.list({ per_page: 100 })) as AsyncIterable<any>);
+  return cached("roles", TTL_ROLES, async () => {
+    const mgmt = getMgmtClient();
+    return drain((await mgmt.roles.list({ per_page: 100 })) as AsyncIterable<any>);
+  });
 }
 
-/** Every user holding the given role id, across all pages (checkpoint paging). */
+/** Every user holding the given role id, across all pages (checkpoint paging). Cached. */
 export async function listUsersInRole(roleId: string): Promise<any[]> {
-  const mgmt = getMgmtClient();
-  return drain(
-    (await mgmt.roles.users.list(roleId, { take: 100 })) as AsyncIterable<any>,
-  );
+  return cached(`role-members:${roleId}`, TTL_ROLE_MEMBERS, async () => {
+    const mgmt = getMgmtClient();
+    return drain(
+      (await mgmt.roles.users.list(roleId, { take: 100 })) as AsyncIterable<any>,
+    );
+  });
 }
 
 /**
@@ -79,17 +94,19 @@ export async function getRolesByUserId(): Promise<{
   rolesByUser: Map<string, string[]>;
   roles: any[];
 }> {
-  const roles = await listAllRoles();
-  const rolesByUser = new Map<string, string[]>();
+  return cached("roles-by-user", TTL_ROLES_BY_USER, async () => {
+    const roles = await listAllRoles();
+    const rolesByUser = new Map<string, string[]>();
 
-  await mapLimit(roles, 4, async (role: any) => {
-    const members = await listUsersInRole(role.id);
-    for (const u of members) {
-      const arr = rolesByUser.get(u.user_id);
-      if (arr) arr.push(role.name);
-      else rolesByUser.set(u.user_id, [role.name]);
-    }
+    await mapLimit(roles, 4, async (role: any) => {
+      const members = await listUsersInRole(role.id);
+      for (const u of members) {
+        const arr = rolesByUser.get(u.user_id);
+        if (arr) arr.push(role.name);
+        else rolesByUser.set(u.user_id, [role.name]);
+      }
+    });
+
+    return { rolesByUser, roles };
   });
-
-  return { rolesByUser, roles };
 }

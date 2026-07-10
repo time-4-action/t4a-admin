@@ -1,5 +1,6 @@
 import { getMgmtClient } from "@/lib/mgmt";
 import { listAllRoles } from "@/lib/auth0-mgmt";
+import { invalidateAuth0Cache } from "@/lib/auth0-cache";
 import { isDevRole } from "@/lib/ai-role";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -22,6 +23,7 @@ export async function POST(req: NextRequest) {
     if (isDevRole(name.trim())) return NextResponse.json({ error: "This role name is reserved." }, { status: 400 });
     const mgmt = getMgmtClient();
     const data = await mgmt.roles.create({ name: name.trim(), description: description?.trim() ?? "" });
+    invalidateAuth0Cache();
     return NextResponse.json({ id: (data as any).id, name: (data as any).name, description: (data as any).description ?? "" }, { status: 201 });
   } catch (err: any) {
     console.error("[POST /api/admin/roles]", err);
