@@ -16,6 +16,10 @@ export const SECTION_ROLES = {
   access: ["admin", "access-admin"],
   ai: ["admin", "ai-admin"],
   warranty: ["admin", "warranty-admin"],
+  partners: ["admin", "partners-admin"],
+  automation: ["admin", "automation-admin"],
+  builder: ["admin", "builder-admin"],
+  documents: ["admin", "documents-admin"],
   system: ["admin"],
 } as const;
 
@@ -69,14 +73,30 @@ export function isPrivilegedRoleName(name: string): boolean {
 // unmapped so any admin role may call them — page gating already hides them.
 // Order is most-specific-first.
 export const ROUTE_RULES: { prefix: string; section: SectionKey }[] = [
+  // Access-management pages are STRICT super-admin only — mapped to the
+  // admin-only "system" section. These must precede the broader section
+  // prefixes below so the more-specific /<section>/access path wins.
+  { prefix: "/roles/super-admins", section: "system" },
+  { prefix: "/ai/access", section: "system" },
+  { prefix: "/warranty/access", section: "system" },
+  { prefix: "/partners/access", section: "system" },
+  { prefix: "/automation/access", section: "system" },
+  { prefix: "/builder/access", section: "system" },
   // pages
   { prefix: "/warranty", section: "warranty" },
+  { prefix: "/partners", section: "partners" },
+  { prefix: "/automation", section: "automation" },
+  { prefix: "/builder", section: "builder" },
+  { prefix: "/documents", section: "documents" },
   { prefix: "/roles", section: "access" },
   { prefix: "/ai", section: "ai" },
   { prefix: "/users", section: "general" },
   { prefix: "/settings", section: "system" },
   // section-specific API routes
   { prefix: "/api/warranty", section: "warranty" },
+  { prefix: "/api/partners", section: "partners" },
+  { prefix: "/api/automation", section: "automation" },
+  { prefix: "/api/admin/documents", section: "documents" },
   { prefix: "/api/admin/roles", section: "access" },
   { prefix: "/api/admin/resource-servers", section: "access" },
   { prefix: "/api/admin/stats", section: "ai" },
@@ -88,4 +108,16 @@ export function sectionForPath(pathname: string): SectionKey | null {
     (r) => pathname === r.prefix || pathname.startsWith(r.prefix + "/")
   );
   return rule ? rule.section : null;
+}
+
+// The B2B customer portal. These paths are open to ANY authenticated user (they
+// are not admin-gated): a customer's identity is their email, matched to a
+// Metakocka partner inside the portal itself. Not listed in ROUTE_RULES.
+export function isPortalPath(pathname: string): boolean {
+  return (
+    pathname === "/portal" ||
+    pathname.startsWith("/portal/") ||
+    pathname === "/api/portal" ||
+    pathname.startsWith("/api/portal/")
+  );
 }

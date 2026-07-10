@@ -44,7 +44,8 @@ This is a **Next.js 16 App Router** admin dashboard for managing users, access t
 All routes except `/forbidden` and `/unauthorized` are protected by `middleware.ts`, which delegates to `lib/proxy.ts`. The middleware:
 1. Runs the Auth0 SDK middleware for session management.
 2. Verifies the user has the `"admin"` role by decoding the Auth0 ID token JWT directly (custom claims under `https://time-4-action.com/roles`). The Auth0 `userinfo` endpoint does not forward custom claims, so the raw JWT payload must be parsed manually.
-3. Redirects unauthenticated users to `/auth/login` and non-admin users to `/forbidden`.
+3. Redirects unauthenticated users to `/auth/login`.
+4. **Non-admins are routed to the B2B customer portal, not `/forbidden`.** `/portal/*` (and `/api/portal/*`) are open to any authenticated user — a customer holds no role; their identity is the session email, matched to a Metakocka partner inside the portal (see the B2B Customer Portal module). A logged-in non-admin who hits any admin route is redirected to `/portal`. Admins who lack a specific section's role still get `/forbidden`. Portal paths are recognized by `isPortalPath()` in `lib/access.ts` and are intentionally absent from `ROUTE_RULES`.
 
 Auth0 session client: `lib/auth.ts` (singleton `auth0`).  
 Auth0 Management API client: `lib/mgmt.ts` (singleton `ManagementClient`, lazy-initialized).
@@ -195,6 +196,204 @@ contract lives in the `patrik-warranty-form` repo.
 - `AuditEntry` / `AuditChange` in `types/warranty.ts` mirror the service's audit
   shape — keep in sync by hand like the other warranty types.
 
+### Partners module (`app/partners/`)
+
+A read/update surface over the **t4a-partner-portal** API, modelled on Warranty.
+A "partner" is an Auth0 user holding the portal's export role
+(`NEXT_PUBLIC_PARTNER_ROLE_NAME`, default `"export"`). The portal exposes an
+internal admin surface at `/api/admin/partners/*` behind a shared
+`PARTNER_ADMIN_TOKEN`; this admin calls it server-side via `lib/partner-api.ts`
+(`callPartnerPortal`) and proxies it under `/api/partners/*` so the token never
+reaches the browser. The portal **owns** all partner data (activity, notes); this
+admin stores nothing.
+
+| Page | Path | Notes |
+|---|---|---|
+| Partners list | `/partners` | All export-role Auth0 users joined with per-partner portal activity (Shopify connections, exports + downloads, feeds, last-active). Dormant partners show with zeros. |
+| Partner detail | `/partners/[sub]` | Insight cards (Shopify / Exports / Own Sources), "most interacted with", activity timeline, and a timestamped internal-notes log. `sub` is the Auth0 sub (URL-encoded). |
+| Catalogue Sync | `/partners/sync` | Global (not per-partner) view of the portal's in-app schedulers: PNV catalogue refresh, Own Sources feed imports, Shopify pending-cleanup sweep. Status cards (next/last run, duration, result), a PNV run-history table, an Own Sources feed table, and **Run now** buttons (full PNV pipeline + per-feed). Polls `/api/partners/sync` while a run is in flight. Fed entirely by the portal's `/api/admin/system/*` surface. |
+| Partners Access | `/partners/access` | Per-user toggle of the **partner** role (`PARTNER_ROLE_NAME`, default `export`) — i.e. manage *who is a partner*. Granting it makes a user appear in the Partners list and gives them partner-portal access. Reuses `<AccessManager>`. (This is distinct from `partners-admin`, the role that gates the admin section itself — that one is managed via the general Access section.) |
+
+| Proxy route | Methods |
+|---|---|
+| `/api/partners` | GET (list: `getUsersWithRole` + portal `/overview`, joined by sub) |
+| `/api/partners/[sub]` | GET |
+| `/api/partners/[sub]/activity` | GET |
+| `/api/partners/[sub]/notes` | GET, POST (author stamped from the session, like warranty notes) |
+| `/api/partners/[sub]/notes/[noteId]` | DELETE |
+| `/api/partners/sync` | GET (proxy portal `/api/admin/system/sync`) |
+| `/api/partners/sync/run` | POST (proxy portal `/api/admin/system/sync/pnv/run` — full pipeline) |
+| `/api/partners/sync/own-sources/[feedId]/run` | POST (proxy portal feed run) |
+
+The partner list is the set of Auth0 users with `PARTNER_ROLE_NAME` (via
+`lib/role-users.ts` → `getUsersWithRole`, the same 2-call pattern as
+`lib/dev-users.ts`). Activity comes from the portal, which logs it via a new
+`activity_log` / `partner_activity` instrumentation (login/last-active, export
+downloads, Shopify/feed actions). Shared types live in `types/partner.ts` and
+mirror the portal's `src/controllers/adminPartnersController.js` — keep in sync
+by hand. Role names are configurable via `NEXT_PUBLIC_PARTNERS_ADMIN_ROLE_NAME`
+(default `"partners-admin"`) and `NEXT_PUBLIC_PARTNER_ROLE_NAME` (default
+`"export"`) in `lib/partner-role.ts`.
+
+Required env vars (server-side only):
+
+```
+PARTNER_API_BASE=https://<partner-portal-api host>   # e.g. https://api.time-4-action.com
+PARTNER_API_TOKEN=<must match the portal's PARTNER_ADMIN_TOKEN>
+```
+
+### Automation module (`app/automation/`)
+
+A read/update surface over the **t4a-mk-automation** service (the Metakocka warehouse +
+products sync engine). Modelled on Warranty/Partners: the service exposes `/api/v1/*`
+behind an `x-api-key`; this admin calls it server-side via `lib/mk-api.ts`
+(`callMkAutomation`) and proxies it under `/api/automation/*` so the key never reaches the
+browser. The service owns its data (cron schedules in `cron.json`, run history in SQLite).
+
+Gated by a new `automation` section (`SECTION_ROLES.automation = ["admin", "automation-admin"]`).
+
+The section is split into an **overview** plus a **dedicated page per sync**. All three
+render the same cards/modals/history off one shared client module,
+`app/automation/automation-shared.tsx` (helpers + `SyncCard` + `RunDetailsModal` +
+`CronEditorModal` + `RunHistoryTable` + the `useAutomation()` data hook + `SingleSyncPage`).
+`/api/automation/status` already returns both syncs and both run lists, so every page hits
+the same endpoint and renders its slice.
+
+| Page | Path | Notes |
+|---|---|---|
+| Overview | `/automation` | Both cards (Warehouse, Products) + a **combined** run-history table. Each card links to its dedicated page. |
+| Warehouse | `/automation/warehouse` | Warehouse card + "How it works" + warehouse-only history. Reads T4A free stock → CREAGLOBE T4A virtual warehouse. **ProMode/Germany source is retired** (engine keeps the disabled code). |
+| Products | `/automation/products` | Products card + "How it works" + products-only history. **One-way** sync: T4A is the source of truth, CREAGLOBE is updated to match (never the reverse). |
+
+Each card shows status, a plain-English schedule with an inline cron editor (presets + live
+`humanizeCron` preview), next/last run, and **Run now**; the shared hook polls every 4s while
+a sync is running. Run details surface per-item errors for both warehouse (`sync_stock`
+`error_list`) and products.
+
+| Proxy route | Methods |
+|---|---|
+| `/api/automation/status` | GET (mk `/api/v1/status` + `/api/v1/runs` per type, combined) |
+| `/api/automation/schedules/[type]` | PUT (`type` = `warehouse` \| `products` → mk schedule endpoints) |
+| `/api/automation/[type]/run` | POST (mk run endpoints — 202 started / 409 already running) |
+
+The mk-automation run endpoints are **asynchronous**: they record a row in the service's
+`sync_runs` table, run in the background, and respond `202` immediately. Shared types live
+in `types/automation.ts`. Required env vars (server-side secrets):
+
+```
+MK_API_BASE=https://<mk-automation host>
+MK_API_TOKEN=<must match the service's API_KEY>
+```
+
+### Builder module (`app/builder/`)
+
+A **fully client-side** tool that generates copyable HTML snippets for the
+marketing website's "sections". It is a polished admin-portal port of the
+**t4a-main-website-sections** repo (used only as the concept reference) — it
+calls **no backend** and stores nothing. Each snippet is scriptless: only markup
++ `data-*` config, rendered on the live site by one shared script
+(`patrik-components.js`). Gated by a new `builder` section
+(`SECTION_ROLES.builder = ["admin", "builder-admin"]`).
+
+| Page | Path | Notes |
+|---|---|---|
+| Section Builder hub | `/builder` | Landing page: lists the available builders + a "how it works" primer and a renderer download. |
+| Radar Chart builder | `/builder/radar-chart` | Performance octagon — single dataset or a comparison dropdown; axes, values, and optional colours. |
+| Range Bars builder | `/builder/range-bars` | Feel / rider-goal bars — two-pole or labelled-scale mode, optional marker + band colour. Add any number of bars. |
+| Builder Access | `/builder/access` | Per-user toggle of the `builder-admin` role. Reuses `<AccessManager>` (`fuchsia` accent); super-admin only (mapped to the `system` section in `ROUTE_RULES`, like the other `*/access` pages). |
+
+Each builder holds its own state, generates the markup in a `useMemo`, and renders
+through the shared `BuilderShell` in `app/builder/builder-ui.tsx` (which also holds
+the controls kit, the syntax-highlighted copyable code panel, and the live
+preview). Code generation is a faithful port of the reference builders' logic.
+
+**The live preview uses the real renderer, not a re-implementation.** The
+website's `patrik-components.js` is bundled verbatim at `public/patrik-components.js`;
+`lib/use-patrik-components.ts` loads it once and re-runs it over the preview
+subtree, so the preview is byte-identical to production output. The same file is
+offered as a download from the builder pages.
+
+The `<script src="…">` line written into every **generated snippet** is a
+**hardcoded** constant `BUILDER_SCRIPT_URL` in `lib/builder-role.ts` (the
+canonical hosted renderer at
+`https://www.patrikinternational.com/assets/added_js_files/patrik-components.js`)
+— not env-configurable. Role name is configurable via
+`NEXT_PUBLIC_BUILDER_ADMIN_ROLE_NAME` (default `"builder-admin"`, also in
+`lib/builder-role.ts`). To add a new section builder: bundle its renderer logic
+into `patrik-components.js`, then add a `/builder/<name>` page that drives
+`BuilderShell` (see the two existing builders as templates).
+
+### B2B Customer Portal + Documents module (`app/portal/`, `app/documents/`)
+
+One integration, **two faces**, over the **raw Metakocka REST API**
+(`https://main.metakocka.si/rest/eshop/v1/*`). Customers view their **own**
+offers / sales orders / invoices; admins browse **any** customer's. Both faces
+render the same document components (`app/documents/documents-shared.tsx`); only
+the partner-id source differs.
+
+- **Customers** (`app/portal/*`) log in **passwordless** (Auth0 OTP) and hold
+  **no role**. Their email is matched to a Metakocka partner via
+  `/get_partner`; unmatched → `/portal/no-account`. The shell is the stripped-down
+  **"Time 4 Action B2B"** nav (`components/portal-nav.tsx`), chosen by pathname in
+  `components/app-shell.tsx` (the root layout no longer renders `<Nav>` directly).
+- **Admins** (`app/documents/*`) get a new `documents` section
+  (`SECTION_ROLES.documents = ["admin", "documents-admin"]`) — a partner picker →
+  per-customer Offers/Orders/Invoices tabs → detail.
+
+**Metakocka client** — `lib/metakocka.ts` (`server-only`, distinct from
+`lib/mk-api.ts` which is the mk-automation sync service). Every call is a POST
+whose JSON body carries `secret_key` + `company_id`; the `opr_code` envelope
+(`"0"` = OK) is checked. Key functions: `resolvePartnerByEmail` (email→partner,
+exact-contact-match only, short in-process TTL cache), `searchPartners` /
+`getPartnerById` (admin picker), `listDocuments(kind, partnerMkId)` (per-family
+`/search` with `query_advance partner_mk_id`; invoices merge
+`sales_bill_domestic` + `sales_bill_foreign`), `getDocument(kind, mkId)` (tries
+each doc_type for the kind; bills add payment flags), `getDocumentPdf(kind, mkId)`
+(`/report`, needs a report_id). `DocKind` = `offer | order | invoice`. Server-side
+partner resolution for the portal lives in `lib/portal.ts` (`getSessionPartner`).
+
+| Page | Path | Notes |
+|---|---|---|
+| Portal (customer) | `/portal` → `/portal/invoices` | B2B shell; own docs only. |
+| Invoices / Offers / Orders | `/portal/{invoices,offers,orders}` | List (payment status + due date on invoices). |
+| Detail | `/portal/{…}/[mkId]` | Full doc + **Download PDF**. Ownership re-checked. |
+| No account | `/portal/no-account` | Email not matched to a partner. |
+| Customer picker (admin) | `/documents` | Search a partner by name/email/tax. |
+| Customer docs (admin) | `/documents/[partnerMkId]` | Offers/Orders/Invoices tabs. |
+| Detail (admin) | `/documents/[partnerMkId]/[kind]/[mkId]` | Same detail view, any partner. |
+
+| Proxy route | Methods |
+|---|---|
+| `/api/portal/documents` | GET (`?type=` — partner from session email) |
+| `/api/portal/documents/pdf` | GET (`?kind=&mkId=` — ownership re-checked) |
+| `/api/admin/documents` | GET (`?partner=&type=`) |
+| `/api/admin/documents/partners` | GET (`?q=`) |
+| `/api/admin/documents/pdf` | GET (`?kind=&mkId=`) |
+
+**Security:** `MK_SECRET_KEY`/`MK_COMPANY_ID` stay server-side; the portal APIs
+derive the partner from the **session email** (never client input) and re-check
+`doc.partner.mkId` on every detail/PDF fetch; cost/purchase-price expansion flags
+are never sent. Shared types live in `types/documents.ts` (hand-mirror the MK
+responses, like `types/warranty.ts`). Role name is configurable via
+`NEXT_PUBLIC_DOCUMENTS_ADMIN_ROLE_NAME` (default `"documents-admin"`, in
+`lib/documents-role.ts`).
+
+Required env vars (server-side secrets — the raw Metakocka REST credentials,
+distinct from `MK_API_*`):
+
+```
+MK_SECRET_KEY=<Metakocka private key>
+MK_COMPANY_ID=<Metakocka public company id>
+MK_REST_BASE=https://main.metakocka.si   # optional (default)
+MK_REPORT_ID_INVOICE=38   # optional — defaults to MK's standard bill report (verified)
+MK_REPORT_ID_OFFER=37     # optional — defaults to MK's standard offer report (verified)
+MK_REPORT_ID_ORDER=<id>   # optional — no default; set to enable the order PDF button
+```
+
+Invoice + offer PDF export work out of the box (report IDs 38 / 37). Orders have
+no reliable standard report, so the order PDF button only appears when
+`MK_REPORT_ID_ORDER` is set.
+
 ### API Routes (`app/api/admin/`)
 
 | Route | Methods | Notes |
@@ -232,5 +431,22 @@ NEXT_PUBLIC_APP_NAME         # Browser tab title (default: "Admin")
 NEXT_PUBLIC_AI_ROLE_NAME     # Name of the AI-access role (default: "AI User")
 NEXT_PUBLIC_DEV_ROLE_NAME    # Name of the dev role to hide (default: "dev")
 NEXT_PUBLIC_WARRANTY_ADMIN_ROLE_NAME  # Role whose members are warranty assignees (default: "warranty-admin")
+NEXT_PUBLIC_PARTNERS_ADMIN_ROLE_NAME  # Role that grants the Partners section (default: "partners-admin")
+NEXT_PUBLIC_PARTNER_ROLE_NAME         # Auth0 role that identifies a partner (default: "export")
+NEXT_PUBLIC_AUTOMATION_ADMIN_ROLE_NAME # Role that grants the Automation section (default: "automation-admin")
+NEXT_PUBLIC_BUILDER_ADMIN_ROLE_NAME  # Role that grants the Builder section (default: "builder-admin")
+NEXT_PUBLIC_DOCUMENTS_ADMIN_ROLE_NAME # Role that grants the Documents browse section (default: "documents-admin")
 AUTH0_BASE_URL               # Production base URL (set by docker-compose)
 ```
+
+Partners module also requires `PARTNER_API_BASE` and `PARTNER_API_TOKEN` (both
+server-side secrets — see the Partners module section above).
+
+Automation module requires `MK_API_BASE` and `MK_API_TOKEN` (server-side
+secrets — see the Automation module section above). Its section is gated by the
+`automation-admin` role (or `admin`).
+
+B2B Customer Portal + Documents module requires `MK_SECRET_KEY` and
+`MK_COMPANY_ID` (the raw Metakocka REST credentials — **not** `MK_API_*`);
+`MK_REST_BASE`, `MK_REPORT_ID_INVOICE`, `MK_REPORT_ID_OFFER` are optional. See the
+B2B Customer Portal module section above.

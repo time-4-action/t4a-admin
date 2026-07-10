@@ -31,3 +31,17 @@ export async function getUsersWithRole(roleName: string): Promise<RoleUser[]> {
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
+
+/**
+ * Returns a single user holding the named role, by Auth0 user id (sub), or null.
+ * Reuses {@link getUsersWithRole} so the identity matches the Partners list
+ * exactly (same name/email/picture resolution) — avoids a separate
+ * `users.get` call whose result shape/scopes can differ.
+ */
+export async function getRoleUser(
+  roleName: string,
+  userId: string,
+): Promise<RoleUser | null> {
+  const users = await getUsersWithRole(roleName);
+  return users.find((u) => u.id === userId) ?? null;
+}
