@@ -23,7 +23,6 @@ import { cn } from "@/lib/utils";
 import {
   BuilderShell,
   Group,
-  Field,
   TextField,
   Segmented,
   Slider,
@@ -79,14 +78,18 @@ function SortableAxisRow({
 
 /* ── defaults & colour config (mirrors the reference builder) ─────────────── */
 
+// Dark-native teal defaults that mirror patrik-components.js. Leaving `fill`
+// and `fillOpacity` untouched emits no data-fill, so the renderer draws its
+// smooth teal gradient; the grid/axis sentinels below map to the renderer's
+// faint white hairlines (which are alpha-based, so not written as hex).
 const DEF = {
-  fill: "#b4ff64",
-  fillOpacity: 0.6,
-  stroke: "#b4ff64",
-  point: "#1a3a4a",
-  grid: "#b0c4cf",
-  axisColor: "#b0c4cf",
-  labelColor: "#1a3a4a",
+  fill: "#38b6d3",
+  fillOpacity: 0.45,
+  stroke: "#38b6d3",
+  point: "#eaf7fb",
+  grid: "#7c93a0",
+  axisColor: "#6a828f",
+  labelColor: "#c7dce4",
 };
 
 const COLOR_FIELDS = [
@@ -118,8 +121,6 @@ function hexToRgba(hex: string, a: number): string {
 /* ── page ─────────────────────────────────────────────────────────────────── */
 
 export default function RadarChartBuilder() {
-  const [wrap, setWrap] = useState(true);
-  const [heading, setHeading] = useState("Programme");
   const [mode, setMode] = useState<"single" | "compare">("single");
   const [axes, setAxes] = useState<string[]>([
     "LIGHTWIND", "FREERIDE", "FOIL", "FREEFLY", "WAVE", "SURF", "RACING", "FREESTYLE",
@@ -233,13 +234,11 @@ export default function RadarChartBuilder() {
         } else {
           L[L.length - 1] += ">";
         }
-        L.push(`${pad}    <div style="margin-bottom:20px;">`);
+        L.push(`${pad}    <div style="margin-bottom:20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">`);
         L.push(
-          `${pad}        <label style="font-size:13px;color:#1a3a4a;font-weight:bold;margin-right:8px;">Compare models:</label>`,
+          `${pad}        <label style="font-family:'Montserrat',sans-serif;font-size:13px;color:#c7dce4;font-weight:700;letter-spacing:.02em;">Compare models:</label>`,
         );
-        L.push(
-          `${pad}        <select class="patrik-radar-select" style="padding:6px 12px;font-size:14px;border-radius:5px;border:1px solid #b0c4cf;color:#1a3a4a;background:#fff;font-weight:bold;cursor:pointer;">`,
-        );
+        L.push(`${pad}        <select class="patrik-radar-select">`);
         datasets.forEach((ds) => {
           L.push(
             `${pad}            <option value="${fit(ds.values).join(",")}">${esc(ds.name)}</option>`,
@@ -252,36 +251,15 @@ export default function RadarChartBuilder() {
       return L.join("\n");
     };
 
-    const buildMarkup = (): string => {
-      if (!wrap) return buildChart("");
-      const pad = "    ";
-      let out = `<div style="background-color:#efefef; padding:20px; border-radius:10px; font-family:sans-serif; max-width:550px; margin:30px auto;">\n`;
-      if (heading.trim())
-        out += `${pad}<h2 style="color:#1a3a4a; margin-top:0; font-size:22px;">${esc(heading)}</h2>\n\n`;
-      out += buildChart(pad) + `\n</div>`;
-      return out;
-    };
-
-    const m = buildMarkup();
+    const m = buildChart("");
     const full = `${m}\n\n<script src="${BUILDER_SCRIPT_URL}"></script>`;
     return { markup: m, code: full };
-  }, [wrap, heading, mode, axes, values, datasets, colors]);
+  }, [mode, axes, values, datasets, colors]);
 
   /* — controls — */
   const controls = (
     <>
-      <Group num={1} title="Card wrapper">
-        <CheckRow checked={wrap} onChange={setWrap}>
-          Wrap in a grey card with a heading
-        </CheckRow>
-        {wrap && (
-          <Field label="Heading">
-            <TextField value={heading} onChange={setHeading} placeholder="Programme" />
-          </Field>
-        )}
-      </Group>
-
-      <Group num={2} title="Mode">
+      <Group num={1} title="Mode">
         <Segmented
           value={mode}
           onChange={setMode}
@@ -292,7 +270,7 @@ export default function RadarChartBuilder() {
         />
       </Group>
 
-      <Group num={3} title="Axes">
+      <Group num={2} title="Axes">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onAxisDragEnd}>
           <SortableContext items={axisKeys} strategy={verticalListSortingStrategy}>
             <div className="space-y-2">
@@ -314,7 +292,7 @@ export default function RadarChartBuilder() {
         <AddButton onClick={addAxis}>Add axis</AddButton>
       </Group>
 
-      <Group num={4} title={mode === "single" ? "Values" : "Datasets"}>
+      <Group num={3} title={mode === "single" ? "Values" : "Datasets"}>
         {mode === "single" ? (
           <div className="space-y-2.5">
             {axes.map((ax, i) => (
@@ -356,7 +334,7 @@ export default function RadarChartBuilder() {
         )}
       </Group>
 
-      <Group num={5} title="Colours" optional>
+      <Group num={4} title="Colours" optional>
         <div className="grid grid-cols-2 gap-2.5">
           {COLOR_FIELDS.map((f) => (
             <ColorField
@@ -370,7 +348,7 @@ export default function RadarChartBuilder() {
         </div>
         <div className="pt-1">
           <Slider
-            label="Fill opacity"
+            label="Fill intensity"
             value={colors.fillOpacity}
             min={0}
             max={1}
@@ -379,8 +357,9 @@ export default function RadarChartBuilder() {
           />
         </div>
         <p className="text-[10.5px] text-muted-foreground leading-relaxed">
-          Only colours you change are written into the snippet. Everything else uses the component
-          defaults.
+          The fill renders as a smooth gradient of the colour you pick — intensity sets how strong
+          it is at the top. Only colours you change are written into the snippet; everything else
+          uses the component defaults.
         </p>
       </Group>
     </>

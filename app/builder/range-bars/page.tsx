@@ -27,6 +27,7 @@ import {
   TextField,
   NumberField,
   Segmented,
+  Select,
   Slider,
   CheckRow,
   ColorField,
@@ -36,7 +37,10 @@ import {
   SubCard,
 } from "../builder-ui";
 
-const DEF_RANGE = "#b4ff64";
+// Sentinel band colour. When a bar keeps this value no data-range is emitted,
+// so patrik-components.js renders its smooth teal gradient fill. Pick any other
+// colour and it is written out as a flat data-range override.
+const DEF_RANGE = "#38b6d3";
 
 // Deterministic stop-key counter (stable across SSR/CSR because keys are only
 // minted in the same call order). Gives drag-and-drop a stable identity per
@@ -104,17 +108,12 @@ function StopSelect({
   onChange: (v: number) => void;
 }) {
   return (
-    <select
+    <Select
       value={value === "" ? 0 : value}
-      onChange={(e) => onChange(Number(e.target.value))}
-      className="h-8 w-full rounded-md border border-border bg-background text-xs px-2 text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-blue-400"
-    >
-      {stops.map((s, i) => (
-        <option key={i} value={i}>
-          {i} · {s.trim() || "(blank)"}
-        </option>
-      ))}
-    </select>
+      onChange={(v) => onChange(Number(v))}
+      ariaLabel="Select stop"
+      options={stops.map((s, i) => ({ value: i, label: `${i} · ${s.trim() || "(blank)"}` }))}
+    />
   );
 }
 
@@ -157,8 +156,6 @@ const newBar = (over: Partial<Bar> = {}): Bar => {
 };
 
 export default function RangeBarsBuilder() {
-  const [wrap, setWrap] = useState(true);
-  const [heading, setHeading] = useState("Feel");
   const [bars, setBars] = useState<Bar[]>([
     newBar({ title: "Power delivery", left: "Direct", right: "Smooth", min: 25, max: 62 }),
     newBar({ title: "Center of effort", left: "Backhanded", right: "Fronthanded", min: 45, max: 80 }),
@@ -196,37 +193,15 @@ export default function RangeBarsBuilder() {
       return `${pad}<div class="patrik-range-bar"\n${A.join("\n")}${A.length ? "\n" : ""}${last}\n${pad}</div>`;
     };
 
-    const buildMarkup = (): string => {
-      const pad = wrap ? "    " : "";
-      const body = bars.map((b) => buildBar(b, pad)).join("\n\n");
-      if (!wrap) return body;
-      let out = `<div style="background-color:#efefef; padding:24px; border-radius:10px; font-family:sans-serif; max-width:550px; margin:30px auto;">\n`;
-      if (heading.trim())
-        out += `    <h2 style="color:#1a3a4a; margin-top:0; font-size:22px;">${esc(heading)}</h2>\n\n`;
-      out += body + `\n</div>`;
-      return out;
-    };
-
-    const m = buildMarkup();
+    const m = bars.map((b) => buildBar(b, "")).join("\n\n");
     const full = `${m}\n\n<script src="${BUILDER_SCRIPT_URL}"></script>`;
     return { markup: m, code: full };
-  }, [wrap, heading, bars]);
+  }, [bars]);
 
   /* — controls — */
   const controls = (
     <>
-      <Group num={1} title="Card wrapper">
-        <CheckRow checked={wrap} onChange={setWrap}>
-          Wrap all bars in a grey card with a heading
-        </CheckRow>
-        {wrap && (
-          <Field label="Heading">
-            <TextField value={heading} onChange={setHeading} placeholder="Feel" />
-          </Field>
-        )}
-      </Group>
-
-      <Group num={2} title="Bars">
+      <Group num={1} title="Bars">
         <div className="space-y-3">
           {bars.map((bar, bi) => {
             const stops = bar.scale.split(",");
@@ -416,6 +391,10 @@ export default function RangeBarsBuilder() {
           })}
         </div>
         <AddButton onClick={addBar}>Add bar</AddButton>
+        <p className="text-[10.5px] text-muted-foreground leading-relaxed pt-1">
+          Each band renders as a smooth gradient of its colour — matching the radar chart&apos;s
+          fill. Leave the band colour at the default for the brand teal.
+        </p>
       </Group>
     </>
   );

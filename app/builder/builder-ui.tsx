@@ -9,7 +9,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { Copy, Check, Download, ArrowLeft, Plus, X, RotateCcw } from "lucide-react";
+import { Copy, Check, Download, ArrowLeft, Plus, X, RotateCcw, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { usePatrikComponents } from "@/lib/use-patrik-components";
@@ -72,8 +72,11 @@ function PreviewPanel({ markup }: { markup: string }) {
 
   return (
     <div className="bg-surface border border-border rounded-xl overflow-hidden">
-      <PanelHead title="Live preview" note="rendered by patrik-components.js" />
-      <div className="p-4 md:p-6 bg-muted/20">
+      <PanelHead title="Live preview" note="on a dark site surface · transparent" />
+      {/* Pure-black surface: the components are dark-native and transparent,
+          so this mirrors the black patrikinternational.com pages regardless
+          of the admin theme. */}
+      <div className="p-4 md:p-6" style={{ background: "#000000" }}>
         <div ref={ref} className="min-h-[120px]" />
       </div>
     </div>
@@ -344,6 +347,154 @@ export function Segmented<T extends string>({
   );
 }
 
+// A modern custom dropdown — replaces the native <select> so the closed
+// control and the open option list are both fully themed (native option lists
+// can't be styled). Portalled + fixed-positioned like ColorField so it is never
+// clipped by a scroll container, with keyboard support (↑/↓/Enter/Esc).
+export function Select<T extends string | number>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  placeholder,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+  ariaLabel?: string;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+
+  const selected = options.find((o) => o.value === value);
+  const curIdx = Math.max(0, options.findIndex((o) => o.value === value));
+
+  const place = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const maxH = 240;
+    const listH = Math.min(maxH, options.length * 34 + 8);
+    const below = window.innerHeight - r.bottom - 8;
+    // Open below by default; flip above when cramped and there's more room up.
+    const top = below < listH && r.top > below ? Math.max(8, r.top - 6 - listH) : r.bottom + 6;
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - r.width - 8);
+    setPos({ top, left, width: r.width });
+  }, [options.length]);
+
+  useEffect(() => {
+    if (!open) return;
+    place();
+    setActiveIdx(curIdx);
+    requestAnimationFrame(() => popRef.current?.focus());
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (triggerRef.current?.contains(t) || popRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [open, place, curIdx]);
+
+  const commit = (v: T) => {
+    onChange(v);
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  return (
+    <div className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) {
+            e.preventDefault();
+            setOpen(true);
+          }
+        }}
+        className={cn(
+          "flex items-center gap-2 w-full h-8 rounded-md border bg-background px-2.5 text-[11.5px] text-foreground transition-colors",
+          open ? "border-blue-400 ring-2 ring-blue-500/20" : "border-border hover:bg-muted/50",
+        )}
+      >
+        <span className="flex-1 truncate text-left">
+          {selected ? selected.label : <span className="text-muted-foreground">{placeholder ?? "Select"}</span>}
+        </span>
+        <ChevronDown
+          className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform", open && "rotate-180")}
+        />
+      </button>
+
+      {open && pos &&
+        createPortal(
+          <div
+            ref={popRef}
+            role="listbox"
+            tabIndex={-1}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setActiveIdx((i) => Math.min(options.length - 1, i + 1));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setActiveIdx((i) => Math.max(0, i - 1));
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                if (options[activeIdx]) commit(options[activeIdx].value);
+              } else if (e.key === "Escape") {
+                setOpen(false);
+                triggerRef.current?.focus();
+              }
+            }}
+            style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, maxHeight: 240 }}
+            className="z-50 overflow-auto rounded-lg border border-border bg-popover shadow-xl p-1 focus:outline-none"
+          >
+            {options.map((o, i) => {
+              const isSel = o.value === value;
+              return (
+                <button
+                  key={String(o.value) + i}
+                  type="button"
+                  role="option"
+                  aria-selected={isSel}
+                  onMouseEnter={() => setActiveIdx(i)}
+                  onClick={() => commit(o.value)}
+                  className={cn(
+                    "flex items-center gap-2 w-full rounded-md px-2 h-8 text-[11.5px] text-left transition-colors",
+                    isSel
+                      ? "bg-blue-600 text-white"
+                      : i === activeIdx
+                        ? "bg-muted text-foreground"
+                        : "text-foreground hover:bg-muted",
+                  )}
+                >
+                  <span className="flex-1 truncate">{o.label}</span>
+                  {isSel && <Check className="w-3.5 h-3.5 shrink-0" />}
+                </button>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
 // A value control that is both a drag slider AND a typeable number field —
 // they stay in sync and both clamp to [min, max]. The number field allows a
 // transient empty string while editing so the user can clear and retype.
@@ -443,11 +594,13 @@ export function CheckRow({
   );
 }
 
-// Curated palette: the Patrik brand colours first, then a general spectrum.
+// Swatches sampled straight from patrikinternational.com — the brand teals
+// first (incl. the component default #38b6d3), then the site's accent reds,
+// earth tone, neutrals, and the light tints used for labels/points on dark.
 const SWATCHES = [
-  "#b4ff64", "#1a3a4a", "#b0c4cf", "#efefef", "#ffffff", "#000000",
-  "#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16", "#22c55e",
-  "#10b981", "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6", "#ec4899",
+  "#01a0be", "#269ebc", "#2786b4", "#38b6d3", "#0b131c", "#000000",
+  "#b72a4c", "#e82c2e", "#55473c", "#303030", "#888888", "#cccccc",
+  "#e2e2e2", "#f3f6fd", "#ffffff", "#c7dce4", "#eaf7fb", "#645448",
 ];
 
 const isHex = (h: string) => /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(h);
