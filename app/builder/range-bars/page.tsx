@@ -208,6 +208,25 @@ export default function RangeBarsBuilder() {
       ),
     );
 
+  /* — save / load the whole build (per-user presets) — */
+  const getConfig = () => ({ mode, align, size, compareLabel, bars, models });
+  const applyConfig = (raw: unknown) => {
+    const c = raw as Partial<ReturnType<typeof getConfig>> | null;
+    if (!c || typeof c !== "object") return;
+    if (c.mode === "single" || c.mode === "compare") setMode(c.mode);
+    if (c.align === "left" || c.align === "center" || c.align === "right") setAlign(c.align);
+    if (typeof c.size === "number") setSize(c.size);
+    if (typeof c.compareLabel === "string") setCompareLabel(c.compareLabel);
+    if (Array.isArray(c.bars)) {
+      // Regenerate the drag-and-drop stop keys so they can't collide with the
+      // live counter.
+      setBars(
+        c.bars.map((b) => ({ ...b, stopKeys: String(b.scale ?? "").split(",").map(() => sid()) })),
+      );
+    }
+    if (Array.isArray(c.models)) setModels(c.models);
+  };
+
   /* — code generation (faithful port) — */
   const { markup, code } = useMemo(() => {
     // includeBand=false in comparison mode: the band (min/max) comes from the
@@ -613,6 +632,9 @@ export default function RangeBarsBuilder() {
       controls={controls}
       markup={markup}
       code={code}
+      presetKey="range-bars"
+      getConfig={getConfig}
+      applyConfig={applyConfig}
       tip={
         <>
           Load the renderer once per page — it renders every{" "}

@@ -68,6 +68,7 @@ MongoDB connection is cached on `global._mongooseConn` to survive Next.js hot-re
 | `UserUsage` | `userusages` | Per-user, per-model token counts and cost. Unique index on `(userId, modelId)`. |
 | `UserLimit` | `userlimits` | Per-user spending cap with period (`daily/weekly/monthly/total`) and current spend. |
 | `Conversation` | `conversations` | One document per conversation; used only to count `convToday` on the dashboard. |
+| `BuilderPreset` | `builderpresets` | A saved Section Builder configuration, scoped to the owning Auth0 `sub`. `config` is the builder's own state blob (opaque to the server). Index on `(userId, builder, updatedAt)`. |
 
 ### Dev-User Filtering
 
@@ -312,6 +313,20 @@ website's `patrik-components.js` is bundled verbatim at `public/patrik-component
 `lib/use-patrik-components.ts` loads it once and re-runs it over the preview
 subtree, so the preview is byte-identical to production output. The same file is
 offered as a download from the builder pages.
+
+**Saved builds (per-user presets).** Each builder header has a "Saved builds"
+control (`SavedPresets` in `app/builder/builder-ui.tsx`) that lets a user name the
+current configuration, reload it later, rename, update, or delete it. Presets are
+stored in MongoDB (`BuilderPreset` model) **scoped to the Auth0 `sub`** — a user
+only ever sees/edits their own. Each builder passes `presetKey` +
+`getConfig()`/`applyConfig()` to `BuilderShell`; the config is the builder's own
+state blob (opaque to the server). API (gated by the `builder` section via the new
+`/api/builder` rule in `lib/access.ts`):
+
+| Route | Methods |
+|---|---|
+| `/api/builder/presets` | GET (`?builder=`, own only), POST (`{builder,name,config}`) |
+| `/api/builder/presets/[id]` | PATCH (rename / overwrite `config`), DELETE — both owner-scoped |
 
 The `<script src="…">` line written into every **generated snippet** is a
 **hardcoded** constant `BUILDER_SCRIPT_URL` in `lib/builder-role.ts` (the

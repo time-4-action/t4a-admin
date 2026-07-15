@@ -9,7 +9,20 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { Copy, Check, Download, ArrowLeft, Plus, X, RotateCcw, ChevronDown } from "lucide-react";
+import {
+  Copy,
+  Check,
+  Download,
+  ArrowLeft,
+  Plus,
+  X,
+  RotateCcw,
+  ChevronDown,
+  Bookmark,
+  Trash2,
+  Pencil,
+  Loader2,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { usePatrikComponents } from "@/lib/use-patrik-components";
@@ -151,6 +164,306 @@ export function CopyableCode({ code }: { code: string }) {
   );
 }
 
+/* ─────────────────────────── saved presets ─────────────────────────────── */
+
+type Preset = { id: string; builder: string; name: string; config: unknown; updatedAt: string };
+
+// Per-user saved builds (persisted in MongoDB via /api/builder/presets). Lets a
+// user name the current configuration, come back later, and load it to keep
+// editing. `getConfig` snapshots the builder's state; `applyConfig` restores it.
+export function SavedPresets({
+  builderId,
+  getConfig,
+  applyConfig,
+}: {
+  builderId: string;
+  getConfig: () => unknown;
+  applyConfig: (config: unknown) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const [presets, setPresets] = useState<Preset[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [name, setName] = useState("");
+  const [currentId, setCurrentId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+
+  const current = presets.find((p) => p.id === currentId) ?? null;
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/builder/presets?builder=${encodeURIComponent(builderId)}`);
+      if (res.ok) {
+        const data = (await res.json()) as { presets: Preset[] };
+        setPresets(data.presets ?? []);
+      }
+    } catch {
+      /* keep whatever we had */
+    } finally {
+      setLoading(false);
+    }
+  }, [builderId]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const place = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setPos({ top: Math.min(r.bottom + 6, window.innerHeight - 8), right: window.innerWidth - r.right });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    place();
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (triggerRef.current?.contains(t) || popRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, place]);
+
+  const saveNew = async () => {
+    const n = name.trim();
+    if (!n || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/builder/presets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ builder: builderId, name: n, config: getConfig() }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Save failed");
+      const { preset } = (await res.json()) as { preset: Preset };
+      setName("");
+      setCurrentId(preset.id);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const updateCurrent = async () => {
+    if (!currentId || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/builder/presets/${currentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config: getConfig() }),
+      });
+      if (!res.ok) throw new Error("Update failed");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Update failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const load = (p: Preset) => {
+    applyConfig(p.config);
+    setCurrentId(p.id);
+    setOpen(false);
+  };
+
+  const rename = async (p: Preset) => {
+    const n = editName.trim();
+    setEditingId(null);
+    if (!n || n === p.name) return;
+    try {
+      await fetch(`/api/builder/presets/${p.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: n }),
+      });
+      await refresh();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const remove = async (p: Preset) => {
+    try {
+      await fetch(`/api/builder/presets/${p.id}`, { method: "DELETE" });
+      if (currentId === p.id) setCurrentId(null);
+      await refresh();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          "inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border text-[11px] font-medium transition-colors shrink-0",
+          open
+            ? "border-blue-400 text-foreground bg-muted"
+            : "border-border text-muted-foreground hover:text-foreground hover:bg-muted",
+        )}
+        title="Saved builds"
+      >
+        <Bookmark className="w-3.5 h-3.5" />
+        <span className="hidden sm:inline max-w-[140px] truncate">
+          {current ? current.name : "Saved builds"}
+        </span>
+        {presets.length > 0 && (
+          <span className="text-[10px] text-muted-foreground tabular-nums">{presets.length}</span>
+        )}
+      </button>
+
+      {open && pos &&
+        createPortal(
+          <div
+            ref={popRef}
+            style={{ position: "fixed", top: pos.top, right: pos.right, width: 288 }}
+            className="z-50 rounded-xl border border-border bg-popover shadow-xl p-3 space-y-3"
+          >
+            {/* save as new */}
+            <div>
+              <div className="text-[11px] font-semibold text-foreground mb-1.5">Save this build</div>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && saveNew()}
+                  placeholder="Name it…"
+                  className="h-8 text-xs bg-background"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  onClick={saveNew}
+                  disabled={!name.trim() || busy}
+                  className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg bg-blue-600 text-white text-[11px] font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                >
+                  {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  Save
+                </button>
+              </div>
+              {current && (
+                <button
+                  type="button"
+                  onClick={updateCurrent}
+                  disabled={busy}
+                  className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  Update “{current.name}” with current changes
+                </button>
+              )}
+              {error && <p className="mt-1.5 text-[11px] text-rose-500">{error}</p>}
+            </div>
+
+            <div className="border-t border-border/60" />
+
+            {/* list */}
+            <div>
+              <div className="text-[11px] font-semibold text-foreground mb-1.5 flex items-center gap-2">
+                Your builds
+                {loading && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+              </div>
+              {presets.length === 0 && !loading ? (
+                <p className="text-[11px] text-muted-foreground py-1">
+                  Nothing saved yet. Name a build above to save it.
+                </p>
+              ) : (
+                <div className="max-h-64 overflow-auto -mx-1 px-1 space-y-0.5">
+                  {presets.map((p) => (
+                    <div
+                      key={p.id}
+                      className={cn(
+                        "group flex items-center gap-1.5 rounded-lg px-2 h-9 transition-colors",
+                        p.id === currentId ? "bg-blue-500/10" : "hover:bg-muted",
+                      )}
+                    >
+                      {editingId === p.id ? (
+                        <input
+                          autoFocus
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onBlur={() => rename(p)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                            if (e.key === "Escape") setEditingId(null);
+                          }}
+                          className="flex-1 h-7 rounded-md border border-blue-400 bg-background text-[12px] px-2 text-foreground focus:outline-none"
+                          spellCheck={false}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => load(p)}
+                          className="flex-1 min-w-0 text-left"
+                          title={`Load “${p.name}”`}
+                        >
+                          <span className="block text-[12px] text-foreground truncate">{p.name}</span>
+                        </button>
+                      )}
+                      {editingId !== p.id && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingId(p.id);
+                              setEditName(p.name);
+                            }}
+                            className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground/60 hover:text-foreground hover:bg-background opacity-0 group-hover:opacity-100 transition"
+                            title="Rename"
+                            aria-label="Rename"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => remove(p)}
+                            className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground/60 hover:text-rose-500 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition"
+                            title="Delete"
+                            aria-label="Delete"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 /* ────────────────────────────── shell ──────────────────────────────────── */
 
 export function BuilderShell({
@@ -162,6 +475,9 @@ export function BuilderShell({
   markup,
   code,
   tip,
+  presetKey,
+  getConfig,
+  applyConfig,
 }: {
   title: string;
   icon: ElementType;
@@ -171,6 +487,10 @@ export function BuilderShell({
   markup: string;
   code: string;
   tip: ReactNode;
+  // When provided, the header shows the per-user "Saved builds" control.
+  presetKey?: string;
+  getConfig?: () => unknown;
+  applyConfig?: (config: unknown) => void;
 }) {
   return (
     <div className="flex flex-col h-full">
@@ -193,15 +513,20 @@ export function BuilderShell({
               {badge}
             </span>
           </div>
-          <a
-            href="/patrik-components.js"
-            download
-            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-border text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-            title="Download the renderer script"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">patrik-components.js</span>
-          </a>
+          <div className="flex items-center gap-2 shrink-0">
+            {presetKey && getConfig && applyConfig && (
+              <SavedPresets builderId={presetKey} getConfig={getConfig} applyConfig={applyConfig} />
+            )}
+            <a
+              href="/patrik-components.js"
+              download
+              className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-border text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+              title="Download the renderer script"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">patrik-components.js</span>
+            </a>
+          </div>
         </div>
       </header>
 

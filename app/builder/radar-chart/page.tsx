@@ -204,6 +204,24 @@ export default function RadarChartBuilder() {
   const setColor = (key: ColorKey, v: string) => setColors((c) => ({ ...c, [key]: v }));
   const resetColor = (key: ColorKey) => setColors((c) => ({ ...c, [key]: DEF[key] }));
 
+  /* — save / load the whole build (per-user presets) — */
+  const getConfig = () => ({ mode, align, size, compareLabel, axes, values, datasets, colors });
+  const applyConfig = (raw: unknown) => {
+    const c = raw as Partial<ReturnType<typeof getConfig>> | null;
+    if (!c || typeof c !== "object") return;
+    if (c.mode === "single" || c.mode === "compare") setMode(c.mode);
+    if (c.align === "left" || c.align === "center" || c.align === "right") setAlign(c.align);
+    if (typeof c.size === "number") setSize(c.size);
+    if (typeof c.compareLabel === "string") setCompareLabel(c.compareLabel);
+    if (Array.isArray(c.axes)) {
+      setAxes(c.axes);
+      setAxisKeys(c.axes.map(() => mkKey())); // fresh drag-and-drop identities
+    }
+    if (Array.isArray(c.values)) setValues(c.values);
+    if (Array.isArray(c.datasets)) setDatasets(c.datasets);
+    if (c.colors && typeof c.colors === "object") setColors({ ...DEF, ...(c.colors as Colors) });
+  };
+
   /* — code generation (faithful port) — */
   const { markup, code } = useMemo(() => {
     const colorAttrs = (): [string, string][] => {
@@ -406,6 +424,9 @@ export default function RadarChartBuilder() {
       controls={controls}
       markup={markup}
       code={code}
+      presetKey="radar-chart"
+      getConfig={getConfig}
+      applyConfig={applyConfig}
       tip={
         <>
           Load the renderer once per page (near the end of{" "}
