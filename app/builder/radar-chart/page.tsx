@@ -234,10 +234,8 @@ export default function RadarChartBuilder() {
         } else {
           L[L.length - 1] += ">";
         }
-        L.push(`${pad}    <div style="margin-bottom:20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">`);
-        L.push(
-          `${pad}        <label style="font-family:'Montserrat',sans-serif;font-size:13px;color:#c7dce4;font-weight:700;letter-spacing:.02em;">Compare models:</label>`,
-        );
+        L.push(`${pad}    <div class="patrik-rc-compare">`);
+        L.push(`${pad}        <span class="patrik-rc-compare-label">Compare models</span>`);
         L.push(`${pad}        <select class="patrik-radar-select">`);
         datasets.forEach((ds) => {
           L.push(

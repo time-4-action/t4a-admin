@@ -51,20 +51,22 @@
             if (h.length !== 6) return null;
             const n = parseInt(h, 16);
             if (!Number.isFinite(n)) return null;
-            return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255, a: 1 };
+            return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255, a: 1, hasAlpha: false };
         }
         const m = c.match(/rgba?\(([^)]+)\)/i);
         if (m) {
             const p = m[1].split(",").map(s => parseFloat(s.trim()));
-            return { r: p[0] || 0, g: p[1] || 0, b: p[2] || 0, a: p[3] != null ? p[3] : 1 };
+            // hasAlpha distinguishes an explicit alpha (incl. exactly 1) from an
+            // opaque hex/rgb, so a fill intensity of 1 is honoured, not reset.
+            return { r: p[0] || 0, g: p[1] || 0, b: p[2] || 0, a: p[3] != null ? p[3] : 1, hasAlpha: p[3] != null };
         }
         return null;
     }
     function rgba(c, a) { return `rgba(${c.r},${c.g},${c.b},${a})`; }
-    // A translucent vertical fade of one colour — the shared "fill" look used by
-    // both the radar polygon and the range-bar band.
+    // A translucent left-to-right fade of one colour — the range-bar band fill,
+    // echoing the radar polygon's gradient in the horizontal direction.
     function fillGradientCss(c, peak) {
-        return `linear-gradient(180deg,${rgba(c, peak)},${rgba(c, Math.max(0.04, peak * 0.34))})`;
+        return `linear-gradient(90deg,${rgba(c, peak)},${rgba(c, Math.max(0.04, peak * 0.34))})`;
     }
     function injectStyles(id, css) {
         if (document.getElementById(id)) return;
@@ -129,8 +131,57 @@
         .patrik-radar-select:hover{ background-color:rgba(255,255,255,0.10); border-color:rgba(255,255,255,0.28); }
         .patrik-radar-select:focus-visible{ border-color:${TEAL}; box-shadow:0 0 0 3px rgba(56,182,211,0.28); }
         .patrik-radar-select option{ color:#0b131c; background:#eaf7fb; }
+        /* Fully custom dropdown (built by JS, replaces the native select so the
+           closed control AND the open list are themed). */
+        .patrik-rc-select{ position:relative; display:inline-block; font-family:inherit; }
+        .patrik-rc-select-btn{
+            -webkit-appearance:none; appearance:none;
+            display:inline-flex; align-items:center; gap:10px;
+            font-family:inherit; font-size:14px; font-weight:700; color:#eaf7fb;
+            background-color:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.18);
+            border-radius:10px; padding:9px 14px; cursor:pointer; outline:none; line-height:1.2;
+            transition:border-color .15s, background-color .15s, box-shadow .15s;
+        }
+        .patrik-rc-select-btn:hover{ background-color:rgba(255,255,255,0.10); border-color:rgba(255,255,255,0.30); }
+        .patrik-rc-select-btn:focus-visible{ border-color:${TEAL}; box-shadow:0 0 0 3px rgba(56,182,211,0.28); }
+        .patrik-rc-select-btn::after{
+            content:""; width:12px; height:12px; margin-left:2px; flex:0 0 auto;
+            background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23c7dce4' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") center/12px no-repeat;
+            transition:transform .18s;
+        }
+        .patrik-rc-select-btn[aria-expanded="true"]::after{ transform:rotate(180deg); }
+        .patrik-rc-select-label{ white-space:nowrap; }
+        .patrik-rc-select-menu{
+            position:absolute; z-index:60; top:calc(100% + 6px); left:0; min-width:100%;
+            background:#0e1a22; border:1px solid rgba(255,255,255,0.14); border-radius:12px;
+            padding:6px; box-shadow:0 18px 44px rgba(0,0,0,0.55); max-height:260px; overflow:auto;
+        }
+        .patrik-rc-select-menu[hidden]{ display:none; }
+        .patrik-rc-select-opt{
+            display:block; width:100%; text-align:left; white-space:nowrap;
+            font-family:inherit; font-size:13.5px; font-weight:600; color:#c7dce4;
+            background:transparent; border:0; border-radius:8px; padding:8px 12px; cursor:pointer;
+            transition:background-color .12s, color .12s;
+        }
+        .patrik-rc-select-opt:hover, .patrik-rc-select-opt.is-active{ background:rgba(56,182,211,0.16); color:#eaf7fb; }
+        .patrik-rc-select-opt[aria-selected="true"]{ background:rgba(56,182,211,0.30); color:#ffffff; }
+        /* Compare-models switcher: a centred eyebrow + prominent dropdown pill,
+           sitting cleanly above the chart. */
+        .patrik-rc-compare{
+            display:flex; flex-direction:column; align-items:center; gap:9px;
+            margin:0 auto 20px; text-align:center;
+        }
+        .patrik-rc-compare-label{
+            font-family:inherit; font-size:10.5px; font-weight:700; letter-spacing:.2em;
+            text-transform:uppercase; color:#7fb4c4;
+        }
+        .patrik-rc-compare .patrik-rc-select-btn{
+            min-width:220px; justify-content:space-between; font-size:15px; padding:11px 16px;
+        }
+        .patrik-rc-compare .patrik-rc-select-menu{ left:50%; transform:translateX(-50%); }
         @media (max-width:480px){
             .patrik-radar-chart .rc-label{ font-size:12px; }
+            .patrik-rc-compare .patrik-rc-select-btn{ min-width:180px; }
         }
         `);
     }
@@ -235,6 +286,100 @@
         });
     }
 
+    // Replace a native <select.patrik-radar-select> with a fully custom, themed
+    // dropdown. The native element is kept (hidden) as the source of truth and
+    // for no-JS / accessibility fallback; `onChange` fires with the chosen value.
+    function buildRadarSelect(nativeSelect, onChange) {
+        if (nativeSelect.dataset.pcEnhanced) return;
+        nativeSelect.dataset.pcEnhanced = "1";
+
+        const opts = Array.from(nativeSelect.options).map(o => ({ value: o.value, label: o.textContent }));
+        if (!opts.length) return;
+        let sel = nativeSelect.selectedIndex < 0 ? 0 : nativeSelect.selectedIndex;
+        let active = sel;
+
+        const wrap = document.createElement("div");
+        wrap.className = "patrik-rc-select";
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "patrik-rc-select-btn";
+        btn.setAttribute("aria-haspopup", "listbox");
+        btn.setAttribute("aria-expanded", "false");
+        const label = document.createElement("span");
+        label.className = "patrik-rc-select-label";
+        label.textContent = opts[sel].label;
+        btn.appendChild(label);
+
+        const menu = document.createElement("div");
+        menu.className = "patrik-rc-select-menu";
+        menu.setAttribute("role", "listbox");
+        menu.hidden = true;
+
+        const optEls = opts.map((o, i) => {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = "patrik-rc-select-opt";
+            b.setAttribute("role", "option");
+            b.setAttribute("aria-selected", i === sel ? "true" : "false");
+            b.textContent = o.label;
+            b.addEventListener("click", () => choose(i));
+            b.addEventListener("mousemove", () => setActive(i));
+            menu.appendChild(b);
+            return b;
+        });
+
+        function setActive(i) {
+            active = clamp(i, 0, opts.length - 1);
+            optEls.forEach((e, j) => e.classList.toggle("is-active", j === active));
+            optEls[active].scrollIntoView({ block: "nearest" });
+        }
+        function open() {
+            if (!menu.hidden) return;
+            menu.hidden = false;
+            btn.setAttribute("aria-expanded", "true");
+            setActive(sel);
+            document.addEventListener("mousedown", onDoc);
+            document.addEventListener("keydown", onKey);
+        }
+        function close() {
+            if (menu.hidden) return;
+            menu.hidden = true;
+            btn.setAttribute("aria-expanded", "false");
+            document.removeEventListener("mousedown", onDoc);
+            document.removeEventListener("keydown", onKey);
+        }
+        function choose(i) {
+            sel = i;
+            label.textContent = opts[i].label;
+            optEls.forEach((e, j) => e.setAttribute("aria-selected", j === i ? "true" : "false"));
+            nativeSelect.selectedIndex = i;
+            close();
+            btn.focus();
+            onChange(opts[i].value);
+        }
+        function onDoc(e) { if (!wrap.contains(e.target)) close(); }
+        function onKey(e) {
+            if (e.key === "Escape") { close(); btn.focus(); }
+            else if (e.key === "ArrowDown") { e.preventDefault(); setActive(active + 1); }
+            else if (e.key === "ArrowUp") { e.preventDefault(); setActive(active - 1); }
+            else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(active); }
+        }
+
+        btn.addEventListener("click", () => (menu.hidden ? open() : close()));
+        btn.addEventListener("keydown", (e) => {
+            if (menu.hidden && (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ")) {
+                e.preventDefault();
+                open();
+            }
+        });
+
+        wrap.appendChild(btn);
+        wrap.appendChild(menu);
+        nativeSelect.style.display = "none";
+        nativeSelect.parentNode.insertBefore(wrap, nativeSelect.nextSibling);
+    }
+
     function renderRadarComponent(el) {
         injectRadarStyles();
         const d = el.dataset;
@@ -254,7 +399,9 @@
         // the hue from data-fill (or the outline, or teal). If data-fill carries
         // an alpha (e.g. rgba(...)), that alpha becomes the gradient's peak.
         const baseColor = parseColor(d.fill) || parseColor(d.stroke) || parseColor(TEAL);
-        const fillPeak = d.fill && baseColor && baseColor.a < 1 ? baseColor.a : 0.45;
+        // An explicit alpha (from the builder's intensity slider) sets the peak,
+        // monotonically across 0..1; a bare hex fill keeps the default peak.
+        const fillPeak = d.fill && baseColor && baseColor.hasAlpha ? baseColor.a : 0.45;
         const gradientOpts = { fillColor: baseColor, fillPeak };
 
         // ensure an <svg> exists (created here, not in HTML)
@@ -274,9 +421,12 @@
 
         const select = el.querySelector("select.patrik-radar-select");
         if (select) {
-            const current = () => select.options[select.selectedIndex].value;
-            build(current());
-            select.addEventListener("change", () => build(current()));
+            const idx = select.selectedIndex < 0 ? 0 : select.selectedIndex;
+            build(select.options[idx].value);
+            // Native change (keyboard / no-JS fallback) still re-renders.
+            select.addEventListener("change", () => build(select.options[select.selectedIndex].value));
+            // Upgrade to the custom themed dropdown.
+            buildRadarSelect(select, (value) => build(value));
         } else if (d.values) {
             build(d.values);
         }
@@ -309,8 +459,9 @@
         injectStyles("patrik-range-bar-styles", `
         .patrik-range-bar{
             --rb-track:rgba(255,255,255,0.06);
-            /* Same translucent teal fill + crisp edge as the radar polygon. */
-            --rb-range:linear-gradient(180deg,rgba(56,182,211,0.65),rgba(56,182,211,0.22));
+            /* Same translucent teal fill + crisp edge as the radar polygon,
+               faded left-to-right along the band. */
+            --rb-range:linear-gradient(90deg,rgba(56,182,211,0.65),rgba(56,182,211,0.22));
             --rb-range-edge:rgba(56,182,211,0.65);
             --rb-text:#c7dce4;
             --rb-border:rgba(255,255,255,0.10);
