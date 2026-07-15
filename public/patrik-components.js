@@ -113,12 +113,25 @@
             font-family:inherit;
         }
         .patrik-radar-svg{ display:block; width:100%; max-width:460px; height:auto; margin:0 auto; overflow:visible; background:transparent; }
+        .patrik-radar-chart[data-align="left"] .patrik-radar-svg{ margin-left:0; margin-right:auto; }
+        .patrik-radar-chart[data-align="right"] .patrik-radar-svg{ margin-left:auto; margin-right:0; }
         .patrik-radar-chart .rc-grid-line{ fill:none; stroke:var(--rc-grid); stroke-width:1; }
         .patrik-radar-chart .rc-axis-line{ stroke:var(--rc-axis); stroke-width:1; }
         .patrik-radar-chart .rc-data-poly{ fill:var(--rc-fill); stroke:var(--rc-stroke); stroke-width:2; stroke-linejoin:round; }
         .patrik-radar-chart .rc-data-point{ fill:var(--rc-point); }
         .patrik-radar-chart .rc-label{ fill:var(--rc-label); font-size:11px; font-weight:700; letter-spacing:.04em; text-anchor:middle; }
-        .patrik-radar-select{
+        @media (max-width:480px){
+            .patrik-radar-chart .rc-label{ font-size:12px; }
+        }
+        `);
+    }
+
+    // Shared styling for the custom dropdown + the compare switcher, used by BOTH
+    // the radar chart and the range-bar group. Injected on demand so a page that
+    // has a range-bar comparison but no radar chart still gets it.
+    function injectSelectStyles() {
+        injectStyles("patrik-select-styles", `
+        .patrik-radar-select, .patrik-range-select{
             -webkit-appearance:none; -moz-appearance:none; appearance:none;
             font-family:inherit; font-size:14px; font-weight:700;
             color:#eaf7fb; background-color:rgba(255,255,255,0.06);
@@ -128,9 +141,9 @@
             background-repeat:no-repeat; background-position:right 13px center; background-size:14px;
             transition:border-color .15s, background-color .15s, box-shadow .15s;
         }
-        .patrik-radar-select:hover{ background-color:rgba(255,255,255,0.10); border-color:rgba(255,255,255,0.28); }
-        .patrik-radar-select:focus-visible{ border-color:${TEAL}; box-shadow:0 0 0 3px rgba(56,182,211,0.28); }
-        .patrik-radar-select option{ color:#0b131c; background:#eaf7fb; }
+        .patrik-radar-select:hover, .patrik-range-select:hover{ background-color:rgba(255,255,255,0.10); border-color:rgba(255,255,255,0.28); }
+        .patrik-radar-select:focus-visible, .patrik-range-select:focus-visible{ border-color:${TEAL}; box-shadow:0 0 0 3px rgba(56,182,211,0.28); }
+        .patrik-radar-select option, .patrik-range-select option{ color:#0b131c; background:#eaf7fb; }
         /* Fully custom dropdown (built by JS, replaces the native select so the
            closed control AND the open list are themed). */
         .patrik-rc-select{ position:relative; display:inline-block; font-family:inherit; }
@@ -165,8 +178,7 @@
         }
         .patrik-rc-select-opt:hover, .patrik-rc-select-opt.is-active{ background:rgba(56,182,211,0.16); color:#eaf7fb; }
         .patrik-rc-select-opt[aria-selected="true"]{ background:rgba(56,182,211,0.30); color:#ffffff; }
-        /* Compare-models switcher: a centred eyebrow + prominent dropdown pill,
-           sitting cleanly above the chart. */
+        /* Compare-models switcher: a centred eyebrow + prominent dropdown pill. */
         .patrik-rc-compare{
             display:flex; flex-direction:column; align-items:center; gap:9px;
             margin:0 auto 20px; text-align:center;
@@ -179,8 +191,14 @@
             min-width:220px; justify-content:space-between; font-size:15px; padding:11px 16px;
         }
         .patrik-rc-compare .patrik-rc-select-menu{ left:50%; transform:translateX(-50%); }
+        /* Alignment: data-align="left|center|right" on the component (radar chart
+           or range group) shifts the compare switcher (and, for the radar, the
+           chart). Default is centred. */
+        [data-align="left"] > .patrik-rc-compare{ align-items:flex-start; text-align:left; margin-left:0; margin-right:auto; }
+        [data-align="right"] > .patrik-rc-compare{ align-items:flex-end; text-align:right; margin-left:auto; margin-right:0; }
+        [data-align="left"] > .patrik-rc-compare .patrik-rc-select-menu{ left:0; transform:none; }
+        [data-align="right"] > .patrik-rc-compare .patrik-rc-select-menu{ left:auto; right:0; transform:none; }
         @media (max-width:480px){
-            .patrik-radar-chart .rc-label{ font-size:12px; }
             .patrik-rc-compare .patrik-rc-select-btn{ min-width:180px; }
         }
         `);
@@ -286,12 +304,14 @@
         });
     }
 
-    // Replace a native <select.patrik-radar-select> with a fully custom, themed
-    // dropdown. The native element is kept (hidden) as the source of truth and
-    // for no-JS / accessibility fallback; `onChange` fires with the chosen value.
-    function buildRadarSelect(nativeSelect, onChange) {
+    // Replace a native <select> with a fully custom, themed dropdown. The native
+    // element is kept (hidden) as the source of truth and for no-JS / accessibility
+    // fallback; `onChange` fires with the chosen value. Shared by the radar chart's
+    // and the range group's compare switchers.
+    function buildCustomSelect(nativeSelect, onChange) {
         if (nativeSelect.dataset.pcEnhanced) return;
         nativeSelect.dataset.pcEnhanced = "1";
+        injectSelectStyles();
 
         const opts = Array.from(nativeSelect.options).map(o => ({ value: o.value, label: o.textContent }));
         if (!opts.length) return;
@@ -412,6 +432,8 @@
             svg.setAttribute("viewBox", "0 0 400 400");
             el.appendChild(svg);
         }
+        // data-size sets the chart's max width in px (default 460).
+        svg.style.maxWidth = (d.size ? num(d.size, 460) : 460) + "px";
 
         const build = (valuesStr) => {
             const values = splitList(valuesStr).map(v => num(v, 0));
@@ -426,7 +448,7 @@
             // Native change (keyboard / no-JS fallback) still re-renders.
             select.addEventListener("change", () => build(select.options[select.selectedIndex].value));
             // Upgrade to the custom themed dropdown.
-            buildRadarSelect(select, (value) => build(value));
+            buildCustomSelect(select, (value) => build(value));
         } else if (d.values) {
             build(d.values);
         }
@@ -603,19 +625,83 @@
 
 
     /* ==================================================================
+       RANGE BAR GROUP  (model comparison for a set of bars)
+       ------------------------------------------------------------------
+       A group holds several .patrik-range-bar (their titles / poles /
+       scale stay fixed) plus a selector whose options switch every bar's
+       band at once. Each option value is one "min:max" pair per bar, in
+       bar order:
+
+         <div class="patrik-range-bar-group">
+             <div class="patrik-rc-compare">
+                 <span class="patrik-rc-compare-label">Compare models</span>
+                 <select class="patrik-range-select">
+                     <option value="25:62,45:80,1:3">Model A</option>
+                     <option value="30:70,55:85,2:3">Model B</option>
+                 </select>
+             </div>
+             <div class="patrik-range-bar" data-title="Power delivery"
+                  data-left="Direct" data-right="Smooth"></div>
+             <div class="patrik-range-bar" data-title="Rider level"
+                  data-scale="Entry,Intermediate,Advanced,Pro"
+                  data-scale-index="true"></div>
+         </div>
+       ================================================================== */
+    function renderRangeGroup(group) {
+        const select = group.querySelector("select.patrik-range-select");
+        const bars = Array.from(group.querySelectorAll(".patrik-range-bar"));
+        if (!bars.length) return;
+
+        // data-size caps the group's width; alignment then places it.
+        if (group.dataset.size) {
+            group.style.maxWidth = num(group.dataset.size, 0) + "px";
+            const al = group.dataset.align;
+            group.style.marginLeft = al === "left" ? "0" : "auto";
+            group.style.marginRight = al === "right" ? "0" : "auto";
+        }
+
+        const apply = (value) => {
+            const pairs = splitList(value).map(p => p.split(":"));
+            bars.forEach((bar, i) => {
+                const pair = pairs[i];
+                if (pair) {
+                    if (pair[0] != null && pair[0].trim() !== "") bar.dataset.min = pair[0].trim();
+                    if (pair[1] != null && pair[1].trim() !== "") bar.dataset.max = pair[1].trim();
+                }
+                renderRangeBar(bar);
+            });
+        };
+
+        if (select && select.options.length) {
+            const idx = select.selectedIndex < 0 ? 0 : select.selectedIndex;
+            apply(select.options[idx].value);
+            select.addEventListener("change", () => apply(select.options[select.selectedIndex].value));
+            buildCustomSelect(select, apply);
+        } else {
+            // No selector: just render the bars with their own min/max.
+            bars.forEach(renderRangeBar);
+        }
+    }
+
+
+    /* ==================================================================
        AUTO-INIT  +  public API
        ================================================================== */
     function renderAll(root) {
         const scope = root || document;
         scope.querySelectorAll(".patrik-radar-chart").forEach(renderRadarComponent);
-        scope.querySelectorAll(".patrik-range-bar").forEach(renderRangeBar);
+        scope.querySelectorAll(".patrik-range-bar-group").forEach(renderRangeGroup);
+        scope.querySelectorAll(".patrik-range-bar").forEach((bar) => {
+            if (bar.closest(".patrik-range-bar-group")) return; // driven by its group
+            renderRangeBar(bar);
+        });
     }
 
     // exposed for manual re-rendering after dynamic DOM changes
     window.renderRadarChart = renderRadarChart;
     window.PatrikComponents  = { render: renderAll };
     window.PatrikRadar       = { render: (r) => (r || document).querySelectorAll(".patrik-radar-chart").forEach(renderRadarComponent), renderOne: renderRadarComponent };
-    window.PatrikRangeBars   = { render: (r) => (r || document).querySelectorAll(".patrik-range-bar").forEach(renderRangeBar), renderOne: renderRangeBar };
+    window.PatrikRangeBars   = { render: (r) => { const s = r || document; s.querySelectorAll(".patrik-range-bar-group").forEach(renderRangeGroup); s.querySelectorAll(".patrik-range-bar").forEach((b) => { if (!b.closest(".patrik-range-bar-group")) renderRangeBar(b); }); }, renderOne: renderRangeBar };
 
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", () => renderAll());

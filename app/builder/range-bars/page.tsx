@@ -134,6 +134,13 @@ type Bar = {
   scaleIndex: boolean;
 };
 
+type Align = "left" | "center" | "right";
+// In comparison mode a "model" supplies each bar's band (start/end); the bars'
+// own structure (title, poles, scale) stays fixed. `bands` is index-aligned to
+// the bars array.
+type Band = { min: number | ""; max: number | "" };
+type Model = { name: string; bands: Band[] };
+
 const esc = (s: string) =>
   String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -156,9 +163,18 @@ const newBar = (over: Partial<Bar> = {}): Bar => {
 };
 
 export default function RangeBarsBuilder() {
+  const [mode, setMode] = useState<"single" | "compare">("single");
+  const [align, setAlign] = useState<Align>("center");
+  const [compareLabel, setCompareLabel] = useState("Compare models");
+  const [size, setSize] = useState(720); // group max width in px; 720 = full width
   const [bars, setBars] = useState<Bar[]>([
     newBar({ title: "Power delivery", left: "Direct", right: "Smooth", min: 25, max: 62 }),
     newBar({ title: "Center of effort", left: "Backhanded", right: "Fronthanded", min: 45, max: 80 }),
+  ]);
+  // Models for comparison mode; bands stay index-aligned to `bars`.
+  const [models, setModels] = useState<Model[]>([
+    { name: "4Wave FLOW HD", bands: [{ min: 25, max: 62 }, { min: 45, max: 80 }] },
+    { name: "4Wave FLASH HD", bands: [{ min: 40, max: 75 }, { min: 55, max: 90 }] },
   ]);
 
   const sensors = useSensors(
@@ -168,12 +184,35 @@ export default function RangeBarsBuilder() {
 
   const updateBar = (bi: number, patch: Partial<Bar>) =>
     setBars((bs) => bs.map((b, i) => (i === bi ? { ...b, ...patch } : b)));
-  const removeBar = (bi: number) => setBars((bs) => bs.filter((_, i) => i !== bi));
-  const addBar = () => setBars((bs) => [...bs, newBar()]);
+  // Keep every model's bands index-aligned when bars are added / removed.
+  const removeBar = (bi: number) => {
+    setBars((bs) => bs.filter((_, i) => i !== bi));
+    setModels((ms) => ms.map((m) => ({ ...m, bands: m.bands.filter((_, i) => i !== bi) })));
+  };
+  const addBar = () => {
+    setBars((bs) => [...bs, newBar()]);
+    setModels((ms) => ms.map((m) => ({ ...m, bands: [...m.bands, { min: 20, max: 70 }] })));
+  };
+
+  /* — model handlers (comparison mode) — */
+  const addModel = () =>
+    setModels((ms) => [...ms, { name: `Model ${ms.length + 1}`, bands: bars.map(() => ({ min: 20, max: 70 })) }]);
+  const removeModel = (mi: number) =>
+    setModels((ms) => (ms.length > 1 ? ms.filter((_, i) => i !== mi) : ms));
+  const setModelName = (mi: number, name: string) =>
+    setModels((ms) => ms.map((m, i) => (i === mi ? { ...m, name } : m)));
+  const setBand = (mi: number, bi: number, patch: Partial<Band>) =>
+    setModels((ms) =>
+      ms.map((m, i) =>
+        i !== mi ? m : { ...m, bands: m.bands.map((bd, j) => (j === bi ? { ...bd, ...patch } : bd)) },
+      ),
+    );
 
   /* — code generation (faithful port) — */
   const { markup, code } = useMemo(() => {
-    const buildBar = (bar: Bar, pad: string): string => {
+    // includeBand=false in comparison mode: the band (min/max) comes from the
+    // selected model, so it is not written onto the bar.
+    const buildBar = (bar: Bar, pad: string, includeBand = true): string => {
       const A: string[] = [];
       const push = (name: string, val: string | number) => A.push(`${pad}     ${name}="${esc(String(val))}"`);
       if (bar.title) push("data-title", bar.title);
@@ -184,8 +223,10 @@ export default function RangeBarsBuilder() {
         push("data-scale", bar.scale);
         if (bar.scaleIndex) push("data-scale-index", "true");
       }
-      push("data-min", bar.min);
-      push("data-max", bar.max);
+      if (includeBand) {
+        push("data-min", bar.min);
+        push("data-max", bar.max);
+      }
       if (bar.marker) push("data-value", bar.value);
       if (bar.range && bar.range.toLowerCase() !== DEF_RANGE) push("data-range", bar.range);
 
@@ -193,15 +234,96 @@ export default function RangeBarsBuilder() {
       return `${pad}<div class="patrik-range-bar"\n${A.join("\n")}${A.length ? "\n" : ""}${last}\n${pad}</div>`;
     };
 
-    const m = bars.map((b) => buildBar(b, "")).join("\n\n");
+    const numOr0 = (v: number | "") => (v === "" ? 0 : v);
+    const alignAttr = align !== "center" ? ` data-align="${align}"` : "";
+    const sizeAttr = size < 720 ? ` data-size="${size}"` : "";
+
+    // withSelect=true → comparison group (a model dropdown drives every band).
+    // withSelect=false → a plain group wrapper, used in single mode only when a
+    // size/alignment needs a container to act on.
+    const buildGroup = (withSelect: boolean): string => {
+      const pad = "    ";
+      let out = `<div class="patrik-range-bar-group"${alignAttr}${sizeAttr}>\n`;
+      if (withSelect) {
+        out += `${pad}<div class="patrik-rc-compare">\n`;
+        if (compareLabel.trim())
+          out += `${pad}    <span class="patrik-rc-compare-label">${esc(compareLabel)}</span>\n`;
+        out += `${pad}    <select class="patrik-range-select">\n`;
+        models.forEach((mdl) => {
+          const val = bars
+            .map((_, i) => {
+              const bd = mdl.bands[i] ?? { min: 0, max: 0 };
+              return `${numOr0(bd.min)}:${numOr0(bd.max)}`;
+            })
+            .join(",");
+          out += `${pad}        <option value="${val}">${esc(mdl.name)}</option>\n`;
+        });
+        out += `${pad}    </select>\n`;
+        out += `${pad}</div>\n`;
+      }
+      out += bars.map((b) => buildBar(b, pad, !withSelect)).join("\n\n") + `\n</div>`;
+      return out;
+    };
+
+    let m: string;
+    if (mode === "compare") m = buildGroup(true);
+    else if (sizeAttr || alignAttr) m = buildGroup(false);
+    else m = bars.map((b) => buildBar(b, "")).join("\n\n");
     const full = `${m}\n\n<script src="${BUILDER_SCRIPT_URL}"></script>`;
     return { markup: m, code: full };
-  }, [bars]);
+  }, [bars, mode, align, size, compareLabel, models]);
 
   /* — controls — */
   const controls = (
     <>
-      <Group num={1} title="Bars">
+      <Group num={1} title="Mode & layout">
+        <Segmented
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: "single", label: "Single" },
+            { value: "compare", label: "Comparison" },
+          ]}
+        />
+        <Slider
+          label={size >= 720 ? "Width: full" : "Width (px)"}
+          value={size}
+          min={320}
+          max={720}
+          step={20}
+          onChange={setSize}
+        />
+        {(mode === "compare" || size < 720) && (
+          <Field label="Alignment">
+            <Segmented
+              value={align}
+              onChange={setAlign}
+              options={[
+                { value: "left", label: "Left" },
+                { value: "center", label: "Center" },
+                { value: "right", label: "Right" },
+              ]}
+            />
+          </Field>
+        )}
+        {mode === "compare" && (
+          <Field label="Compare label">
+            <TextField
+              value={compareLabel}
+              onChange={setCompareLabel}
+              placeholder="Compare models"
+            />
+          </Field>
+        )}
+      </Group>
+
+      <Group num={2} title="Bars">
+        {mode === "compare" && (
+          <p className="text-[10.5px] text-muted-foreground leading-relaxed">
+            These define each bar&apos;s structure. The band start/end come from the models below,
+            so the dropdown can switch every bar at once.
+          </p>
+        )}
         <div className="space-y-3">
           {bars.map((bar, bi) => {
             const stops = bar.scale.split(",");
@@ -288,14 +410,16 @@ export default function RangeBarsBuilder() {
                         />
                       </Field>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Field label="Band start" hint="(0–100%)">
-                        <NumberField value={bar.min} onChange={(v) => updateBar(bi, { min: v })} />
-                      </Field>
-                      <Field label="Band end" hint="(0–100%)">
-                        <NumberField value={bar.max} onChange={(v) => updateBar(bi, { max: v })} />
-                      </Field>
-                    </div>
+                    {mode === "single" && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <Field label="Band start" hint="(0–100%)">
+                          <NumberField value={bar.min} onChange={(v) => updateBar(bi, { min: v })} />
+                        </Field>
+                        <Field label="Band end" hint="(0–100%)">
+                          <NumberField value={bar.max} onChange={(v) => updateBar(bi, { max: v })} />
+                        </Field>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>
@@ -338,30 +462,32 @@ export default function RangeBarsBuilder() {
                       Band snaps to stops
                     </CheckRow>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      <Field label="Band start" hint={bar.scaleIndex ? undefined : "(0–100%)"}>
-                        {bar.scaleIndex ? (
-                          <StopSelect
-                            value={bar.min}
-                            stops={stops}
-                            onChange={(v) => updateBar(bi, { min: v })}
-                          />
-                        ) : (
-                          <NumberField value={bar.min} onChange={(v) => updateBar(bi, { min: v })} />
-                        )}
-                      </Field>
-                      <Field label="Band end" hint={bar.scaleIndex ? undefined : "(0–100%)"}>
-                        {bar.scaleIndex ? (
-                          <StopSelect
-                            value={bar.max}
-                            stops={stops}
-                            onChange={(v) => updateBar(bi, { max: v })}
-                          />
-                        ) : (
-                          <NumberField value={bar.max} onChange={(v) => updateBar(bi, { max: v })} />
-                        )}
-                      </Field>
-                    </div>
+                    {mode === "single" && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <Field label="Band start" hint={bar.scaleIndex ? undefined : "(0–100%)"}>
+                          {bar.scaleIndex ? (
+                            <StopSelect
+                              value={bar.min}
+                              stops={stops}
+                              onChange={(v) => updateBar(bi, { min: v })}
+                            />
+                          ) : (
+                            <NumberField value={bar.min} onChange={(v) => updateBar(bi, { min: v })} />
+                          )}
+                        </Field>
+                        <Field label="Band end" hint={bar.scaleIndex ? undefined : "(0–100%)"}>
+                          {bar.scaleIndex ? (
+                            <StopSelect
+                              value={bar.max}
+                              stops={stops}
+                              onChange={(v) => updateBar(bi, { max: v })}
+                            />
+                          ) : (
+                            <NumberField value={bar.max} onChange={(v) => updateBar(bi, { max: v })} />
+                          )}
+                        </Field>
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -396,6 +522,79 @@ export default function RangeBarsBuilder() {
           fill. Leave the band colour at the default for the brand teal.
         </p>
       </Group>
+
+      {mode === "compare" && (
+        <Group num={3} title="Models">
+          <div className="space-y-3">
+            {models.map((mdl, mi) => (
+              <SubCard
+                key={mi}
+                title={`Model ${mi + 1}`}
+                onRemove={models.length > 1 ? () => removeModel(mi) : undefined}
+              >
+                <Field label="Name (dropdown label)">
+                  <TextField
+                    value={mdl.name}
+                    onChange={(v) => setModelName(mi, v)}
+                    placeholder="e.g. 4Wave FLOW HD"
+                  />
+                </Field>
+                <div className="space-y-2 pt-1">
+                  {bars.map((bar, bi) => {
+                    const stops = bar.scale.split(",");
+                    const band = mdl.bands[bi] ?? { min: "" as number | "", max: "" as number | "" };
+                    const isIdx = bar.mode === "scale" && bar.scaleIndex;
+                    return (
+                      <div
+                        key={bi}
+                        className="rounded-lg border border-border/60 bg-background/40 p-2.5 space-y-1.5"
+                      >
+                        <span
+                          className="text-[11px] font-medium text-muted-foreground truncate block"
+                          title={bar.title}
+                        >
+                          {bar.title || `Bar ${bi + 1}`}
+                        </span>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Field label="Start" hint={isIdx ? undefined : "(0–100%)"}>
+                            {isIdx ? (
+                              <StopSelect
+                                value={band.min}
+                                stops={stops}
+                                onChange={(v) => setBand(mi, bi, { min: v })}
+                              />
+                            ) : (
+                              <NumberField
+                                value={band.min}
+                                onChange={(v) => setBand(mi, bi, { min: v })}
+                              />
+                            )}
+                          </Field>
+                          <Field label="End" hint={isIdx ? undefined : "(0–100%)"}>
+                            {isIdx ? (
+                              <StopSelect
+                                value={band.max}
+                                stops={stops}
+                                onChange={(v) => setBand(mi, bi, { max: v })}
+                              />
+                            ) : (
+                              <NumberField
+                                value={band.max}
+                                onChange={(v) => setBand(mi, bi, { max: v })}
+                              />
+                            )}
+                          </Field>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </SubCard>
+            ))}
+            <AddButton onClick={addModel}>Add model</AddButton>
+          </div>
+        </Group>
+      )}
     </>
   );
 

@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import {
   BuilderShell,
   Group,
+  Field,
   TextField,
   Segmented,
   Slider,
@@ -122,6 +123,9 @@ function hexToRgba(hex: string, a: number): string {
 
 export default function RadarChartBuilder() {
   const [mode, setMode] = useState<"single" | "compare">("single");
+  const [align, setAlign] = useState<"left" | "center" | "right">("center");
+  const [compareLabel, setCompareLabel] = useState("Compare models");
+  const [size, setSize] = useState(460); // chart max width in px
   const [axes, setAxes] = useState<string[]>([
     "LIGHTWIND", "FREERIDE", "FOIL", "FREEFLY", "WAVE", "SURF", "RACING", "FREESTYLE",
   ]);
@@ -222,6 +226,8 @@ export default function RadarChartBuilder() {
       const L: string[] = [];
       L.push(`${pad}<div class="patrik-radar-chart"`);
       L.push(`${pad}     data-axes="${esc(axesStr)}"`);
+      if (align !== "center") L.push(`${pad}     data-align="${align}"`);
+      if (size !== 460) L.push(`${pad}     data-size="${size}"`);
 
       if (mode === "single") {
         let last = `${pad}     data-values="${fit(values).join(",")}"`;
@@ -235,7 +241,8 @@ export default function RadarChartBuilder() {
           L[L.length - 1] += ">";
         }
         L.push(`${pad}    <div class="patrik-rc-compare">`);
-        L.push(`${pad}        <span class="patrik-rc-compare-label">Compare models</span>`);
+        if (compareLabel.trim())
+          L.push(`${pad}        <span class="patrik-rc-compare-label">${esc(compareLabel)}</span>`);
         L.push(`${pad}        <select class="patrik-radar-select">`);
         datasets.forEach((ds) => {
           L.push(
@@ -252,12 +259,12 @@ export default function RadarChartBuilder() {
     const m = buildChart("");
     const full = `${m}\n\n<script src="${BUILDER_SCRIPT_URL}"></script>`;
     return { markup: m, code: full };
-  }, [mode, axes, values, datasets, colors]);
+  }, [mode, align, size, compareLabel, axes, values, datasets, colors]);
 
   /* — controls — */
   const controls = (
     <>
-      <Group num={1} title="Mode">
+      <Group num={1} title="Mode & layout">
         <Segmented
           value={mode}
           onChange={setMode}
@@ -266,6 +273,27 @@ export default function RadarChartBuilder() {
             { value: "compare", label: "Comparison" },
           ]}
         />
+        <Field label="Alignment">
+          <Segmented
+            value={align}
+            onChange={setAlign}
+            options={[
+              { value: "left", label: "Left" },
+              { value: "center", label: "Center" },
+              { value: "right", label: "Right" },
+            ]}
+          />
+        </Field>
+        <Slider label="Size (px)" value={size} min={240} max={640} step={10} onChange={setSize} />
+        {mode === "compare" && (
+          <Field label="Compare label">
+            <TextField
+              value={compareLabel}
+              onChange={setCompareLabel}
+              placeholder="Compare models"
+            />
+          </Field>
+        )}
       </Group>
 
       <Group num={2} title="Axes">
