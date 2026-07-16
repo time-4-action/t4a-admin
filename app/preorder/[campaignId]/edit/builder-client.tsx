@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -20,9 +20,10 @@ import {
   ArrowLeft,
   Plus,
   Trash2,
-  ChevronUp,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Loader2,
   Check,
   Search,
@@ -37,8 +38,27 @@ import {
   LayoutDashboard,
   Tag,
   RefreshCw,
+  GripVertical,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DatePicker } from "@/components/ui/date-picker";
+import {
+  DndContext,
+  DragEndEvent,
+  PointerSensor,
+  KeyboardSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  arrayMove,
+  verticalListSortingStrategy,
+  sortableKeyboardCoordinates,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type {
   PreorderCampaign,
   PreorderRow,
@@ -62,12 +82,12 @@ const uid = () =>
     ? crypto.randomUUID()
     : `id-${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
-function move<T>(arr: T[], idx: number, delta: number): T[] {
-  const next = [...arr];
-  const j = idx + delta;
-  if (j < 0 || j >= next.length) return next;
-  [next[idx], next[j]] = [next[j], next[idx]];
-  return next;
+// Reorder an array by moving the item with `activeId` to where `overId` sits.
+function reorderById<T extends { id: string }>(arr: T[], activeId: string, overId: string): T[] {
+  const from = arr.findIndex((x) => x.id === activeId);
+  const to = arr.findIndex((x) => x.id === overId);
+  if (from === -1 || to === -1 || from === to) return arr;
+  return arrayMove(arr, from, to);
 }
 
 function materializeGroup(draft: GroupDraft): PreorderGroup {
@@ -96,6 +116,13 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   const [pricelists, setPricelists] = useState<MkPricelist[]>([]);
   const [repricing, setRepricing] = useState(false);
   const [repricedAt, setRepricedAt] = useState<number | null>(null);
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    // A small drag threshold so plain clicks (select / double-click rename) still register.
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   const toggleCollapse = (groupId: string) =>
     setCollapsed((prev) => {
@@ -164,11 +191,8 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
     mutate((c) => ({ ...c, tabs: c.tabs.filter((t) => t.id !== tabId) }));
     setActiveTabId((cur) => (cur !== tabId ? cur : rest[0]?.id ?? null));
   }
-  function moveTab(tabId: string, delta: number) {
-    mutate((c) => {
-      const idx = c.tabs.findIndex((t) => t.id === tabId);
-      return { ...c, tabs: move(c.tabs, idx, delta) };
-    });
+  function reorderTabs(activeId: string, overId: string) {
+    mutate((c) => ({ ...c, tabs: reorderById(c.tabs, activeId, overId) }));
   }
 
   // ── Groups ──
@@ -182,11 +206,8 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   function deleteGroup(tabId: string, groupId: string) {
     mutateTab(tabId, (t) => ({ ...t, groups: t.groups.filter((g) => g.id !== groupId) }));
   }
-  function moveGroup(tabId: string, groupId: string, delta: number) {
-    mutateTab(tabId, (t) => {
-      const idx = t.groups.findIndex((g) => g.id === groupId);
-      return { ...t, groups: move(t.groups, idx, delta) };
-    });
+  function reorderGroups(tabId: string, activeId: string, overId: string) {
+    mutateTab(tabId, (t) => ({ ...t, groups: reorderById(t.groups, activeId, overId) }));
   }
 
   // ── Rows ──
@@ -222,11 +243,8 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   function deleteRow(tabId: string, groupId: string, rowId: string) {
     mutateGroup(tabId, groupId, (g) => ({ ...g, rows: g.rows.filter((r) => r.id !== rowId) }));
   }
-  function moveRow(tabId: string, groupId: string, rowId: string, delta: number) {
-    mutateGroup(tabId, groupId, (g) => {
-      const idx = g.rows.findIndex((r) => r.id === rowId);
-      return { ...g, rows: move(g.rows, idx, delta) };
-    });
+  function reorderRows(tabId: string, groupId: string, activeId: string, overId: string) {
+    mutateGroup(tabId, groupId, (g) => ({ ...g, rows: reorderById(g.rows, activeId, overId) }));
   }
 
   const save = useCallback(
@@ -419,7 +437,12 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
           </label>
           <label className="flex items-center gap-1.5 text-muted-foreground">
             Deadline
-            <Input type="date" value={campaign.deadline ? campaign.deadline.slice(0, 10) : ""} onChange={(e) => mutate((c) => ({ ...c, deadline: e.target.value ? new Date(e.target.value).toISOString() : null }))} className="h-7 w-40 text-xs bg-background" />
+            <DatePicker
+              value={campaign.deadline ?? null}
+              withTime
+              placeholder="Set deadline"
+              onChange={(iso) => mutate((c) => ({ ...c, deadline: iso }))}
+            />
           </label>
           <div className="flex items-center gap-1.5 text-muted-foreground">
             <Tag className="w-3.5 h-3.5 opacity-60" />
@@ -458,26 +481,30 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
       <div className="flex-1 min-h-0 flex">
         {/* Tab rail */}
         <aside className="w-44 md:w-52 shrink-0 border-r border-border overflow-y-auto p-2 space-y-1">
-          {campaign.tabs.map((t, ti) => (
-            <div
-              key={t.id}
-              className={cn(
-                "group flex items-center gap-1 rounded-lg px-2 py-1.5 cursor-pointer text-[13px]",
-                t.id === activeTabId ? "bg-lime-600/10 text-lime-700 dark:text-lime-300" : "hover:bg-muted text-foreground",
-              )}
-              onClick={() => setActiveTabId(t.id)}
-            >
-              <Layers className="w-3.5 h-3.5 shrink-0 opacity-60" />
-              <span className="flex-1 truncate">{t.name || "Untitled"}</span>
-              <span className="text-[10px] text-muted-foreground tabular-nums">
-                {t.groups.reduce((n, g) => n + g.rows.length, 0)}
-              </span>
-              <span className="opacity-0 group-hover:opacity-100 flex items-center">
-                <button onClick={(e) => { e.stopPropagation(); moveTab(t.id, -1); }} disabled={ti === 0} className="p-0.5 disabled:opacity-30 hover:text-foreground" aria-label="Move tab up"><ChevronUp className="w-3 h-3" /></button>
-                <button onClick={(e) => { e.stopPropagation(); moveTab(t.id, 1); }} disabled={ti === campaign.tabs.length - 1} className="p-0.5 disabled:opacity-30 hover:text-foreground" aria-label="Move tab down"><ChevronDown className="w-3 h-3" /></button>
-              </span>
-            </div>
-          ))}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={(e: DragEndEvent) => {
+              const { active, over } = e;
+              if (over && active.id !== over.id) reorderTabs(String(active.id), String(over.id));
+            }}
+          >
+            <SortableContext items={campaign.tabs.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+              {campaign.tabs.map((t) => (
+                <SortableTab
+                  key={t.id}
+                  tab={t}
+                  active={t.id === activeTabId}
+                  count={t.groups.reduce((n, g) => n + g.rows.length, 0)}
+                  renaming={renamingTabId === t.id}
+                  onSelect={() => setActiveTabId(t.id)}
+                  onStartRename={() => { setActiveTabId(t.id); setRenamingTabId(t.id); }}
+                  onRename={(name) => mutateTab(t.id, (x) => ({ ...x, name }))}
+                  onEndRename={() => setRenamingTabId(null)}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
           <button onClick={addTab} className="w-full flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
             <Plus className="w-3.5 h-3.5" /> Add tab
           </button>
@@ -496,6 +523,25 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                 <Input value={activeTab.name} onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, name: e.target.value }))} className="h-9 max-w-xs text-sm font-semibold bg-background" aria-label="Tab name" />
                 <Input value={activeTab.discountNote ?? ""} onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, discountNote: e.target.value }))} className="h-9 max-w-xs text-xs bg-background" placeholder="Discount note (optional)" />
                 <div className="flex-1" />
+                {activeTab.groups.length > 0 && (() => {
+                  const allCollapsed = activeTab.groups.every((g) => collapsed.has(g.id));
+                  const ids = activeTab.groups.map((g) => g.id);
+                  return (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setCollapsed((prev) => {
+                        const next = new Set(prev);
+                        if (allCollapsed) ids.forEach((id) => next.delete(id));
+                        else ids.forEach((id) => next.add(id));
+                        return next;
+                      })}
+                      className="h-8 text-muted-foreground"
+                    >
+                      {allCollapsed ? <><ChevronsUpDown className="w-3.5 h-3.5" /> Expand all</> : <><ChevronsDownUp className="w-3.5 h-3.5" /> Collapse all</>}
+                    </Button>
+                  );
+                })()}
                 <Button variant="ghost" size="sm" onClick={() => deleteTab(activeTab.id)} className="h-8 text-destructive hover:text-destructive">
                   <Trash2 className="w-3.5 h-3.5" /> Delete tab
                 </Button>
@@ -517,66 +563,34 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                 </span>
               </div>
 
-              {activeTab.groups.map((g, gi) => (
-                <section key={g.id} className="rounded-xl border border-border bg-surface overflow-hidden">
-                  <div className={cn("flex items-center gap-2 px-3 py-2 bg-muted/40", !collapsed.has(g.id) && "border-b border-border")}>
-                    <button
-                      type="button"
-                      onClick={() => toggleCollapse(g.id)}
-                      className="p-0.5 rounded hover:bg-muted text-muted-foreground shrink-0"
-                      aria-label={collapsed.has(g.id) ? "Expand group" : "Collapse group"}
-                      title={collapsed.has(g.id) ? "Expand" : "Collapse"}
-                    >
-                      {collapsed.has(g.id) ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                    </button>
-                    <Input value={g.name} onChange={(e) => mutateGroup(activeTab.id, g.id, (gr) => ({ ...gr, name: e.target.value }))} className="h-7 max-w-[280px] text-[13px] font-medium bg-background" aria-label="Group name" />
-                    <span className="text-[11px] text-muted-foreground tabular-nums">{g.rows.length} variant{g.rows.length === 1 ? "" : "s"}</span>
-                    <div className="flex-1" />
-                    <button onClick={() => moveGroup(activeTab.id, g.id, -1)} disabled={gi === 0} className="p-1 rounded hover:bg-muted disabled:opacity-30" aria-label="Move group up"><ChevronUp className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => moveGroup(activeTab.id, g.id, 1)} disabled={gi === activeTab.groups.length - 1} className="p-1 rounded hover:bg-muted disabled:opacity-30" aria-label="Move group down"><ChevronDown className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => deleteGroup(activeTab.id, g.id)} className="p-1 rounded hover:bg-muted text-destructive" aria-label="Delete group"><Trash2 className="w-3.5 h-3.5" /></button>
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={(e: DragEndEvent) => {
+                  const { active, over } = e;
+                  if (over && active.id !== over.id) reorderGroups(activeTab.id, String(active.id), String(over.id));
+                }}
+              >
+                <SortableContext items={activeTab.groups.map((g) => g.id)} strategy={verticalListSortingStrategy}>
+                  <div className="space-y-4">
+                    {activeTab.groups.map((g) => (
+                      <GroupSection
+                        key={g.id}
+                        group={g}
+                        collapsed={collapsed.has(g.id)}
+                        sensors={sensors}
+                        onToggleCollapse={() => toggleCollapse(g.id)}
+                        onRenameGroup={(name) => mutateGroup(activeTab.id, g.id, (gr) => ({ ...gr, name }))}
+                        onDeleteGroup={() => deleteGroup(activeTab.id, g.id)}
+                        onAddRow={() => addManualRow(activeTab.id, g.id)}
+                        onUpdateRow={(rowId, patch) => updateRow(activeTab.id, g.id, rowId, patch)}
+                        onDeleteRow={(rowId) => deleteRow(activeTab.id, g.id, rowId)}
+                        onReorderRows={(a, o) => reorderRows(activeTab.id, g.id, a, o)}
+                      />
+                    ))}
                   </div>
-
-                  {!collapsed.has(g.id) && g.rows.length > 0 && (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-[12px]">
-                        <thead>
-                          <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60">
-                            <th className="text-left font-semibold px-3 py-1.5 min-w-[200px]">Variant</th>
-                            <th className="text-left font-semibold px-2 py-1.5">SKU</th>
-                            <th className="text-left font-semibold px-2 py-1.5">Size / label</th>
-                            <th className="text-right font-semibold px-2 py-1.5 w-20">RRP</th>
-                            <th className="text-right font-semibold px-2 py-1.5 w-20">Partner</th>
-                            <th className="text-right font-semibold px-2 py-1.5 w-20">Disc.</th>
-                            <th className="px-2 py-1.5 w-16" />
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {g.rows.map((r, ri) => (
-                            <RowEditor
-                              key={r.id}
-                              row={r}
-                              first={ri === 0}
-                              last={ri === g.rows.length - 1}
-                              onChange={(patch) => updateRow(activeTab.id, g.id, r.id, patch)}
-                              onDelete={() => deleteRow(activeTab.id, g.id, r.id)}
-                              onMove={(d) => moveRow(activeTab.id, g.id, r.id, d)}
-                            />
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-
-                  {!collapsed.has(g.id) && (
-                    <div className="flex items-center gap-2 px-3 py-2 border-t border-border/60">
-                      <Button variant="ghost" size="xs" onClick={() => addManualRow(activeTab.id, g.id)}>
-                        <PencilLine className="w-3 h-3" /> Add variant manually
-                      </Button>
-                    </div>
-                  )}
-                </section>
-              ))}
+                </SortableContext>
+              </DndContext>
 
               {activeTab.groups.length === 0 && (
                 <div className="text-center text-[13px] text-muted-foreground py-14 rounded-xl border border-dashed border-border">
@@ -623,20 +637,23 @@ function priceStr(n?: number | null): string {
   return n === null || n === undefined ? "" : String(n);
 }
 
-function RowEditor({
-  row, first, last, onChange, onDelete, onMove,
+const RowEditor = memo(function RowEditor({
+  row, onChange, onDelete,
 }: {
   row: PreorderRow;
-  first: boolean;
-  last: boolean;
   onChange: (patch: Partial<PreorderRow>) => void;
   onDelete: () => void;
-  onMove: (delta: number) => void;
 }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: row.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    ...(isDragging ? { position: "relative" as const, zIndex: 10, opacity: 0.9 } : {}),
+  };
   const cell = "px-2 py-1 border-b border-border/40";
   const inp = "h-7 w-full rounded border border-transparent bg-transparent px-1.5 text-[12px] hover:border-border focus:border-ring focus:bg-background focus:outline-none";
   return (
-    <tr className="hover:bg-muted/20">
+    <tr ref={setNodeRef} style={style} className={cn("hover:bg-muted/20", isDragging && "bg-surface shadow-lg")} {...attributes}>
       <td className={cn(cell, "pl-3")}>
         <div className="flex items-center gap-1.5">
           {row.image ? (
@@ -659,15 +676,218 @@ function RowEditor({
       <td className={cell}><input className={cn(inp, "text-right tabular-nums")} value={priceStr(row.partnerPrice)} inputMode="decimal" onChange={(e) => onChange({ partnerPrice: numOrNull(e.target.value) })} /></td>
       <td className={cell}><input className={cn(inp, "text-right tabular-nums")} value={priceStr(row.discountedPrice)} inputMode="decimal" onChange={(e) => onChange({ discountedPrice: numOrNull(e.target.value) })} /></td>
       <td className={cn(cell, "whitespace-nowrap")}>
-        <div className="flex items-center justify-end">
-          <button onClick={() => onMove(-1)} disabled={first} className="p-0.5 disabled:opacity-30 hover:text-foreground text-muted-foreground" aria-label="Move up"><ChevronUp className="w-3 h-3" /></button>
-          <button onClick={() => onMove(1)} disabled={last} className="p-0.5 disabled:opacity-30 hover:text-foreground text-muted-foreground" aria-label="Move down"><ChevronDown className="w-3 h-3" /></button>
+        <div className="flex items-center justify-end gap-0.5">
+          <button
+            type="button"
+            {...listeners}
+            className="p-0.5 cursor-grab active:cursor-grabbing touch-none text-muted-foreground hover:text-foreground"
+            aria-label="Drag to reorder variant"
+            title="Drag to reorder"
+          >
+            <GripVertical className="w-3.5 h-3.5" />
+          </button>
           <button onClick={onDelete} className="p-0.5 text-muted-foreground hover:text-destructive" aria-label="Delete variant"><Trash2 className="w-3 h-3" /></button>
         </div>
       </td>
     </tr>
   );
+});
+
+// ── Sortable tab (rail): click to select, double-click to rename inline, grip to drag ──
+function SortableTab({
+  tab, active, count, renaming, onSelect, onStartRename, onRename, onEndRename,
+}: {
+  tab: PreorderTab;
+  active: boolean;
+  count: number;
+  renaming: boolean;
+  onSelect: () => void;
+  onStartRename: () => void;
+  onRename: (name: string) => void;
+  onEndRename: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    ...(isDragging ? { zIndex: 10, opacity: 0.9 } : {}),
+  };
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "group flex items-center gap-1 rounded-lg pl-1 pr-2 py-1.5 text-[13px]",
+        isDragging && "shadow-lg bg-surface",
+        active ? "bg-lime-600/10 text-lime-700 dark:text-lime-300" : "hover:bg-muted text-foreground",
+        !renaming && "cursor-pointer",
+      )}
+      onClick={() => !renaming && onSelect()}
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        onClick={(e) => e.stopPropagation()}
+        className="p-0.5 -mr-0.5 cursor-grab active:cursor-grabbing touch-none text-muted-foreground/60 opacity-0 group-hover:opacity-100 hover:text-foreground shrink-0"
+        aria-label="Drag to reorder tab"
+        title="Drag to reorder"
+      >
+        <GripVertical className="w-3.5 h-3.5" />
+      </button>
+      <Layers className="w-3.5 h-3.5 shrink-0 opacity-60" />
+      {renaming ? (
+        <input
+          autoFocus
+          defaultValue={tab.name}
+          onFocus={(e) => e.target.select()}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => onRename(e.target.value)}
+          onBlur={onEndRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+          }}
+          className="flex-1 min-w-0 h-6 rounded border border-ring bg-background px-1.5 text-[13px] outline-none"
+          aria-label="Tab name"
+        />
+      ) : (
+        <span
+          className="flex-1 truncate select-none"
+          onDoubleClick={(e) => { e.stopPropagation(); onStartRename(); }}
+          title="Double-click to rename"
+        >
+          {tab.name || "Untitled"}
+        </span>
+      )}
+      <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">{count}</span>
+    </div>
+  );
 }
+
+// ── Sortable group (a parent product): header + variant table, drag via grip ──
+function GroupSection({
+  group, collapsed, sensors, onToggleCollapse, onRenameGroup, onDeleteGroup, onAddRow, onUpdateRow, onDeleteRow, onReorderRows,
+}: {
+  group: PreorderGroup;
+  collapsed: boolean;
+  sensors: ReturnType<typeof useSensors>;
+  onToggleCollapse: () => void;
+  onRenameGroup: (name: string) => void;
+  onDeleteGroup: () => void;
+  onAddRow: () => void;
+  onUpdateRow: (rowId: string, patch: Partial<PreorderRow>) => void;
+  onDeleteRow: (rowId: string) => void;
+  onReorderRows: (activeId: string, overId: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: group.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    ...(isDragging ? { zIndex: 20, position: "relative" as const } : {}),
+  };
+  return (
+    <section
+      ref={setNodeRef}
+      style={style}
+      className={cn("rounded-xl border border-border bg-surface overflow-hidden", isDragging && "shadow-xl opacity-95")}
+    >
+      <div className={cn("flex items-center gap-2 px-3 py-2 bg-muted/40", !collapsed && "border-b border-border")}>
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          className="p-0.5 rounded cursor-grab active:cursor-grabbing touch-none text-muted-foreground/70 hover:text-foreground shrink-0"
+          aria-label="Drag to reorder group"
+          title="Drag to reorder"
+        >
+          <GripVertical className="w-3.5 h-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className="p-0.5 rounded hover:bg-muted text-muted-foreground shrink-0"
+          aria-label={collapsed ? "Expand group" : "Collapse group"}
+          title={collapsed ? "Expand" : "Collapse"}
+        >
+          {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </button>
+        <Input value={group.name} onChange={(e) => onRenameGroup(e.target.value)} className="h-7 max-w-[280px] text-[13px] font-medium bg-background" aria-label="Group name" />
+        <span className="text-[11px] text-muted-foreground tabular-nums">{group.rows.length} variant{group.rows.length === 1 ? "" : "s"}</span>
+        <div className="flex-1" />
+        <button onClick={onDeleteGroup} className="p-1 rounded hover:bg-muted text-destructive" aria-label="Delete group"><Trash2 className="w-3.5 h-3.5" /></button>
+      </div>
+
+      {!collapsed && group.rows.length > 0 && (
+        <VariantTable
+          rows={group.rows}
+          sensors={sensors}
+          onReorderRows={onReorderRows}
+          onUpdateRow={onUpdateRow}
+          onDeleteRow={onDeleteRow}
+        />
+      )}
+
+      {!collapsed && (
+        <div className="flex items-center gap-2 px-3 py-2 border-t border-border/60">
+          <Button variant="ghost" size="xs" onClick={onAddRow}>
+            <PencilLine className="w-3 h-3" /> Add variant manually
+          </Button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ── Variant table: memoized so a group being dragged/reordered doesn't force
+// every *other* group to re-render its whole rows table on each drag frame. ──
+const VariantTable = memo(function VariantTable({
+  rows, sensors, onReorderRows, onUpdateRow, onDeleteRow,
+}: {
+  rows: PreorderRow[];
+  sensors: ReturnType<typeof useSensors>;
+  onReorderRows: (activeId: string, overId: string) => void;
+  onUpdateRow: (rowId: string, patch: Partial<PreorderRow>) => void;
+  onDeleteRow: (rowId: string) => void;
+}) {
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragEnd={(e: DragEndEvent) => {
+        const { active, over } = e;
+        if (over && active.id !== over.id) onReorderRows(String(active.id), String(over.id));
+      }}
+    >
+      <div className="overflow-x-auto">
+        <table className="w-full text-[12px]">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60">
+              <th className="text-left font-semibold px-3 py-1.5 min-w-[200px]">Variant</th>
+              <th className="text-left font-semibold px-2 py-1.5">SKU</th>
+              <th className="text-left font-semibold px-2 py-1.5">Size / label</th>
+              <th className="text-right font-semibold px-2 py-1.5 w-20">RRP</th>
+              <th className="text-right font-semibold px-2 py-1.5 w-20">Partner</th>
+              <th className="text-right font-semibold px-2 py-1.5 w-20">Disc.</th>
+              <th className="px-2 py-1.5 w-14" />
+            </tr>
+          </thead>
+          <SortableContext items={rows.map((r) => r.id)} strategy={verticalListSortingStrategy}>
+            <tbody>
+              {rows.map((r) => (
+                <RowEditor
+                  key={r.id}
+                  row={r}
+                  onChange={(patch) => onUpdateRow(r.id, patch)}
+                  onDelete={() => onDeleteRow(r.id)}
+                />
+              ))}
+            </tbody>
+          </SortableContext>
+        </table>
+      </div>
+    </DndContext>
+  );
+});
 
 // ── Price-list selector: pick which Metakocka list feeds a price column ──
 const PL_NONE = "__none__";
