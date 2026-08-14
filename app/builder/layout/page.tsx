@@ -56,10 +56,8 @@ import {
 import { cn } from "@/lib/utils";
 import type { PresetSummary } from "@/types/builder";
 import {
-  LAYOUT_LABEL_ROOM,
   LAYOUT_ROW_BG,
   generateLayout,
-  layoutBlockInsetDefault,
   layoutDefaultBlock,
   layoutDefaultConfig,
   layoutDefaultRow,
@@ -226,13 +224,6 @@ function splitPresets(n: number): { label: string; spans: number[] }[] {
       { label: "25/25/50", spans: [1, 1, 2] },
     ];
   return [equal];
-}
-
-// Radar charts sharing a row with another column and carrying no side room —
-// the exact recipe for axis labels colliding with the neighbouring column.
-function crowdedCharts(row: LayoutRow): LayoutBlock[] {
-  if (row.blocks.length < 2) return [];
-  return row.blocks.filter((b) => b.type === "radar-chart" && b.insetX < LAYOUT_LABEL_ROOM);
 }
 
 // Range-bar blocks carry volatile drag-and-drop stop keys — mint fresh ones
@@ -1175,26 +1166,6 @@ export default function LayoutBuilder() {
             />
           </div>
 
-          {crowdedCharts(activeRow).length > 0 && (
-            <div className="rounded-lg border border-amber-400/40 bg-amber-500/10 p-2.5 space-y-2">
-              <p className="text-[10.5px] text-amber-700 dark:text-amber-300 leading-relaxed">
-                A radar chart shares this row with another column and has no side room — its axis
-                labels are drawn outside the chart and will run into the neighbour.
-              </p>
-              <button
-                type="button"
-                onClick={() =>
-                  crowdedCharts(activeRow).forEach((b) =>
-                    patchBlock(b.id, { insetX: LAYOUT_LABEL_ROOM }),
-                  )
-                }
-                className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-amber-500 text-white text-[10.5px] font-semibold hover:bg-amber-600 transition-colors"
-              >
-                Give the labels room
-              </button>
-            </div>
-          )}
-
           <div className="flex items-center gap-2 pt-1">
             <button
               type="button"
@@ -1514,26 +1485,8 @@ export default function LayoutBuilder() {
               onChange={(v) => patchBlock(selectedBlock.id, { insetY: v })}
             />
             <p className="text-[10.5px] text-muted-foreground leading-relaxed">
-              {selectedBlock.type === "radar-chart" ? (
-                <>
-                  A radar chart draws its axis labels <em>outside</em> the chart, so side room is
-                  what stops them running into the next column.{" "}
-                  {selectedBlock.insetX !== layoutBlockInsetDefault("radar-chart") && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        patchBlock(selectedBlock.id, { insetX: layoutBlockInsetDefault("radar-chart") })
-                      }
-                      className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                    >
-                      Reset to {LAYOUT_LABEL_ROOM}%
-                    </button>
-                  )}
-                </>
-              ) : (
-                <>Keeps this block clear of the column edges — a share of the column, so it holds
-                  at every screen width.</>
-              )}
+              Keeps this block clear of the column edges — a share of the column, so it holds at
+              every screen width.
             </p>
           </div>
         </Group>

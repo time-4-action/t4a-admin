@@ -366,13 +366,11 @@ export type LayoutBlockSource = { id: string; name: string };
 
 // What every block has regardless of what it draws.
 //
-// `insetX` is a PERCENTAGE of the column, not px, and it is what keeps a radar
-// chart's axis labels from colliding with the neighbouring column: the renderer
-// draws those labels outside the SVG box (`overflow:visible`), so a chart that
-// fills its column spills roughly a tenth of its width to each side. Reserving
-// that room inside the column is a pure-markup fix — the hosted renderer is
-// untouched. Percentages resolve against the block's own cell wrapper, so the
-// inset is always relative to the column, never to the whole row.
+// `insetX` is a PERCENTAGE of the column, not px — aesthetic breathing room
+// that holds its proportion at every screen width. The renderer applies it to
+// the block's own cell wrapper, so it is always relative to the column, never
+// to the whole row. (It is no longer needed for radar axis labels: the
+// renderer grows the SVG viewBox to contain them.)
 export type LayoutBlockBase = {
   id: string;
   span: number;
@@ -457,12 +455,18 @@ export const LAYOUT_DIVIDER_COLOR = "#c7dce4";
 export const LAYOUT_BUTTON_COLOR = "#38b6d3";
 export const LAYOUT_ROW_BG = "#0b131c";
 
-// Side room (% of the column) a freshly inserted block reserves. Only the radar
-// chart needs it — its axis labels are drawn outside the SVG box.
+// LEGACY: the side room (% of the column) a radar block used to reserve, from
+// when the renderer painted axis labels outside the SVG box. The renderer now
+// grows the viewBox to contain the labels, so the room is pure wasted width —
+// it is what made a chart look small next to a full-column neighbour. Kept
+// only so normalizeLayoutBlock can recognise (and drop) the old auto-default
+// in saved layouts.
 export const LAYOUT_LABEL_ROOM = 10;
 
-export function layoutBlockInsetDefault(type: LayoutBlockType): number {
-  return type === "radar-chart" ? LAYOUT_LABEL_ROOM : 0;
+// Insets are aesthetic breathing room now — no block type needs one to render
+// correctly, so nothing starts with one.
+export function layoutBlockInsetDefault(_type: LayoutBlockType): number {
+  return 0;
 }
 
 const indent = (markup: string, pad: string) =>
@@ -564,12 +568,17 @@ function normalizeLayoutBlock(raw: unknown, fallbackId: string): LayoutBlock | n
       ? { id: src.id, name: src.name }
       : undefined;
   if (!type) return null;
-  // Layouts saved before insets existed fall back to the per-type default, so
-  // an old two-chart row picks up its label room the next time it is opened.
+  // Migration: radar blocks used to be auto-seeded with LAYOUT_LABEL_ROOM (10%)
+  // side room for axis labels the renderer no longer paints outside its box.
+  // That exact value is dropped back to 0 so old saved layouts stop rendering
+  // their charts smaller than their neighbours; any other inset is a deliberate
+  // author choice and is kept.
+  const rawInsetX = numOr(b.insetX, layoutBlockInsetDefault(type));
+  const insetX = type === "radar-chart" && rawInsetX === LAYOUT_LABEL_ROOM ? 0 : rawInsetX;
   const base: LayoutBlockBase = {
     id,
     span: asSpan(b.span),
-    insetX: Math.max(0, Math.min(40, numOr(b.insetX, layoutBlockInsetDefault(type)))),
+    insetX: Math.max(0, Math.min(40, insetX)),
     insetY: Math.max(0, numOr(b.insetY, 0)),
   };
   switch (type) {

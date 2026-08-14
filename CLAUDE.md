@@ -393,17 +393,19 @@ and every row can become a **band** (`background` + `padX`/`padY` + `radius`;
 an empty background emits the row exactly as before). The row panel has
 one-click column splits (`splitPresets`) that rewrite every span in the row.
 
-**`insetX` is what keeps side-by-side radar charts legible.** The renderer draws
-axis labels *outside* the SVG box (`.patrik-radar-svg { overflow: visible }`), so
-a chart that fills its column spills roughly a tenth of its width to each side
-and collides with the neighbouring column. Radar blocks therefore default to
-`insetX = LAYOUT_LABEL_ROOM` (10%) — including old saved layouts, which pick it
-up through `normalizeLayoutBlock`. The row panel also flags any radar chart that
-shares a row and has less (`crowdedCharts()`) with a one-click fix. The inset is
-carried as `data-inset-x`/`data-inset-y` on the column but **applied by the
-renderer to an inner `.patrik-layout-cell`, never to the column itself**: a
-percentage padding resolves against the containing block, so on the column it
-would be a share of the whole row instead of of the column.
+**Insets are aesthetic breathing room only.** They used to be load-bearing:
+radar axis labels were painted outside the SVG box, so radar blocks defaulted
+to `insetX = LAYOUT_LABEL_ROOM` (10%) to keep them out of the neighbouring
+column. The renderer now grows the viewBox to *contain* the labels, so that
+room is pure wasted width — `layoutBlockInsetDefault` is 0 for every type, and
+`normalizeLayoutBlock` migrates a radar block whose stored `insetX` equals the
+old 10% auto-default back to 0 (any other value is a deliberate author choice
+and is kept; `LAYOUT_LABEL_ROOM` survives only as that migration constant).
+The inset is carried as `data-inset-x`/`data-inset-y` on the column but
+**applied by the renderer to an inner `.patrik-layout-cell`, never to the
+column itself**: a percentage padding resolves against the containing block,
+so on the column it would be a share of the whole row instead of of the
+column.
 
 The emitted markup is pure **structure** — `.patrik-layout` /
 `.patrik-layout-row` / `.patrik-layout-col` divs carrying only classes +
@@ -432,8 +434,10 @@ proportional point/stroke/offset scaling — whenever they would render below
 ~10px, so a chart in a narrow column or on a phone stays readable); range bars
 step their type/track down through `data-pc-w="md|sm|xs"` buckets set from
 their own width. Inside a layout column a default-size radar fills its column
-share (capped at 560px) so side-by-side charts balance visually; an explicit
-`data-size` still wins and is applied as `min(<size>px, 100%)`.
+share so side-by-side blocks balance visually — capped at 560px only when the
+column is alone in its row (`:not(:only-child)` lifts the cap, the column
+itself being the size limit); an explicit `data-size` still wins and is
+applied as `min(<size>px, 100%)`.
 
 | Page | Path | Notes |
 |---|---|---|

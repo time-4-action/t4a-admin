@@ -155,12 +155,15 @@
         .patrik-radar-svg{ display:block; width:100%; max-width:460px; height:auto; margin:0 auto; overflow:visible; background:transparent; }
         .patrik-radar-chart[data-align="left"] .patrik-radar-svg{ margin-left:0; margin-right:auto; }
         .patrik-radar-chart[data-align="right"] .patrik-radar-svg{ margin-left:auto; margin-right:0; }
-        /* Inside a layout column a default-size chart fills its column share
-           (capped so a full-width row does not blow it up) — this is what keeps
-           two side-by-side charts the same visual size regardless of the px
-           size their builds were saved with. An explicit data-size still wins:
+        /* Inside a layout column a default-size chart fills its column share —
+           this is what keeps a chart visually balanced against whatever sits
+           beside it. Alone in a full-width row it is capped so it does not
+           blow up to the whole section; sharing a row with other columns
+           (:not(:only-child)) the cap is lifted entirely, because the column
+           itself is already the size limit. An explicit data-size still wins:
            it is applied as an inline max-width. */
         .patrik-layout-col .patrik-radar-svg{ max-width:min(100%, 560px); }
+        .patrik-layout-col:not(:only-child) .patrik-radar-svg{ max-width:100%; }
         .patrik-radar-chart .rc-grid-line{ fill:none; stroke:var(--rc-grid); stroke-width:1; }
         .patrik-radar-chart .rc-axis-line{ stroke:var(--rc-axis); stroke-width:1; }
         .patrik-radar-chart .rc-data-poly{ fill:var(--rc-fill); stroke:var(--rc-stroke); stroke-width:var(--rc-sw,2px); stroke-linejoin:round; }
