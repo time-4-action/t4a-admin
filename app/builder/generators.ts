@@ -367,10 +367,12 @@ export type LayoutBlockSource = { id: string; name: string };
 // What every block has regardless of what it draws.
 //
 // `insetX` is a PERCENTAGE of the column, not px — aesthetic breathing room
-// that holds its proportion at every screen width. The renderer applies it to
-// the block's own cell wrapper, so it is always relative to the column, never
-// to the whole row. (It is no longer needed for radar axis labels: the
-// renderer grows the SVG viewBox to contain them.)
+// between side-by-side columns. The renderer applies it to the block's own
+// cell wrapper, so it is always relative to the column, never to the whole
+// row — and it ramps the inset down as the section narrows (gone at ≤480px),
+// because stacked mobile columns should give the content the full width.
+// (It is no longer needed for radar axis labels: the renderer grows the SVG
+// viewBox to contain them.)
 export type LayoutBlockBase = {
   id: string;
   span: number;

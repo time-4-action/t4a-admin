@@ -1487,8 +1487,9 @@ export default function LayoutBuilder() {
               onChange={(v) => patchBlock(selectedBlock.id, { insetY: v })}
             />
             <p className="text-[10.5px] text-muted-foreground leading-relaxed">
-              Keeps this block clear of the column edges — a share of the column, so it holds at
-              every screen width.
+              Keeps this block clear of the column edges — a share of the column. On narrow
+              screens, where columns stack, the side room fades out so the content gets the
+              full width.
             </p>
           </div>
         </Group>

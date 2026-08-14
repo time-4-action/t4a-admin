@@ -966,8 +966,9 @@
 
        Column:
          data-span     width share relative to its siblings (default 1)
-         data-inset-x  % of the column kept clear on each side (radar
-                       charts use this for their outside axis labels)
+         data-inset-x  % of the column kept clear on each side — desktop
+                       breathing room between neighbours; fades to zero as
+                       the section narrows so phones get the full width
          data-inset-y  px above/below
          (either inset needs the inner .patrik-layout-cell wrapper)
 
@@ -1020,10 +1021,16 @@
         }
         /* The inset lives on this inner cell, never on the column itself: a
            percentage padding resolves against the containing block, so on the
-           column it would be a share of the whole row instead of the column. */
+           column it would be a share of the whole row instead of the column.
+           Horizontal insets are breathing room BETWEEN side-by-side columns —
+           on a narrow section the columns have stacked and the inset would
+           only shrink the content, so it ramps down with the section width
+           and is gone at phone size (0 at 480px, fully back by ~1000px).
+           clamp() keeps the authored value as the ceiling, so desktop is
+           untouched and legacy pasted layouts heal themselves on mobile. */
         .patrik-layout-cell{
             box-sizing:border-box; width:100%;
-            padding:var(--pl-iy,0px) var(--pl-ix,0%);
+            padding:var(--pl-iy,0px) clamp(0%, calc((var(--pl-w,1200) - 480) * 0.08%), var(--pl-ix,0%));
         }
         .patrik-layout-heading{
             margin:0; font-family:inherit; font-weight:800; letter-spacing:.01em;

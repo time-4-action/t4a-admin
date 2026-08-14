@@ -405,7 +405,12 @@ The inset is carried as `data-inset-x`/`data-inset-y` on the column but
 **applied by the renderer to an inner `.patrik-layout-cell`, never to the
 column itself**: a percentage padding resolves against the containing block,
 so on the column it would be a share of the whole row instead of of the
-column.
+column. **Horizontal insets fade out on narrow sections** — they are breathing
+room between side-by-side columns, so once the columns have stacked they would
+only shrink the content: the cell's padding is `clamp()`ed against the
+section's `--pl-w` (0 at ≤480px, authored value fully back by ~1000px), which
+also heals legacy pasted layouts that still carry `data-inset-x="10"` on
+mobile.
 
 The emitted markup is pure **structure** — `.patrik-layout` /
 `.patrik-layout-row` / `.patrik-layout-col` divs carrying only classes +
