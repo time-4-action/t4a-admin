@@ -945,7 +945,10 @@ export function BuilderShell({
         </p>
 
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,360px)_1fr] gap-4 items-start">
-          <div className="bg-surface border border-border rounded-xl overflow-hidden">
+          {/* No overflow-hidden here: control panels open dropdown menus (e.g.
+              the composer's "+ Add a block" menu at the panel's bottom edge)
+              that must be able to hang outside the panel box. */}
+          <div className="bg-surface border border-border rounded-xl">
             {controls}
           </div>
 

@@ -308,10 +308,12 @@ function AddBlockMenu({
       {open && !pickingFor && (
         <div
           className={cn(
-            "absolute z-30 top-full mt-1.5 w-60 rounded-xl border border-border bg-popover shadow-xl p-1",
+            "absolute z-30 w-60 rounded-xl border border-border bg-popover shadow-xl p-1",
             // The row-header button sits at the right edge — hang the menu off
-            // its right so it never runs past the panel.
-            compact ? "right-0" : "left-0",
+            // its right so it never runs past the panel. The panel button sits
+            // at the very bottom of the controls column, so its menu opens
+            // UPWARD to stay in view.
+            compact ? "top-full mt-1.5 right-0" : "bottom-full mb-1.5 left-0",
           )}
         >
           {BLOCK_ORDER.map((t) => {
@@ -346,8 +348,8 @@ function AddBlockMenu({
       {open && pickingFor && (
         <div
           className={cn(
-            "absolute z-30 top-full mt-1.5 w-72 rounded-xl border border-border bg-popover shadow-xl p-1",
-            compact ? "right-0" : "left-0",
+            "absolute z-30 w-72 rounded-xl border border-border bg-popover shadow-xl p-1",
+            compact ? "top-full mt-1.5 right-0" : "bottom-full mb-1.5 left-0",
           )}
         >
           <button
