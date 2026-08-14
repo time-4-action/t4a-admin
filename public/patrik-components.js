@@ -1013,9 +1013,16 @@
             background:var(--pl-band,transparent);
             border-radius:var(--pl-band-radius,0px);
         }
+        /* flex-GROW is what makes stacking work: when a column wraps onto its
+           own line its flex-basis is still the desktop share (e.g. 50% - gap),
+           so without grow it would sit at its min-width — a 320px stub
+           centred in the row — instead of filling it. With grow it expands to
+           the full line. Desktop is untouched: the bases of a row's columns
+           already sum to ~100%, so there is no free space to grow into and
+           the span ratios hold. */
         .patrik-layout-col{
             box-sizing:border-box;
-            flex:0 1 var(--pl-basis,100%);
+            flex:1 1 var(--pl-basis,100%);
             min-width:min(100%, var(--pl-wrap,320px));
             max-width:100%;
         }
