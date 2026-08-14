@@ -259,12 +259,14 @@
          1. side-aware text-anchor  - a label beside the chart starts/ends at
             its axis instead of straddling it, so it reaches half as far out;
          2. wrapping                - a label that would still leave the box is
-            split over two lines at the space nearest its middle;
-         3. fitRadarViewBox()       - the viewBox is widened by whatever the
-            drawing actually overflows, measured with getBBox().
+            split over two lines at the space nearest its middle (side labels
+            wrap eagerly — their width is subtracted from the polygon's);
+         3. fitRadarViewBox()       - the viewBox is shrink-wrapped to what was
+            actually drawn, measured with getBBox(), so the polygon claims as
+            much of the rendered width as the labels leave it.
        Everything is drawn in the original 0..400 coordinates; only the
-       viewBox changes, so the chart keeps its geometry and just scales down a
-       little when the labels are long.
+       viewBox changes, so the chart keeps its geometry and just scales
+       with the room its labels leave.
 
        READABILITY AT SMALL RENDERED SIZES. Font-size inside an SVG is in
        user units: a chart squeezed into a 300px column renders an 11-unit
@@ -300,10 +302,11 @@
         return [words.slice(0, at).join(" "), words.slice(at).join(" ")];
     }
 
-    // Grow the viewBox so it contains everything drawn. Each side grows only as
-    // far as that side needs, so a chart with one long label is not padded with
-    // dead space opposite it; the original 0..400 box is the floor, which keeps
-    // a short-labelled chart looking exactly as it always did.
+    // SHRINK-WRAP the viewBox to what was actually drawn (+FIT_PAD). Growing
+    // catches labels that run past the 0..400 box; shrinking matters just as
+    // much — the polygon is only 300 of the base 400 units, so keeping the
+    // empty base margins would waste ~12% of the rendered width and make the
+    // chart look smaller than whatever sits beside it.
     function fitRadarViewBox(svg) {
         let box = null;
         try { box = svg.getBBox(); } catch (e) { box = null; }
@@ -311,11 +314,11 @@
             svg.setAttribute("viewBox", "0 0 400 400");
             return;
         }
-        const x0 = Math.min(0, box.x - FIT_PAD);
-        const y0 = Math.min(0, box.y - FIT_PAD);
-        const x1 = Math.max(400, box.x + box.width + FIT_PAD);
-        const y1 = Math.max(400, box.y + box.height + FIT_PAD);
-        svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0));
+        const x0 = box.x - FIT_PAD;
+        const y0 = box.y - FIT_PAD;
+        const w = box.width + FIT_PAD * 2;
+        const h = box.height + FIT_PAD * 2;
+        svg.setAttribute("viewBox", x0 + " " + y0 + " " + w + " " + h);
     }
 
     // Re-draw every chart when webfonts finish loading (they change the text
@@ -417,8 +420,9 @@
             const dirY = Math.sin(angle - Math.PI / 2);
             const side = Math.abs(dirX) < 0.25 ? 0 : (dirX > 0 ? 1 : -1);
             // Offsets grow with the compensated type so bigger labels keep
-            // clearing the octagon (14 / 25 at the default 11-unit size).
-            const labelPos = getXY(angle, maxRadius + (side ? 3 + fontUser : 14 + fontUser));
+            // clearing the octagon — kept as tight as legibility allows,
+            // because every unit of side offset is a unit the polygon loses.
+            const labelPos = getXY(angle, maxRadius + (side ? 5 + fontUser * 0.4 : 8 + fontUser));
 
             const text = document.createElementNS(NS, "text");
             text.setAttribute("class", "rc-label");
@@ -428,12 +432,15 @@
             text.textContent = item.label;
             svg.appendChild(text);
 
-            // Measure in place and wrap only a label that would otherwise run
-            // outside the 0..400 box — one that already fits is left exactly as
-            // it was designed.
+            // Measure in place. SIDE labels wrap eagerly (any multi-word label
+            // wider than ~8 characters): they extend the viewBox sideways, and
+            // every unit of label width is a unit of polygon width lost — the
+            // main reason charts used to look small next to other blocks.
+            // Top/bottom labels sit over empty air, so they only wrap when
+            // they would actually run outside the box.
             const w = textWidth(text, item.label, fontUser);
             const x0 = side > 0 ? labelPos.x : side < 0 ? labelPos.x - w : labelPos.x - w / 2;
-            const lines = (x0 < FIT_PAD || x0 + w > 400 - FIT_PAD)
+            const lines = (side !== 0 && w > fontUser * 7) || (x0 < FIT_PAD || x0 + w > 400 - FIT_PAD)
                 ? wrapLabel(item.label)
                 : [item.label];
 
