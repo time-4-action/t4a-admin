@@ -391,7 +391,12 @@ Block types beyond the charts: `heading`, `text`, `image`, `button`, `divider`,
 `spacer`. Every block also carries **`insetX` (% of its column) / `insetY` (px)**,
 and every row can become a **band** (`background` + `padX`/`padY` + `radius`;
 an empty background emits the row exactly as before). The row panel has
-one-click column splits (`splitPresets`) that rewrite every span in the row.
+one-click column splits (`splitPresets`) that rewrite every span in the row,
+and an optional **stacked spacing** (`stackGap`, emitted as `data-stack-gap`,
+applied by the renderer as the row's `row-gap`): the vertical gap between the
+row's blocks once they wrap on narrow screens. `null` (the default) follows
+the column gap; `0` is meaningful (blocks touching), so presence — not
+truthiness — gates the attribute.
 
 **Insets are aesthetic breathing room only.** They used to be load-bearing:
 radar axis labels were painted outside the SVG box, so radar blocks defaulted

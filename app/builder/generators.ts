@@ -432,6 +432,9 @@ export type LayoutRow = {
   id: string;
   // Space between the columns of this row, in px.
   gap: number;
+  // Space between the columns once the row has wrapped and they sit on top of
+  // each other (narrow screens). null = follow `gap`, the default.
+  stackGap: number | null;
   // Below this column width the row stacks (each column's min-width).
   wrapAt: number;
   valign: "top" | "center" | "bottom" | "stretch";
@@ -481,6 +484,7 @@ export function layoutDefaultRow(over: Partial<LayoutRow> = {}): LayoutRow {
   return {
     id: "",
     gap: 32,
+    stackGap: null,
     wrapAt: 320,
     valign: "top",
     justify: "center",
@@ -662,6 +666,10 @@ export function normalizeLayoutConfig(raw: unknown): LayoutConfig {
     return layoutDefaultRow({
       id: typeof row.id === "string" && row.id ? row.id : `r${ri}`,
       gap: numOr(row.gap, 32),
+      stackGap:
+        typeof row.stackGap === "number" && Number.isFinite(row.stackGap)
+          ? Math.max(0, row.stackGap)
+          : null,
       wrapAt: numOr(row.wrapAt, 320),
       valign: (["top", "center", "bottom", "stretch"] as const).includes(row.valign as never)
         ? (row.valign as LayoutRow["valign"])
@@ -770,6 +778,9 @@ export function generateLayout(cfg: LayoutConfig): { markup: string; code: strin
     const banded = !!row.background.trim();
     const rowAttrs = dataAttrs([
       ["data-gap", row.gap !== 32 && row.gap],
+      // 0 is a meaningful stacked gap (blocks touching), so null-check — not
+      // truthiness — decides whether the attribute is written.
+      ["data-stack-gap", row.stackGap != null ? row.stackGap : false],
       ["data-wrap", row.wrapAt !== 320 && row.wrapAt],
       ["data-valign", row.valign !== "top" && row.valign],
       ["data-justify", row.justify !== "center" && row.justify],

@@ -957,7 +957,9 @@
          </div>
 
        Row (all optional):
-         data-gap      px between columns              (default 32)
+         data-gap        px between columns            (default 32)
+         data-stack-gap  px between the columns once the row has wrapped
+                         and they sit stacked (default: follows data-gap)
          data-wrap     column width below which the row stacks (default 320)
          data-valign   top|center|bottom|stretch       (default top)
          data-justify  left|center|right               (default center)
@@ -1003,9 +1005,16 @@
             width:100%; max-width:var(--pl-max,1200px); margin:0 auto;
             gap:min(var(--pl-row-gap,56px), calc(var(--pl-w,1200) * 0.1px));
         }
+        /* The gap splits into its two axes: column-gap sits BETWEEN columns on
+           one line, row-gap between the lines once the row has wrapped — i.e.
+           between stacked blocks on a phone. data-stack-gap sets the stacked
+           spacing on its own (exact px, the author is deliberately tuning the
+           narrow view); without it the stacked spacing follows the fluid
+           column gap, which is what rows always did. */
         .patrik-layout-row{
             display:flex; flex-wrap:wrap; box-sizing:border-box;
-            gap:min(var(--pl-gap,32px), calc(var(--pl-w,1200) * 0.055px));
+            column-gap:min(var(--pl-gap,32px), calc(var(--pl-w,1200) * 0.055px));
+            row-gap:var(--pl-stack-gap, min(var(--pl-gap,32px), calc(var(--pl-w,1200) * 0.055px)));
             align-items:var(--pl-valign,flex-start);
             justify-content:var(--pl-justify,center);
             padding:min(var(--pl-pad-y,0px), calc(var(--pl-w,1200) * 0.08px))
@@ -1097,6 +1106,8 @@
             const rd = row.dataset;
             const gap = num(rd.gap, 32);
             if (rd.gap) row.style.setProperty("--pl-gap", gap + "px");
+            // "0" is a valid stacked gap, so presence — not truthiness — decides.
+            if (rd.stackGap !== undefined) row.style.setProperty("--pl-stack-gap", Math.max(0, num(rd.stackGap, 0)) + "px");
             if (rd.wrap) row.style.setProperty("--pl-wrap", num(rd.wrap, 320) + "px");
             if (rd.valign && PL_VALIGN[rd.valign]) row.style.setProperty("--pl-valign", PL_VALIGN[rd.valign]);
             if (rd.justify && PL_JUSTIFY[rd.justify]) row.style.setProperty("--pl-justify", PL_JUSTIFY[rd.justify]);

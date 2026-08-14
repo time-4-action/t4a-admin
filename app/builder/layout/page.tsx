@@ -578,6 +578,7 @@ function RowStrip({
         </button>
         <span className="text-[10px] text-muted-foreground">
           {row.blocks.length} {row.blocks.length === 1 ? "column" : "columns"} · gap {row.gap}px
+          {row.stackGap != null && <> · stacked {row.stackGap}px</>}
         </span>
         <div className="ml-auto flex items-center gap-1.5">
           <div className="flex items-center">
@@ -1092,6 +1093,31 @@ export default function LayoutBuilder() {
             A column never gets narrower than the stack width — once they no longer fit side by
             side, the row wraps and the blocks sit on top of each other.
           </p>
+
+          {/* Stacked spacing — the vertical gap between blocks once the row has
+              wrapped. Off = follow the column gap (what rows always did). */}
+          <CheckRow
+            checked={activeRow.stackGap != null}
+            onChange={(v) => patchRow(activeRow.id, { stackGap: v ? 24 : null })}
+          >
+            Custom spacing when stacked
+          </CheckRow>
+          {activeRow.stackGap != null && (
+            <>
+              <Slider
+                label="Stacked gap (px)"
+                value={activeRow.stackGap}
+                min={0}
+                max={120}
+                step={4}
+                onChange={(v) => patchRow(activeRow.id, { stackGap: v })}
+              />
+              <p className="text-[10.5px] text-muted-foreground leading-relaxed">
+                Space between the blocks on narrow screens, where they sit on top of each other.
+                Off, they keep the column gap. Check it with the preview&apos;s phone width.
+              </p>
+            </>
+          )}
 
           {activeRow.blocks.length > 1 && (
             <Field label="Column split" hint="sets every column's share at once">

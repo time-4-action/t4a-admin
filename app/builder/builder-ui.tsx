@@ -393,8 +393,11 @@ export function SavedPresets({
 
   // Unsaved-changes hint: does the live config differ from the loaded save?
   // `stopKeys` are volatile drag-and-drop identities, regenerated on load — not
-  // a real difference.
-  const stripVolatile = (k: string, v: unknown) => (k === "stopKeys" ? undefined : v);
+  // a real difference. A null `stackGap` ("follow the column gap") is the
+  // default a normalizer adds to rows saved before the field existed — also
+  // not a real difference.
+  const stripVolatile = (k: string, v: unknown) =>
+    k === "stopKeys" || (k === "stackGap" && v === null) ? undefined : v;
   let dirty = false;
   if (current) {
     try {
