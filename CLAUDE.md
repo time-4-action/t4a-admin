@@ -68,7 +68,7 @@ MongoDB connection is cached on `global._mongooseConn` to survive Next.js hot-re
 | `UserUsage` | `userusages` | Per-user, per-model token counts and cost. Unique index on `(userId, modelId)`. |
 | `UserLimit` | `userlimits` | Per-user spending cap with period (`daily/weekly/monthly/total`) and current spend. |
 | `Conversation` | `conversations` | One document per conversation; used only to count `convToday` on the dashboard. |
-| `BuilderPreset` | `builderpresets` | A saved Section Builder configuration, scoped to the owning Auth0 `sub`. `config` is the builder's own state blob (opaque to the server). Index on `(userId, builder, updatedAt)`. |
+| `BuilderPreset` | `builderpresets` | A saved Section Builder configuration, **shared** across everyone with builder access. `config` is the builder's own state blob (opaque to the server); carries creator/last-editor stamps, a `versionLabel`, a notes thread, and a capped version history. Index on `(builder, updatedAt)`. |
 
 ### Dev-User Filtering
 
@@ -301,6 +301,7 @@ calls **no backend** and stores nothing. Each snippet is scriptless: only markup
 | Section Builder hub | `/builder` | Landing page: lists the available builders + a "how it works" primer and a renderer download. |
 | Radar Chart builder | `/builder/radar-chart` | Performance octagon — single dataset or a comparison dropdown; axes, values, and optional colours. |
 | Range Bars builder | `/builder/range-bars` | Feel / rider-goal bars — two-pole or labelled-scale mode, optional marker + band colour. Add any number of bars. |
+| Section Layout composer | `/builder/layout` | Arranges the components above into rows and columns — see the composer section below. |
 | Builder Access | `/builder/access` | Per-user toggle of the `builder-admin` role. Reuses `<AccessManager>` (`fuchsia` accent); super-admin only (mapped to the `system` section in `ROUTE_RULES`, like the other `*/access` pages). |
 
 Each builder holds its own state, generates the markup in a `useMemo`, and renders
@@ -314,19 +315,140 @@ website's `patrik-components.js` is bundled verbatim at `public/patrik-component
 subtree, so the preview is byte-identical to production output. The same file is
 offered as a download from the builder pages.
 
-**Saved builds (per-user presets).** Each builder header has a "Saved builds"
-control (`SavedPresets` in `app/builder/builder-ui.tsx`) that lets a user name the
-current configuration, reload it later, rename, update, or delete it. Presets are
-stored in MongoDB (`BuilderPreset` model) **scoped to the Auth0 `sub`** — a user
-only ever sees/edits their own. Each builder passes `presetKey` +
-`getConfig()`/`applyConfig()` to `BuilderShell`; the config is the builder's own
-state blob (opaque to the server). API (gated by the `builder` section via the new
-`/api/builder` rule in `lib/access.ts`):
+**Comparison mode has a default option.** Both compare builders carry a
+`defaultIndex` in their config, written into the snippet as `selected` on that
+`<option>` (the renderer reads `select.selectedIndex`, so the hosted script needs
+no change). It is set either from the **"Show first"** pill on the dataset/model
+card, or simply by **switching models in the live preview** — `PreviewPanel`
+takes an `onSelectDefault` callback and reads the (hidden, renderer-synced)
+`<select>` back after any interaction, since the custom dropdown fires no
+`change` event.
+
+The **layout composer does the same for every chart it holds**: `onSelectDefault`
+reports *all* compare dropdowns in the preview in document order, which is the
+order the markup emits them, so they line up 1:1 with `compareBlockIds(config)`
+and each index lands on its own block. A block's pick is a **placement** choice,
+not part of the build — `syncBlocksToPresets` refreshes the cached config with
+`keepDefaultIndex`, so the same build can open on a different model in two
+different sections and survive a reload. The block editor exposes the same thing
+as a "Shown first" select.
+
+**Saved builds (shared team presets).** Saved builds are **shared across
+everyone with builder access** (the section gate is the ACL — nothing is
+user-scoped except note deletion). Each builder header has a primary **Save**
+button (with an unsaved-changes dot) that opens a proper save modal
+(`SaveBuildModal` in `app/builder/builder-ui.tsx`): update the loaded build vs.
+save as new, build name, a **required version name** ("what changed?"), and an
+optional team note. The "Saved builds" dropdown (`SavedPresets`) is browse/load
+only (plus rename + two-step delete) and deep-links load via
+`/builder/<id>?preset=<presetId>`. Presets live in MongoDB (`BuilderPreset`
+model) with creator/last-editor stamps, a **notes thread**, and a **capped
+version history** (`MAX_PRESET_VERSIONS = 30`): every config overwrite pushes
+the previous state (with its version name, editor, time) onto `versions`.
+Reverting snapshots the current state first, so reverts are revertible. Each
+builder passes `presetKey` + `getConfig()`/`applyConfig()` to `BuilderShell`;
+the config is the builder's own state blob (opaque to the server; range-bars
+`stopKeys` are volatile drag-and-drop identities, ignored by the dirty check).
+
+Markup generation is extracted into `app/builder/generators.ts`
+(`generateSnippet(builder, config)` + per-builder functions/defaults/normalizers)
+so the Saved Builds pages render **real previews** with the same renderer as the
+builders. Wire types live in `types/builder.ts`.
+
+The **control panels** live in `app/builder/section-controls.tsx`
+(`RadarControls`, `RangeBarsControls`) — fully controlled `(value, onChange)`
+components taking the builder's config object. `/builder/radar-chart` and
+`/builder/range-bars` are thin wrappers around them (one config object of state
+each). The only state a panel owns is drag-and-drop identity (axis keys,
+`stopKeys`), which never reaches the markup. `startNum` shifts the numbered group
+badges for callers that slot a panel in after their own groups.
+
+#### Section Layout composer (`app/builder/layout/`)
+
+`/builder/layout` composes a whole section: a canvas of **rows**, each holding
+one or more **blocks** side by side. Blocks are dragged within a row, between
+rows, or onto a trailing zone to start a new row (`@dnd-kit`, one `DndContext`
+with a `SortableContext` + `useDroppable` per row); rows move with up/down
+buttons. Block types: `radar-chart`, `range-bars`, `heading`, `text`, `divider`,
+`spacer`. Selecting a block edits it in the left panel.
+
+**A chart block IS a saved build — the composer arranges, it never edits.**
+There is no ad-hoc chart here: the "+ Block" menu is two-step for the chart
+types (pick the component → pick which saved build), and the block editor's
+"Saved build" select is the only way to change what a block shows. Editing the
+chart itself means opening it in its own builder (the editor deep-links to
+`/builder/<type>?preset=<id>`). Only layout properties — width share, row, and
+position — are editable on the block.
+
+`block.source = {id, name}` is the live link to the build; `block.config` is a
+**cached copy** of it, so `generateSnippet` and the Saved Builds thumbnails work
+from the layout config alone. `syncBlocksToPresets()` refreshes every copy from
+the current builds whenever the preset list loads (and on loading a saved
+layout), so a layout always shows the current state of the builds it points at.
+A block whose build was deleted keeps its last copy and says so in the editor.
+
+Block types beyond the charts: `heading`, `text`, `image`, `button`, `divider`,
+`spacer`. Every block also carries **`insetX` (% of its column) / `insetY` (px)**,
+and every row can become a **band** (`background` + `padX`/`padY` + `radius`;
+an empty background emits the row exactly as before). The row panel has
+one-click column splits (`splitPresets`) that rewrite every span in the row.
+
+**`insetX` is what keeps side-by-side radar charts legible.** The renderer draws
+axis labels *outside* the SVG box (`.patrik-radar-svg { overflow: visible }`), so
+a chart that fills its column spills roughly a tenth of its width to each side
+and collides with the neighbouring column. Radar blocks therefore default to
+`insetX = LAYOUT_LABEL_ROOM` (10%) — including old saved layouts, which pick it
+up through `normalizeLayoutBlock`. The row panel also flags any radar chart that
+shares a row and has less (`crowdedCharts()`) with a one-click fix. The inset is
+carried as `data-inset-x`/`data-inset-y` on the column but **applied by the
+renderer to an inner `.patrik-layout-cell`, never to the column itself**: a
+percentage padding resolves against the containing block, so on the column it
+would be a share of the whole row instead of of the column.
+
+The emitted markup is pure **structure** — `.patrik-layout` /
+`.patrik-layout-row` / `.patrik-layout-col` divs carrying only classes +
+`data-*` config (`data-max`, `data-gap`, `data-span`, `data-band`, …), no
+inline styles. `patrik-components.js` owns all of the layout's styling AND its
+responsive behaviour: it injects a stylesheet, maps the `data-*` onto CSS
+variables, computes column shares from `data-span`, and mirrors the section's
+own rendered width into a `--pl-w` variable (ResizeObserver) from which gaps,
+band paddings, spacer heights and heading sizes scale fluidly via
+`min()`/`clamp()`. Columns stack via `flex-wrap` + `min-width: min(100%,
+<wrapAt>px)` — no media queries anywhere, so the preview's simulated viewport
+widths behave exactly like real devices. **The hosted renderer must therefore
+be the current build of `public/patrik-components.js`** for layout snippets;
+layouts generated before the `data-*` format (inline styles, no `data-max`)
+are detected by the script and left untouched, so already-pasted sections keep
+working. `data-max` is always emitted — it doubles as the format marker. The
+preview panel gains a viewport-width switcher (`PreviewPanel responsive`) to
+check the stacking. The layout itself saves as a `layout` preset like any
+other build.
+
+**Component responsiveness is element-driven, not viewport-driven.** The
+renderer watches each component's own rendered width: radar-chart axis labels
+are **scale-compensated** (after fitting the viewBox the script measures px
+per SVG user unit and redraws the labels at a larger user-unit size — plus
+proportional point/stroke/offset scaling — whenever they would render below
+~10px, so a chart in a narrow column or on a phone stays readable); range bars
+step their type/track down through `data-pc-w="md|sm|xs"` buckets set from
+their own width. Inside a layout column a default-size radar fills its column
+share (capped at 560px) so side-by-side charts balance visually; an explicit
+`data-size` still wins and is applied as `min(<size>px, 100%)`.
+
+| Page | Path | Notes |
+|---|---|---|
+| Saved Builds list | `/builder/saved` | First nav entry of the section. Full-width; search (name/person), builder filter, grid/list toggle (persisted in localStorage), scale-to-fit live thumbnails on the black site surface. |
+| Saved build detail | `/builder/saved/[id]` | Live preview + snippet, inline rename, "Open in builder" (via `?preset=`), two-step delete, team notes thread, and the version timeline — preview any version (amber banner) or restore it (two-step). Server wrapper stamps the viewer for own-note deletion. |
+
+API (gated by the `builder` section via the `/api/builder` rule in `lib/access.ts`):
 
 | Route | Methods |
 |---|---|
-| `/api/builder/presets` | GET (`?builder=`, own only), POST (`{builder,name,config}`) |
-| `/api/builder/presets/[id]` | PATCH (rename / overwrite `config`), DELETE — both owner-scoped |
+| `/api/builder/presets` | GET (`?builder=`, all shared; the composer fetches unfiltered to offer every saved build), POST (`{builder,name,config,versionLabel}` — versionLabel required; `builder` ∈ `radar-chart`/`range-bars`/`layout`) |
+| `/api/builder/presets/[id]` | GET (detail incl. notes + versions), PATCH (rename and/or `config`+`versionLabel`; config change snapshots a version), DELETE |
+| `/api/builder/presets/[id]/notes` | POST (`{text}`, author stamped from session) |
+| `/api/builder/presets/[id]/notes/[noteId]` | DELETE (author-only) |
+| `/api/builder/presets/[id]/revert` | POST (`{versionId}` — snapshots current, restores the version) |
 
 The `<script src="…">` line written into every **generated snippet** is a
 **hardcoded** constant `BUILDER_SCRIPT_URL` in `lib/builder-role.ts` (the
@@ -335,8 +457,14 @@ canonical hosted renderer at
 — not env-configurable. Role name is configurable via
 `NEXT_PUBLIC_BUILDER_ADMIN_ROLE_NAME` (default `"builder-admin"`, also in
 `lib/builder-role.ts`). To add a new section builder: bundle its renderer logic
-into `patrik-components.js`, then add a `/builder/<name>` page that drives
-`BuilderShell` (see the two existing builders as templates).
+into `patrik-components.js`, add its config/generator/normalizer to
+`generators.ts` (plus a `BUILDER_META` entry and `VALID_BUILDERS` in
+`app/api/builder/presets/helpers.ts`), put its panel in `section-controls.tsx`,
+then add a `/builder/<name>` page that drives `BuilderShell` (see the existing
+builders as templates). A new block type in the composer needs a
+`LayoutBlock` variant (on top of `LayoutBlockBase`), a `layoutDefaultBlock` case,
+a `normalizeLayoutBlock` case, a `generateLayoutBlock` case, a `blockSummary`
+case, and an entry in the layout page's `BLOCK_META` / `BLOCK_ORDER`.
 
 ### B2B Customer Portal + Documents module (`app/portal/`, `app/documents/`)
 
