@@ -22,10 +22,44 @@ import {
   Trash2,
   Pencil,
   Loader2,
+  FolderOpen,
+  Save,
+  History,
+  Star,
+  Monitor,
+  Laptop,
+  Tablet,
+  Smartphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { usePatrikComponents } from "@/lib/use-patrik-components";
+import type { PresetSummary } from "@/types/builder";
+
+/* ────────────────────────────── time helpers ───────────────────────────── */
+
+export function relativeTime(value?: string | null): string {
+  if (!value) return "—";
+  const t = new Date(value).getTime();
+  if (Number.isNaN(t)) return "—";
+  const s = Math.round((Date.now() - t) / 1000);
+  if (s < 45) return "just now";
+  if (s < 90) return "a minute ago";
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} h ago`;
+  const d = Math.round(h / 24);
+  if (d < 7) return `${d} day${d === 1 ? "" : "s"} ago`;
+  return new Date(value).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+export function fmtDateTime(value?: string | null): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
 
 /* ────────────────────────────── code highlight ─────────────────────────── */
 
@@ -72,31 +106,117 @@ function PanelHead({ title, note }: { title: string; note?: string }) {
   );
 }
 
-function PreviewPanel({ markup }: { markup: string }) {
+// Viewport presets for the responsive preview — the width the rendered section
+// is given, so you can watch a multi-column layout stack.
+const VIEWPORTS = [
+  { value: 0, label: "Full", icon: Monitor },
+  { value: 1024, label: "1024", icon: Laptop },
+  { value: 768, label: "768", icon: Tablet },
+  { value: 390, label: "390", icon: Smartphone },
+] as const;
+
+export function PreviewPanel({
+  markup,
+  note,
+  // Adds a viewport-width switcher to the panel head. Only worth it for
+  // components whose layout actually reflows (the section composer).
+  responsive,
+  // Called after any interaction inside the preview with the picked option of
+  // EVERY compare dropdown in it, in document order — so "what I picked here"
+  // becomes the option the generated snippet opens on. A single-component
+  // builder reads [0]; the layout composer maps the list onto its chart blocks.
+  onSelectDefault,
+}: {
+  markup: string;
+  note?: string;
+  responsive?: boolean;
+  onSelectDefault?: (indices: number[]) => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState<number>(0);
   const { ready, render } = usePatrikComponents();
+
+  // Held in a ref so an inline callback from the caller doesn't re-run the
+  // effect below on every render (which would re-mount the whole preview).
+  const selectCb = useRef(onSelectDefault);
+  selectCb.current = onSelectDefault;
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.innerHTML = markup;
     if (ready) render(el);
-  }, [markup, ready, render]);
+
+    // The renderer swaps the native <select> for its own themed dropdown and
+    // keeps the hidden original in sync (selectedIndex) but fires no change
+    // event — so read it back after any interaction inside the preview.
+    const read = () => {
+      if (!selectCb.current) return;
+      const all = el.querySelectorAll<HTMLSelectElement>(
+        "select.patrik-radar-select, select.patrik-range-select",
+      );
+      if (!all.length) return;
+      selectCb.current(Array.from(all, (s) => (s.selectedIndex < 0 ? 0 : s.selectedIndex)));
+    };
+    el.addEventListener("click", read);
+    el.addEventListener("change", read);
+    return () => {
+      el.removeEventListener("click", read);
+      el.removeEventListener("change", read);
+    };
+  }, [markup, ready, render, width]);
 
   return (
     <div className="bg-surface border border-border rounded-xl overflow-hidden">
-      <PanelHead title="Live preview" note="on a dark site surface · transparent" />
+      {responsive ? (
+        <div className="flex items-center gap-2 px-4 h-11 border-b border-border/60">
+          <h2 className="text-[12px] font-semibold text-foreground tracking-tight">Live preview</h2>
+          <span className="hidden md:inline text-[10px] text-muted-foreground">
+            {note ?? "on a dark site surface · transparent"}
+          </span>
+          <div className="ml-auto inline-flex items-center gap-0.5 rounded-lg border border-border bg-muted/40 p-0.5">
+            {VIEWPORTS.map((v) => {
+              const active = v.value === width;
+              const VIcon = v.icon;
+              return (
+                <button
+                  key={v.value}
+                  type="button"
+                  onClick={() => setWidth(v.value)}
+                  title={v.value ? `${v.value}px wide` : "Full width"}
+                  aria-pressed={active}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-md px-1.5 h-6 text-[10.5px] font-medium transition-colors",
+                    active
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <VIcon className="w-3 h-3" />
+                  <span className="hidden sm:inline tabular-nums">{v.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <PanelHead title="Live preview" note={note ?? "on a dark site surface · transparent"} />
+      )}
       {/* Pure-black surface: the components are dark-native and transparent,
           so this mirrors the black patrikinternational.com pages regardless
           of the admin theme. */}
-      <div className="p-4 md:p-6" style={{ background: "#000000" }}>
-        <div ref={ref} className="min-h-[120px]" />
+      <div className="p-4 md:p-6 overflow-x-auto" style={{ background: "#000000" }}>
+        <div
+          ref={ref}
+          className="min-h-[120px] mx-auto"
+          style={width ? { width, maxWidth: "100%" } : undefined}
+        />
       </div>
     </div>
   );
 }
 
-function CodePanel({ code }: { code: string }) {
+export function CodePanel({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
     navigator.clipboard.writeText(code).then(() => {
@@ -166,11 +286,14 @@ export function CopyableCode({ code }: { code: string }) {
 
 /* ─────────────────────────── saved presets ─────────────────────────────── */
 
-type Preset = { id: string; builder: string; name: string; config: unknown; updatedAt: string };
+type Preset = PresetSummary;
 
-// Per-user saved builds (persisted in MongoDB via /api/builder/presets). Lets a
-// user name the current configuration, come back later, and load it to keep
-// editing. `getConfig` snapshots the builder's state; `applyConfig` restores it.
+// Saved builds (persisted in MongoDB via /api/builder/presets), SHARED across
+// everyone with builder access: anyone can name the current configuration,
+// come back later, and load or update any saved build. `getConfig` snapshots
+// the builder's state; `applyConfig` restores it. A `?preset=<id>` query param
+// (written by the Saved Builds pages' "Open in builder") loads that save on
+// mount.
 export function SavedPresets({
   builderId,
   getConfig,
@@ -181,19 +304,25 @@ export function SavedPresets({
   applyConfig: (config: unknown) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [name, setName] = useState("");
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
+  // A ?preset=<id> deep link from the Saved Builds pages, applied once loaded.
+  const pendingPresetRef = useRef<string | null>(null);
 
   const current = presets.find((p) => p.id === currentId) ?? null;
+
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("preset");
+    if (id) pendingPresetRef.current = id;
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -213,6 +342,22 @@ export function SavedPresets({
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Apply the deep-linked preset as soon as the list has it.
+  useEffect(() => {
+    const id = pendingPresetRef.current;
+    if (!id) return;
+    const p = presets.find((x) => x.id === id);
+    if (!p) return;
+    pendingPresetRef.current = null;
+    applyConfig(p.config);
+    setCurrentId(p.id);
+    // Drop the param so a refresh doesn't re-apply over newer edits.
+    const url = new URL(window.location.href);
+    url.searchParams.delete("preset");
+    window.history.replaceState(null, "", url.toString());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presets]);
 
   const place = useCallback(() => {
     const el = triggerRef.current;
@@ -242,46 +387,29 @@ export function SavedPresets({
     };
   }, [open, place]);
 
-  const saveNew = async () => {
-    const n = name.trim();
-    if (!n || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/builder/presets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ builder: builderId, name: n, config: getConfig() }),
-      });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Save failed");
-      const { preset } = (await res.json()) as { preset: Preset };
-      setName("");
-      setCurrentId(preset.id);
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
-    } finally {
-      setBusy(false);
-    }
-  };
+  useEffect(() => {
+    if (!open) setConfirmDeleteId(null);
+  }, [open]);
 
-  const updateCurrent = async () => {
-    if (!currentId || busy) return;
-    setBusy(true);
-    setError(null);
+  // Unsaved-changes hint: does the live config differ from the loaded save?
+  // `stopKeys` are volatile drag-and-drop identities, regenerated on load — not
+  // a real difference.
+  const stripVolatile = (k: string, v: unknown) => (k === "stopKeys" ? undefined : v);
+  let dirty = false;
+  if (current) {
     try {
-      const res = await fetch(`/api/builder/presets/${currentId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ config: getConfig() }),
-      });
-      if (!res.ok) throw new Error("Update failed");
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Update failed");
-    } finally {
-      setBusy(false);
+      dirty =
+        JSON.stringify(getConfig(), stripVolatile) !==
+        JSON.stringify(current.config, stripVolatile);
+    } catch {
+      /* treat as clean */
     }
+  }
+
+  const onSaved = async (preset: Preset) => {
+    setCurrentId(preset.id);
+    setSaveOpen(false);
+    await refresh();
   };
 
   const load = (p: Preset) => {
@@ -306,7 +434,13 @@ export function SavedPresets({
     }
   };
 
+  // Shared saves: deleting affects everyone, so require a second click.
   const remove = async (p: Preset) => {
+    if (confirmDeleteId !== p.id) {
+      setConfirmDeleteId(p.id);
+      return;
+    }
+    setConfirmDeleteId(null);
     try {
       await fetch(`/api/builder/presets/${p.id}`, { method: "DELETE" });
       if (currentId === p.id) setCurrentId(null);
@@ -318,6 +452,27 @@ export function SavedPresets({
 
   return (
     <>
+      {/* Save — the primary action. Opens a proper modal (update vs save-as-new,
+          version name, optional team note). A dot marks unsaved changes. */}
+      <button
+        type="button"
+        onClick={() => setSaveOpen(true)}
+        className="relative inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-blue-600 text-white text-[11px] font-medium hover:bg-blue-700 transition-colors shrink-0"
+        title={
+          current
+            ? dirty
+              ? `Unsaved changes to “${current.name}”`
+              : `Save “${current.name}”`
+            : "Save this build"
+        }
+      >
+        <Save className="w-3.5 h-3.5" />
+        Save
+        {dirty && (
+          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-background" />
+        )}
+      </button>
+
       <button
         ref={triggerRef}
         type="button"
@@ -339,6 +494,17 @@ export function SavedPresets({
         )}
       </button>
 
+      {saveOpen && (
+        <SaveBuildModal
+          builderId={builderId}
+          current={current}
+          dirty={dirty}
+          getConfig={getConfig}
+          onSaved={onSaved}
+          onClose={() => setSaveOpen(false)}
+        />
+      )}
+
       {open && pos &&
         createPortal(
           <div
@@ -346,48 +512,11 @@ export function SavedPresets({
             style={{ position: "fixed", top: pos.top, right: pos.right, width: 288 }}
             className="z-50 rounded-xl border border-border bg-popover shadow-xl p-3 space-y-3"
           >
-            {/* save as new */}
-            <div>
-              <div className="text-[11px] font-semibold text-foreground mb-1.5">Save this build</div>
-              <div className="flex items-center gap-1.5">
-                <Input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && saveNew()}
-                  placeholder="Name it…"
-                  className="h-8 text-xs bg-background"
-                  spellCheck={false}
-                />
-                <button
-                  type="button"
-                  onClick={saveNew}
-                  disabled={!name.trim() || busy}
-                  className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg bg-blue-600 text-white text-[11px] font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-                >
-                  {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-                  Save
-                </button>
-              </div>
-              {current && (
-                <button
-                  type="button"
-                  onClick={updateCurrent}
-                  disabled={busy}
-                  className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  Update “{current.name}” with current changes
-                </button>
-              )}
-              {error && <p className="mt-1.5 text-[11px] text-rose-500">{error}</p>}
-            </div>
-
-            <div className="border-t border-border/60" />
-
-            {/* list */}
+            {/* list — shared across everyone with builder access */}
             <div>
               <div className="text-[11px] font-semibold text-foreground mb-1.5 flex items-center gap-2">
-                Your builds
+                Saved builds
+                <span className="text-[10px] text-muted-foreground font-normal">shared with the team</span>
                 {loading && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
               </div>
               {presets.length === 0 && !loading ? (
@@ -400,7 +529,7 @@ export function SavedPresets({
                     <div
                       key={p.id}
                       className={cn(
-                        "group flex items-center gap-1.5 rounded-lg px-2 h-9 transition-colors",
+                        "group flex items-center gap-1.5 rounded-lg px-2 py-1.5 transition-colors",
                         p.id === currentId ? "bg-blue-500/10" : "hover:bg-muted",
                       )}
                     >
@@ -424,7 +553,12 @@ export function SavedPresets({
                           className="flex-1 min-w-0 text-left"
                           title={`Load “${p.name}”`}
                         >
-                          <span className="block text-[12px] text-foreground truncate">{p.name}</span>
+                          <span className="block text-[12px] text-foreground truncate leading-tight">
+                            {p.name}
+                          </span>
+                          <span className="block text-[10px] text-muted-foreground truncate leading-tight mt-0.5">
+                            {p.updatedBy?.name || p.updatedBy?.email || "—"} · {relativeTime(p.updatedAt)}
+                          </span>
                         </button>
                       )}
                       {editingId !== p.id && (
@@ -434,6 +568,7 @@ export function SavedPresets({
                             onClick={() => {
                               setEditingId(p.id);
                               setEditName(p.name);
+                              setConfirmDeleteId(null);
                             }}
                             className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground/60 hover:text-foreground hover:bg-background opacity-0 group-hover:opacity-100 transition"
                             title="Rename"
@@ -444,11 +579,17 @@ export function SavedPresets({
                           <button
                             type="button"
                             onClick={() => remove(p)}
-                            className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground/60 hover:text-rose-500 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition"
-                            title="Delete"
+                            className={cn(
+                              "h-6 rounded-md flex items-center justify-center transition",
+                              confirmDeleteId === p.id
+                                ? "px-1.5 gap-1 text-[10px] font-semibold text-white bg-rose-500 hover:bg-rose-600 opacity-100"
+                                : "w-6 text-muted-foreground/60 hover:text-rose-500 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100",
+                            )}
+                            title={confirmDeleteId === p.id ? "Click again to delete for everyone" : "Delete"}
                             aria-label="Delete"
                           >
                             <Trash2 className="w-3 h-3" />
+                            {confirmDeleteId === p.id && "Sure?"}
                           </button>
                         </>
                       )}
@@ -457,10 +598,267 @@ export function SavedPresets({
                 </div>
               )}
             </div>
+
+            <div className="border-t border-border/60" />
+
+            <Link
+              href="/builder/saved"
+              className="flex items-center gap-1.5 text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline"
+              onClick={() => setOpen(false)}
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              Manage saved builds — notes &amp; history
+            </Link>
           </div>,
           document.body,
         )}
     </>
+  );
+}
+
+/* ─────────────────────────── save modal ────────────────────────────────── */
+
+// The proper save dialog: choose between updating the loaded shared build or
+// saving as a new one, name the build, NAME THE VERSION (required — it is what
+// the version history shows), and optionally leave a team note.
+function SaveBuildModal({
+  builderId,
+  current,
+  dirty,
+  getConfig,
+  onSaved,
+  onClose,
+}: {
+  builderId: string;
+  current: Preset | null;
+  dirty: boolean;
+  getConfig: () => unknown;
+  onSaved: (p: Preset) => void | Promise<void>;
+  onClose: () => void;
+}) {
+  const [mode, setMode] = useState<"update" | "new">(current ? "update" : "new");
+  const [name, setName] = useState(current?.name ?? "");
+  const [versionLabel, setVersionLabel] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
+
+  const pickMode = (m: "update" | "new") => {
+    setMode(m);
+    setName(m === "update" ? current?.name ?? "" : "");
+    setError(null);
+  };
+
+  const canSave = !!name.trim() && !!versionLabel.trim() && !busy;
+
+  const save = async () => {
+    if (!canSave) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const payload = {
+        name: name.trim(),
+        config: getConfig(),
+        versionLabel: versionLabel.trim(),
+      };
+      const res =
+        mode === "update" && current
+          ? await fetch(`/api/builder/presets/${current.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            })
+          : await fetch("/api/builder/presets", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ...payload, builder: builderId }),
+            });
+      const data = (await res.json().catch(() => ({}))) as { preset?: Preset; error?: string };
+      if (!res.ok || !data.preset) throw new Error(data?.error || "Save failed");
+      const text = note.trim();
+      if (text) {
+        // Best-effort: the save itself already succeeded.
+        await fetch(`/api/builder/presets/${data.preset.id}/notes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        }).catch(() => {});
+      }
+      await onSaved(data.preset);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+      setBusy(false);
+    }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Save build"
+        className="relative w-full max-w-md rounded-2xl border border-border bg-popover shadow-2xl overflow-hidden"
+      >
+        {/* head */}
+        <div className="flex items-center gap-2.5 px-5 h-12 border-b border-border/60">
+          <Save className="w-4 h-4 text-blue-500" />
+          <h2 className="text-[13px] font-semibold text-foreground tracking-tight">Save build</h2>
+          <span className="text-[10px] text-muted-foreground">shared with the team</span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-auto p-1.5 -mr-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            aria-label="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* update vs save-as-new */}
+          {current && (
+            <div className="space-y-2">
+              {(
+                [
+                  {
+                    value: "update" as const,
+                    icon: History,
+                    title: `Update “${current.name}”`,
+                    desc: "Overwrites this shared build for everyone. The previous state is kept in version history.",
+                  },
+                  {
+                    value: "new" as const,
+                    icon: Plus,
+                    title: "Save as a new build",
+                    desc: `Creates a separate build — “${current.name}” stays untouched.`,
+                  },
+                ]
+              ).map(({ value, icon: MIcon, title, desc }) => {
+                const active = mode === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => pickMode(value)}
+                    aria-pressed={active}
+                    className={cn(
+                      "w-full flex items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+                      active
+                        ? "border-blue-400 bg-blue-500/5 ring-2 ring-blue-500/20"
+                        : "border-border hover:bg-muted/50",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5",
+                        active ? "bg-blue-600 text-white" : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      <MIcon className="w-3.5 h-3.5" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[12.5px] font-semibold text-foreground leading-tight truncate">
+                        {title}
+                      </span>
+                      <span className="block text-[11px] text-muted-foreground leading-snug mt-0.5">
+                        {desc}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+              {mode === "update" && (
+                <p className={cn("text-[10.5px] px-1", dirty ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
+                  {dirty
+                    ? "You have unsaved changes — saving records a new version."
+                    : "No changes detected since the last save."}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* build name */}
+          <label className="block space-y-1">
+            <span className="text-[11px] font-medium text-muted-foreground">Build name</span>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={mode === "new" ? "Name the new build…" : "Build name"}
+              className="h-8 text-xs bg-background"
+              spellCheck={false}
+              autoFocus={mode === "new" && !name}
+            />
+          </label>
+
+          {/* version name — required on every save */}
+          <label className="block space-y-1">
+            <span className="text-[11px] font-medium text-muted-foreground">
+              Version name <span className="text-rose-500">*</span>
+              <span className="ml-1 text-muted-foreground/60 font-normal">what changed?</span>
+            </span>
+            <Input
+              value={versionLabel}
+              onChange={(e) => setVersionLabel(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && save()}
+              placeholder="e.g. Bumped wave rating, new teal fill…"
+              className="h-8 text-xs bg-background"
+              spellCheck={false}
+              autoFocus={!(mode === "new" && !name)}
+            />
+          </label>
+
+          {/* optional team note */}
+          <label className="block space-y-1">
+            <span className="text-[11px] font-medium text-muted-foreground">
+              Note for the team <span className="text-muted-foreground/60 font-normal">optional</span>
+            </span>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={2}
+              placeholder="Context, where this is used, feedback wanted…"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-[12px] text-foreground outline-none resize-y focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+              spellCheck={false}
+            />
+          </label>
+
+          {error && <p className="text-[11px] text-rose-500">{error}</p>}
+        </div>
+
+        {/* footer */}
+        <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-border/60 bg-muted/30">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center h-8 px-3 rounded-lg border border-border text-[11.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={!canSave}
+            className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg bg-blue-600 text-white text-[11.5px] font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            {mode === "update" ? "Save version" : "Save new build"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -478,6 +876,9 @@ export function BuilderShell({
   presetKey,
   getConfig,
   applyConfig,
+  canvas,
+  previewResponsive,
+  onPreviewSelect,
 }: {
   title: string;
   icon: ElementType;
@@ -491,6 +892,14 @@ export function BuilderShell({
   presetKey?: string;
   getConfig?: () => unknown;
   applyConfig?: (config: unknown) => void;
+  // An extra full-width panel above the preview — the section composer's
+  // rows-and-columns canvas lives here.
+  canvas?: ReactNode;
+  previewResponsive?: boolean;
+  // Switching a compare dropdown in the live preview reports the picked option
+  // of every dropdown here, so the builder can store them as the snippet's
+  // defaults.
+  onPreviewSelect?: (indices: number[]) => void;
 }) {
   return (
     <div className="flex flex-col h-full">
@@ -541,7 +950,12 @@ export function BuilderShell({
           </div>
 
           <div className="space-y-4 min-w-0">
-            <PreviewPanel markup={markup} />
+            {canvas}
+            <PreviewPanel
+              markup={markup}
+              responsive={previewResponsive}
+              onSelectDefault={onPreviewSelect}
+            />
             <CodePanel code={code} />
             <p className="text-[11px] text-muted-foreground leading-relaxed px-1">{tip}</p>
           </div>
@@ -618,6 +1032,29 @@ export function TextField({
       onChange={(e) => onChange(e.target.value)}
       className={cn("h-8 text-xs bg-background", mono && "font-mono")}
       spellCheck={false}
+    />
+  );
+}
+
+export function TextArea({
+  value,
+  placeholder,
+  rows = 3,
+  onChange,
+}: {
+  value: string;
+  placeholder?: string;
+  rows?: number;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <textarea
+      value={value}
+      rows={rows}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      spellCheck={false}
+      className="w-full rounded-md border border-border bg-background px-2.5 py-2 text-[12px] text-foreground outline-none resize-y focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
     />
   );
 }
@@ -1118,10 +1555,13 @@ export function RemoveIcon() {
 export function SubCard({
   title,
   onRemove,
+  // An extra control in the card head, left of the remove button.
+  action,
   children,
 }: {
   title: string;
   onRemove?: () => void;
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -1130,15 +1570,46 @@ export function SubCard({
         <span className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
           {title}
         </span>
-        {onRemove && (
-          <span className="ml-auto">
+        <span className="ml-auto flex items-center gap-1.5">
+          {action}
+          {onRemove && (
             <IconButton onClick={onRemove} title={`Remove ${title}`}>
               <RemoveIcon />
             </IconButton>
-          </span>
-        )}
+          )}
+        </span>
       </div>
       {children}
     </div>
+  );
+}
+
+// Marks which entry of a compare dropdown is shown when the page loads — the
+// same thing that picking an option in the live preview sets.
+export function DefaultPill({
+  active,
+  onClick,
+  title,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={active ? undefined : onClick}
+      title={title}
+      aria-pressed={active}
+      className={cn(
+        "inline-flex items-center gap-1 h-5 px-1.5 rounded-md border text-[9.5px] font-semibold uppercase tracking-wide transition-colors shrink-0",
+        active
+          ? "border-blue-500/50 bg-blue-500/15 text-blue-600 dark:text-blue-400 cursor-default"
+          : "border-border text-muted-foreground/70 hover:text-foreground hover:border-blue-400 hover:bg-blue-500/5",
+      )}
+    >
+      <Star className={cn("w-2.5 h-2.5", active && "fill-current")} />
+      {active ? "Shown first" : "Show first"}
+    </button>
   );
 }
