@@ -39,6 +39,8 @@ import {
   Tag,
   RefreshCw,
   GripVertical,
+  Percent,
+  Copy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -59,13 +61,16 @@ import {
   sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type {
-  PreorderCampaign,
-  PreorderRow,
-  PreorderTab,
-  PreorderGroup,
-  CampaignStatus,
+import {
+  activeTiers,
+  type PreorderCampaign,
+  type PreorderRow,
+  type PreorderTab,
+  type PreorderTier,
+  type PreorderGroup,
+  type CampaignStatus,
 } from "@/types/preorder";
+import { fmtMoney } from "@/app/preorder/preorder-shared";
 import type { MkPricelist } from "@/types/documents";
 
 type RowDraft = Omit<PreorderRow, "id" | "order">;
@@ -547,6 +552,24 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                 </Button>
               </div>
 
+              <TierEditor
+                key={activeTab.id}
+                tab={activeTab}
+                currency={campaign.currency}
+                onChange={(tiers) => mutateTab(activeTab.id, (t) => ({ ...t, tiers }))}
+                otherTabCount={campaign.tabs.length - 1}
+                onApplyToAllTabs={() =>
+                  mutate((c) => ({
+                    ...c,
+                    tabs: c.tabs.map((t) =>
+                      t.id === activeTab.id
+                        ? t
+                        : { ...t, tiers: (activeTab.tiers ?? []).map((x) => ({ ...x, id: uid() })) },
+                    ),
+                  }))
+                }
+              />
+
               {/* Primary add actions — a group is a parent product */}
               <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-border bg-muted/20 px-3 py-2.5">
                 <Button size="sm" onClick={() => setProductPickerTab(activeTab.id)}>
@@ -890,6 +913,225 @@ const VariantTable = memo(function VariantTable({
 });
 
 // ── Price-list selector: pick which Metakocka list feeds a price column ──
+// ── Volume discount tiers (per tab) ─────────────────────────────────────────
+// A tab's ladder: order enough value INSIDE this tab and every line in it drops by
+// the tier's percentage. Tiers never stack — only the highest one reached applies.
+function TierEditor({
+  tab,
+  currency,
+  onChange,
+  onApplyToAllTabs,
+  otherTabCount,
+}: {
+  tab: PreorderTab;
+  currency: string;
+  onChange: (tiers: PreorderTier[]) => void;
+  onApplyToAllTabs: () => void;
+  otherTabCount: number;
+}) {
+  const tiers = useMemo(() => tab.tiers ?? [], [tab.tiers]);
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // The ladder as every reader (partner sheet, review, sales order) will see it.
+  const ladder = useMemo(() => activeTiers(tiers), [tiers]);
+
+  // Authoring mistakes that silently cost the partner a discount they were promised.
+  const warnings = useMemo(() => {
+    const w: string[] = [];
+    const byAmount = new Map<number, number>();
+    for (const t of tiers) byAmount.set(t.minAmount, (byAmount.get(t.minAmount) ?? 0) + 1);
+    for (const [amt, n] of byAmount) {
+      if (n > 1) w.push(`Two tiers start at ${fmtMoney(amt, currency)} — only the better % will apply.`);
+    }
+    for (let i = 1; i < ladder.length; i++) {
+      if (ladder[i].discountPct <= ladder[i - 1].discountPct) {
+        w.push(
+          `“${ladder[i].name || "Unnamed"}” costs more to reach than “${ladder[i - 1].name || "Unnamed"}” but doesn’t discount more — nobody gains by reaching it.`,
+        );
+      }
+    }
+    if (tiers.some((t) => !t.name.trim())) w.push("Name every tier — the partner sees the name when they reach it.");
+    if (tiers.some((t) => t.discountPct <= 0)) w.push("A tier at 0% is ignored.");
+    return w;
+  }, [tiers, ladder, currency]);
+
+  const update = (id: string, patch: Partial<PreorderTier>) =>
+    onChange(tiers.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+
+  function addTier() {
+    const last = ladder[ladder.length - 1];
+    onChange([
+      ...tiers,
+      {
+        id: uid(),
+        name: `Tier ${tiers.length + 1}`,
+        minAmount: last ? last.minAmount * 2 : 10000,
+        discountPct: last ? Math.min(100, last.discountPct + 5) : 5,
+      },
+    ]);
+    setOpen(true);
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-surface">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="flex items-center gap-1.5 text-[13px] font-medium text-foreground hover:text-lime-600 transition-colors shrink-0"
+        >
+          {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+          <Percent className="w-3.5 h-3.5 text-lime-600" />
+          Volume discounts
+        </button>
+        {ladder.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1">
+            {ladder.map((t) => (
+              <span
+                key={t.id}
+                className="inline-flex items-center gap-1 rounded-full bg-lime-100 dark:bg-lime-900/40 px-2 py-0.5 text-[11px] font-medium text-lime-700 dark:text-lime-300"
+                title={`${t.name || "Tier"}: −${t.discountPct}% from ${fmtMoney(t.minAmount, currency)}`}
+              >
+                {t.name || "Tier"} −{t.discountPct}%
+                <span className="text-lime-600/70 dark:text-lime-400/70 tabular-nums">
+                  {fmtMoney(t.minAmount, currency)}+
+                </span>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span className="text-[12px] text-muted-foreground">None — this tab is always at list price.</span>
+        )}
+        <div className="flex-1" />
+        {warnings.length > 0 && (
+          <span className="text-[11px] text-amber-600 dark:text-amber-400" title={warnings.join("\n")}>
+            {warnings.length} note{warnings.length === 1 ? "" : "s"}
+          </span>
+        )}
+        <Button variant="ghost" size="xs" className="h-7 text-muted-foreground" onClick={addTier}>
+          <Plus className="w-3 h-3" /> Add tier
+        </Button>
+      </div>
+
+      {open && (
+        <div className="border-t border-border px-3 py-3 space-y-2.5">
+          <p className="text-[11px] text-muted-foreground">
+            Reach a spend inside <span className="font-medium text-foreground">{tab.name || "this tab"}</span> and every
+            line in it drops by that tier&rsquo;s percentage. Tiers don&rsquo;t stack — only the highest one reached
+            applies, and every tab is counted on its own. Thresholds are the totals the partner sees (incl. VAT).
+          </p>
+
+          {tiers.length === 0 ? (
+            <button
+              type="button"
+              onClick={addTier}
+              className="w-full rounded-lg border border-dashed border-border py-3 text-[12px] text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5 inline mr-1" /> Add the first tier
+            </button>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="hidden sm:grid grid-cols-[1fr_150px_110px_32px] gap-2 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-1">
+                <span>Tier name</span>
+                <span>Spend at least</span>
+                <span>Discount</span>
+                <span />
+              </div>
+              {tiers.map((t, i) => (
+                <div key={t.id} className="grid grid-cols-[1fr_150px_110px_32px] gap-2 items-center">
+                  <Input
+                    value={t.name}
+                    onChange={(e) => update(t.id, { name: e.target.value })}
+                    placeholder={`Tier ${i + 1}`}
+                    className="h-8 text-[12px] bg-background"
+                    aria-label="Tier name"
+                  />
+                  <div className="relative">
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground pointer-events-none">
+                      {currency}
+                    </span>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={100}
+                      value={t.minAmount || ""}
+                      onChange={(e) => update(t.id, { minAmount: Math.max(0, Number(e.target.value) || 0) })}
+                      placeholder="0"
+                      className="h-8 text-[12px] bg-background pl-9 text-right tabular-nums no-spinner"
+                      aria-label="Threshold"
+                    />
+                  </div>
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.5}
+                      value={t.discountPct || ""}
+                      onChange={(e) =>
+                        update(t.id, { discountPct: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })
+                      }
+                      placeholder="0"
+                      className="h-8 text-[12px] bg-background pr-6 text-right tabular-nums no-spinner"
+                      aria-label="Discount percent"
+                    />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground pointer-events-none">
+                      %
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onChange(tiers.filter((x) => x.id !== t.id))}
+                    className="w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                    aria-label="Remove tier"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {warnings.length > 0 && (
+            <ul className="space-y-0.5">
+              {warnings.map((w) => (
+                <li key={w} className="text-[11px] text-amber-600 dark:text-amber-400">
+                  {w}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <span className="text-[11px] text-muted-foreground">
+              {ladder.length > 0
+                ? `Best case: −${ladder[ladder.length - 1].discountPct}% on everything in this tab from ${fmtMoney(ladder[ladder.length - 1].minAmount, currency)}.`
+                : ""}
+            </span>
+            {otherTabCount > 0 && tiers.length > 0 && (
+              <Button
+                variant="ghost"
+                size="xs"
+                className="h-7 text-muted-foreground shrink-0"
+                onClick={() => {
+                  onApplyToAllTabs();
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                title={`Copy this ladder onto the other ${otherTabCount} tab${otherTabCount === 1 ? "" : "s"}, replacing theirs`}
+              >
+                {copied ? <Check className="w-3 h-3 text-lime-600" /> : <Copy className="w-3 h-3" />}
+                {copied ? "Copied to all tabs" : `Copy to all ${otherTabCount + 1} tabs`}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const PL_NONE = "__none__";
 function PricelistSelect({
   label, value, pricelists, onChange,

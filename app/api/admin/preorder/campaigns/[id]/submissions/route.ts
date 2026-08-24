@@ -9,7 +9,7 @@ import {
   toAccessSummary,
   toObjectId,
 } from "@/lib/preorder";
-import { flattenRows, rowUnitPrice } from "@/types/preorder";
+import { computeConfirmedTotals, type LineStatus } from "@/types/preorder";
 import type { IPreorderSubmission } from "@/models/preorder-submission";
 import type { IPreorderAccess } from "@/models/preorder-access";
 
@@ -37,21 +37,23 @@ export async function GET(_req: Request, { params }: RouteParams) {
     >,
   ]);
 
-  const priceByRow = campaignDoc
-    ? new Map(flattenRows(toCampaignView(campaignDoc)).map(({ row }) => [row.id, rowUnitPrice(row)]))
-    : new Map<string, number>();
+  const view = campaignDoc ? toCampaignView(campaignDoc) : null;
 
   const submissions = docs.map((d) => {
-    let qty = 0;
-    let amount = 0;
+    const summary = toSubmissionSummary(d);
+    if (!view) return summary;
+    const quantities: Record<string, number> = {};
+    const fulfil: Record<string, { confirmedQty: number | null; lineStatus: LineStatus }> = {};
     for (const l of d.lines) {
-      if (l.lineStatus !== "confirmed") continue;
-      const c = l.confirmedQty ?? l.qty;
-      if (c <= 0) continue;
-      qty += c;
-      amount += c * (priceByRow.get(l.rowId) ?? 0);
+      quantities[l.rowId] = l.qty;
+      fulfil[l.rowId] = {
+        confirmedQty: l.confirmedQty ?? null,
+        lineStatus: (l.lineStatus ?? "pending") as LineStatus,
+      };
     }
-    return { ...toSubmissionSummary(d), confirmedTotals: { qty, amount } };
+    // Recomputed (not read from the snapshot) so a price or tier edit on the campaign
+    // shows up here immediately — volume discounts included.
+    return { ...summary, confirmedTotals: computeConfirmedTotals(view, quantities, fulfil) };
   });
 
   // Partners who UNLOCKED the campaign (via the invite link) but haven't started a

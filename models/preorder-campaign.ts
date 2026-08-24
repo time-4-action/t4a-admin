@@ -7,6 +7,15 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
 import type { CampaignStatus, RowSource, RowTag } from "@/types/preorder";
 
+// A volume-discount tier on a tab (see PreorderTier in types/preorder.ts): reach
+// `minAmount` of ordered value inside the tab and every line in it drops by `discountPct`.
+export interface IPreorderTier {
+  id: string;
+  name: string;
+  minAmount: number;
+  discountPct: number;
+}
+
 export interface IPreorderRow {
   id: string;
   source: RowSource;
@@ -38,6 +47,7 @@ export interface IPreorderTab {
   name: string;
   order: number;
   discountNote?: string | null;
+  tiers?: IPreorderTier[];
   groups: IPreorderGroup[];
 }
 
@@ -94,12 +104,23 @@ const GroupSchema = new Schema<IPreorderGroup>(
   { _id: false },
 );
 
+const TierSchema = new Schema<IPreorderTier>(
+  {
+    id: { type: String, required: true },
+    name: { type: String, default: "" },
+    minAmount: { type: Number, default: 0, min: 0 },
+    discountPct: { type: Number, default: 0, min: 0, max: 100 },
+  },
+  { _id: false },
+);
+
 const TabSchema = new Schema<IPreorderTab>(
   {
     id: { type: String, required: true },
     name: { type: String, required: true },
     order: { type: Number, default: 0 },
     discountNote: { type: String, default: null },
+    tiers: { type: [TierSchema], default: [] },
     groups: { type: [GroupSchema], default: [] },
   },
   { _id: false },

@@ -15,7 +15,13 @@ import {
   pickMkListGrossPrice,
 } from "@/lib/metakocka";
 import { auth0 } from "@/lib/auth";
-import { flattenRows, rowUnitPrice } from "@/types/preorder";
+import {
+  flattenRows,
+  rowUnitPrice,
+  round2,
+  computeConfirmedTabTotals,
+  type LineStatus,
+} from "@/types/preorder";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,17 +49,39 @@ export async function POST(_req: Request, { params }: RouteParams) {
   if (!campaignDoc) return NextResponse.json({ error: "campaign not found" }, { status: 404 });
   const campaign = toCampaignView(campaignDoc);
 
-  // Map rowId → row so we can read code + the unit price the partner ordered at.
-  const rowById = new Map(flattenRows(campaign).map(({ row }) => [row.id, row]));
+  // Map rowId → its row (unit price) and the tab it sits in (which owns the tier ladder).
+  const rowById = new Map(
+    flattenRows(campaign).map(({ row, tab }) => [row.id, { row, tabId: tab.id }]),
+  );
+
+  // Volume discounts are earned per tab and re-evaluated here on the CONFIRMED lines:
+  // the tier follows what is actually being ordered, so cancelling lines can drop a tab
+  // out of a tier (and confirming more can lift it into one).
+  const quantities: Record<string, number> = {};
+  const fulfil: Record<string, { confirmedQty: number | null; lineStatus: LineStatus }> = {};
+  for (const l of doc.lines) {
+    quantities[l.rowId] = l.qty;
+    fulfil[l.rowId] = {
+      confirmedQty: l.confirmedQty ?? null,
+      lineStatus: (l.lineStatus ?? "pending") as LineStatus,
+    };
+  }
+  const tabTotals = computeConfirmedTabTotals(campaign, quantities, fulfil);
+  const discountPctByTab = new Map(tabTotals.map((t) => [t.tabId, t.discountPct]));
 
   // Only lines the admin explicitly CONFIRMED, at their confirmed quantity
   // (falling back to the ordered qty when left blank).
   const confirmed = doc.lines
     .filter((l) => l.lineStatus === "confirmed")
     .map((l) => {
-      const row = rowById.get(l.rowId);
+      const hit = rowById.get(l.rowId);
       const amount = l.confirmedQty ?? l.qty;
-      return { code: l.code, amount, price: row ? rowUnitPrice(row) : 0 };
+      return {
+        code: l.code,
+        amount,
+        price: hit ? rowUnitPrice(hit.row) : 0,
+        discountPct: hit ? discountPctByTab.get(hit.tabId) ?? 0 : 0,
+      };
     })
     .filter((l) => l.amount > 0 && l.code);
 
@@ -74,10 +102,13 @@ export async function POST(_req: Request, { params }: RouteParams) {
     const listPrice = pickMkListGrossPrice(mkPrices[l.code], campaign.partnerPricelist, {
       untaxedIsNet: true,
     });
+    // The tab's volume discount is baked into the unit price — the document carries no
+    // price list and no document-level discount, so the price must already be final.
+    const gross = listPrice ?? l.price;
     return {
       code: l.code,
       amount: l.amount,
-      priceWithTax: listPrice ?? l.price,
+      priceWithTax: round2(gross * (1 - l.discountPct / 100)),
       tax: productTaxCode(mkPrices[l.code]),
     };
   });
@@ -91,11 +122,19 @@ export async function POST(_req: Request, { params }: RouteParams) {
   }
 
   const title = campaign.season?.trim() || campaign.title;
+  // Spell the earned tiers out on the order — the line prices alone don't say why.
+  const tierNotes = tabTotals
+    .filter((t) => t.discount > 0)
+    .map((t) => `${t.tabName}: ${t.tier?.name || "volume discount"} -${t.discountPct}%`);
+  const notes =
+    [doc.terms?.comment?.trim(), tierNotes.length ? `Volume discounts — ${tierNotes.join("; ")}` : ""]
+      .filter(Boolean)
+      .join("\n") || undefined;
   const result = await createSalesOrder({
     partner,
     title,
     currencyCode: campaign.currency || "EUR",
-    notes: doc.terms?.comment || undefined,
+    notes,
     lines,
   });
   if (!result.ok) {

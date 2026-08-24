@@ -32,6 +32,8 @@ import { fmtMoney } from "@/app/preorder/preorder-shared";
 import {
   CAMPAIGN_STATUS_LABELS,
   SUBMISSION_STATUS_LABELS,
+  totalsNet,
+  totalsDiscount,
   type PreorderCampaign,
   type PreorderSubmissionSummary,
   type PreorderAccessSummary,
@@ -101,8 +103,9 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
   const kpis = useMemo(() => {
     const submitted = subs.filter((s) => s.status === "submitted" || s.status === "confirmed");
     const totalQty = submitted.reduce((n, s) => n + s.totals.qty, 0);
-    const totalAmount = submitted.reduce((n, s) => n + s.totals.amount, 0);
-    const confirmedAmount = subs.reduce((n, s) => n + (s.confirmedTotals?.amount ?? 0), 0);
+    // Values are what the partner actually pays — net of the tabs' volume discounts.
+    const totalAmount = submitted.reduce((n, s) => n + totalsNet(s.totals), 0);
+    const confirmedAmount = subs.reduce((n, s) => n + totalsNet(s.confirmedTotals), 0);
     // Everyone with access = submitters (all hold access) + unlocked-not-started.
     const unlockedCount = subs.length + unlocked.length;
     return { count: subs.length, submitted: submitted.length, totalQty, totalAmount, confirmedAmount, unlockedCount };
@@ -217,9 +220,16 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
                       </div>
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-[12px]">{s.totals.qty}</TableCell>
-                    <TableCell className="text-right tabular-nums text-[12px] font-medium">{fmtMoney(s.totals.amount, currency)}</TableCell>
+                    <TableCell className="text-right tabular-nums text-[12px] font-medium">
+                      {fmtMoney(totalsNet(s.totals), currency)}
+                      {totalsDiscount(s.totals) > 0 && (
+                        <div className="text-[10px] font-normal text-lime-700 dark:text-lime-400">
+                          −{fmtMoney(totalsDiscount(s.totals), currency)} volume
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums text-[12px] font-medium text-lime-700 dark:text-lime-400">
-                      {s.confirmedTotals.amount > 0 ? fmtMoney(s.confirmedTotals.amount, currency) : <span className="text-muted-foreground font-normal">—</span>}
+                      {totalsNet(s.confirmedTotals) > 0 ? fmtMoney(totalsNet(s.confirmedTotals), currency) : <span className="text-muted-foreground font-normal">—</span>}
                     </TableCell>
                     <TableCell className="text-[12px] text-muted-foreground whitespace-nowrap">{fmtDate(s.submittedAt)}</TableCell>
                     <TableCell className="pr-4">

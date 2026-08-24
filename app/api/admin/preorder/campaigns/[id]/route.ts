@@ -6,6 +6,7 @@ import {
   PreorderAccess,
   toCampaignView,
   toObjectId,
+  sanitizeTiers,
 } from "@/lib/preorder";
 import type { CampaignStatus, PreorderTab } from "@/types/preorder";
 
@@ -55,8 +56,13 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   if ("rrpPricelist" in body) doc.rrpPricelist = body.rrpPricelist?.trim() || null;
   if ("partnerPricelist" in body) doc.partnerPricelist = body.partnerPricelist?.trim() || null;
   if (Array.isArray(body.tabs)) {
-    // Trust the admin-authored structure; mongoose coerces/validates on save.
-    doc.tabs = body.tabs as unknown as typeof doc.tabs;
+    // Trust the admin-authored structure; mongoose coerces/validates on save. The
+    // volume-discount ladder is the one part that carries range-checked numbers, so
+    // it is normalized rather than trusted.
+    doc.tabs = body.tabs.map((t) => ({
+      ...t,
+      tiers: sanitizeTiers(t?.tiers),
+    })) as unknown as typeof doc.tabs;
   }
   await doc.save();
   return NextResponse.json({ campaign: toCampaignView(doc) });

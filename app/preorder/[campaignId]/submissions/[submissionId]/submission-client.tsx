@@ -18,11 +18,12 @@ import {
 } from "@/components/ui/dialog";
 import { ArrowLeft, Loader2, Check, CheckCheck, Mail, Phone, MapPin, Truck, MessageSquare, Lock, LockOpen, Minus, Plus, RotateCcw, ShoppingCart, ExternalLink, Trash2, MoreVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { TabBar, PreorderGridTab, OrderSummaryPanel } from "@/app/preorder/preorder-shared";
+import { TabBar, PreorderGridTab, OrderSummaryPanel, fmtMoney } from "@/app/preorder/preorder-shared";
 import {
   SUBMISSION_STATUS_LABELS,
   LINE_STATUS_LABELS,
   computeConfirmedTotals,
+  computeConfirmedTabTotals,
   type PreorderCampaign,
   type PreorderSubmission,
   type SubmissionStatus,
@@ -138,6 +139,24 @@ export default function SubmissionClient({
     }
     return { qty, lines };
   }, [submission]);
+
+  // The volume discounts the SAVED confirmed lines earn, per tab — this is exactly what
+  // the sales order will price at, so the admin sees it before pushing.
+  const savedConfirmedTabs = useMemo(() => {
+    if (!campaign) return [];
+    const q: Record<string, number> = {};
+    const conf: Record<string, Fulfil> = {};
+    for (const l of submission?.lines ?? []) {
+      q[l.rowId] = l.qty;
+      conf[l.rowId] = { confirmedQty: l.confirmedQty ?? null, lineStatus: l.lineStatus ?? "pending" };
+    }
+    return computeConfirmedTabTotals(campaign, q, conf).filter((t) => t.qty > 0);
+  }, [campaign, submission]);
+
+  const savedConfirmedDiscount = useMemo(
+    () => savedConfirmedTabs.reduce((n, t) => n + t.discount, 0),
+    [savedConfirmedTabs],
+  );
 
   // Unsaved edits (fulfilment or submission status) vs the saved submission — drives
   // autosave, and the sales order uses saved data so we gate on it too.
@@ -504,6 +523,24 @@ export default function SubmissionClient({
                   <p className="text-muted-foreground">
                     Push the {savedConfirmed.lines} confirmed line{savedConfirmed.lines === 1 ? "" : "s"} ({savedConfirmed.qty} pcs) to Metakocka as a sales order.
                   </p>
+                  {savedConfirmedDiscount > 0 && (
+                    <div className="rounded-lg bg-lime-50 dark:bg-lime-950/30 border border-lime-200/60 dark:border-lime-800/50 px-2.5 py-2 space-y-0.5">
+                      <div className="font-medium text-lime-700 dark:text-lime-300">
+                        Volume discount −{fmtMoney(savedConfirmedDiscount, currency)}
+                      </div>
+                      {savedConfirmedTabs
+                        .filter((t) => t.discount > 0)
+                        .map((t) => (
+                          <div key={t.tabId} className="text-muted-foreground">
+                            {t.tabName}: {t.tier?.name || "Tier"} −{t.discountPct}% on {fmtMoney(t.amount, currency)}
+                          </div>
+                        ))}
+                      <p className="text-[11px] text-muted-foreground pt-0.5">
+                        Applied to each line&rsquo;s price on the order — the tier is re-checked against the
+                        confirmed lines, not what was originally ordered.
+                      </p>
+                    </div>
+                  )}
                   {dirty && (
                     <p className="text-amber-600 dark:text-amber-400">Save your changes first — the order uses saved confirmed lines.</p>
                   )}
@@ -556,6 +593,18 @@ export default function SubmissionClient({
             <p>
               Order title: <span className="font-medium text-foreground">{campaign.season?.trim() || campaign.title}</span>.
             </p>
+            {savedConfirmedDiscount > 0 && (
+              <p>
+                Line prices include the volume discount the confirmed lines earn —{" "}
+                <strong className="text-lime-700 dark:text-lime-300">−{fmtMoney(savedConfirmedDiscount, currency)}</strong>{" "}
+                across{" "}
+                {savedConfirmedTabs
+                  .filter((t) => t.discount > 0)
+                  .map((t) => `${t.tabName} (${t.tier?.name || "tier"} −${t.discountPct}%)`)
+                  .join(", ")}
+                .
+              </p>
+            )}
           </div>
           {soError && <p className="text-[12px] text-destructive">{soError}</p>}
           <div className="flex justify-end gap-2 pt-1">
