@@ -35,6 +35,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { humanizeCron } from "@/lib/cron";
 import type {
   SyncStatus,
@@ -392,7 +393,7 @@ export default function CatalogueSyncPage() {
             <h1 className="font-display text-lg font-medium tracking-tight text-foreground shrink-0">
               Catalogue Sync
             </h1>
-            {pnv && <StatusPill tone={pnvTone} />}
+            {pnv ? <StatusPill tone={pnvTone} /> : loading && <Skeleton className="h-[16.5px] w-14 rounded-full" />}
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -439,16 +440,7 @@ export default function CatalogueSyncPage() {
 
         {/* ── status cards ── */}
         {loading && !status ? (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="bg-surface border border-border rounded-xl p-4 space-y-3">
-                <div className="h-8 w-40 rounded skeleton" style={{ animationDelay: `${i * 80}ms` }} />
-                <div className="h-3 w-full rounded skeleton" style={{ animationDelay: `${i * 80 + 30}ms` }} />
-                <div className="h-3 w-3/4 rounded skeleton" style={{ animationDelay: `${i * 80 + 60}ms` }} />
-                <div className="h-3 w-2/3 rounded skeleton" style={{ animationDelay: `${i * 80 + 90}ms` }} />
-              </div>
-            ))}
-          </div>
+          <SyncCardsSkeleton />
         ) : (
           status && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -538,6 +530,7 @@ export default function CatalogueSyncPage() {
         )}
 
         {/* ── PNV run history ── */}
+        {loading && !status && <RunHistorySkeleton />}
         {status && (
           <section className="space-y-2">
             <div className="flex items-center gap-2 px-0.5">
@@ -701,5 +694,120 @@ export default function CatalogueSyncPage() {
 
       <RunDetailsModal run={openRun} onClose={() => setOpenRun(null)} />
     </div>
+  );
+}
+
+// ── skeleton twins ────────────────────────────────────────────────────────────
+// The three status cards and the run-history table, with their static chrome
+// (titles, descriptions, stat labels, table headers) rendered for real and only
+// the live values shimmering.
+
+const PILL = <Skeleton className="h-[16.5px] w-14 rounded-full" />;
+
+function StatSkeleton({ label, w, delay }: { label: string; w: string; delay: number }) {
+  return <Stat label={label} value={<SkeletonLine lh="h-[18px]" w={w} className="justify-end" delay={delay} />} />;
+}
+
+function SyncCardsSkeleton() {
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <Card
+        icon={Package}
+        title="Product Catalogue"
+        description="Pulls your full product list from PNV, fills in live stock & prices from Metakocka, then pushes everything to your connected Shopify stores."
+        accent="indigo"
+        pill={PILL}
+        footer={
+          <div className="flex items-center justify-center pt-1">
+            <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-32" delay={200} />
+          </div>
+        }
+      >
+        <div className="divide-y divide-border/60">
+          <StatSkeleton label="Runs" w="w-24" delay={0} />
+          <StatSkeleton label="Next run" w="w-16" delay={40} />
+          <StatSkeleton label="Last run" w="w-16" delay={80} />
+          <StatSkeleton label="Took" w="w-12" delay={120} />
+          <StatSkeleton label="Last outcome" w="w-28" delay={160} />
+        </div>
+      </Card>
+      <Card
+        icon={Rss}
+        title="Partner Supplier Feeds"
+        description="Extra product feeds your partners connect themselves (so-called Own Sources). Each imports on its own schedule, or only when run manually."
+        accent="violet"
+        pill={PILL}
+      >
+        <div className="divide-y divide-border/60">
+          <StatSkeleton label="Connected feeds" w="w-6" delay={60} />
+          <StatSkeleton label="On a schedule" w="w-6" delay={100} />
+          <StatSkeleton label="Need attention" w="w-6" delay={140} />
+          <StatSkeleton label="Last import" w="w-16" delay={180} />
+        </div>
+      </Card>
+      <Card
+        icon={Store}
+        title="Shopify Connection Cleanup"
+        description="Automatic housekeeping. When a store begins connecting to Shopify but never finishes, this safely removes the leftover half-finished connection so no access is left open."
+        accent="sky"
+        pill={PILL}
+      >
+        <div className="divide-y divide-border/60">
+          <StatSkeleton label="Checks every" w="w-12" delay={120} />
+          <StatSkeleton label="Removes after" w="w-24" delay={160} />
+          <StatSkeleton label="Last checked" w="w-16" delay={200} />
+          <StatSkeleton label="Removed last time" w="w-6" delay={240} />
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function RunHistorySkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center gap-2 px-0.5">
+        <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+        <h2 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Catalogue run history</h2>
+      </div>
+      <div className="bg-surface border border-border rounded-xl overflow-auto">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent border-b border-border">
+              <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9 pl-5">When</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">How</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Outcome</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Took</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Products</TableHead>
+              <TableHead className="h-9 w-[40px] pr-5" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {Array.from({ length: rows }).map((_, i) => (
+              <TableRow key={i} className="border-b border-border/60">
+                <TableCell className="pl-5 py-2.5"><SkeletonLine lh="h-[18px]" w="w-32" delay={stagger(i, 60)} /></TableCell>
+                <TableCell className="py-2.5"><Skeleton className="h-[21px] w-[72px] rounded" delay={stagger(i, 60, 20)} /></TableCell>
+                <TableCell className="py-2.5">
+                  <div className="inline-flex items-center gap-1.5">
+                    <Skeleton className="w-3.5 h-3.5 rounded-full" delay={stagger(i, 60, 40)} />
+                    <SkeletonLine lh="h-[18px]" w="w-14" delay={stagger(i, 60, 50)} />
+                  </div>
+                </TableCell>
+                <TableCell className="py-2.5"><SkeletonLine lh="h-[18px]" w="w-10" delay={stagger(i, 60, 60)} /></TableCell>
+                <TableCell className="py-2.5">
+                  <div className="leading-tight">
+                    <SkeletonLine lh="h-[15px]" w="w-28" delay={stagger(i, 60, 70)} />
+                    <SkeletonLine lh="h-[12.5px]" h="h-2.5" w="w-40" delay={stagger(i, 60, 80)} />
+                  </div>
+                </TableCell>
+                <TableCell className="pr-5 py-2.5 text-right">
+                  <ChevronRight className="w-4 h-4 text-muted-foreground/30 inline" />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </section>
   );
 }

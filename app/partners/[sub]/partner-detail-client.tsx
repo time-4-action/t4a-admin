@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonAvatar, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   EVENT_LABELS,
   type PartnerDetail,
@@ -416,14 +417,7 @@ function ActivityTimeline({ sub }: { sub: string }) {
   return (
     <Card icon={ActivityIcon} title="Activity" count={events.length} accent="amber">
       {loading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="flex gap-3 items-center">
-              <div className="w-2 h-2 rounded-full skeleton" />
-              <div className="h-3 w-40 rounded skeleton" style={{ animationDelay: `${i * 60}ms` }} />
-            </div>
-          ))}
-        </div>
+        <ActivityTimelineSkeleton />
       ) : error ? (
         <p className="text-[12px] text-destructive">{error}</p>
       ) : events.length === 0 ? (
@@ -572,11 +566,7 @@ function NotesCard({
         </div>
 
         {loading ? (
-          <div className="space-y-3 pt-2 border-t border-border/40">
-            {Array.from({ length: 2 }).map((_, i) => (
-              <div key={i} className="h-3 w-full rounded skeleton" style={{ animationDelay: `${i * 80}ms` }} />
-            ))}
-          </div>
+          <NotesListSkeleton />
         ) : notes.length === 0 ? (
           <p className="text-center text-[12px] text-muted-foreground py-6">
             No notes yet. Use this space for account context, follow-ups, and conversation summaries.
@@ -609,6 +599,194 @@ function NotesCard({
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── skeleton twins ──────────────────────────────────────────────────────────
+// Structural copies of the cards above. The card chrome (titles, icons, grid)
+// is static and renders for real; only the partner's data shimmers.
+
+/** Twin of the activity <ol>: dot + "label … time" line + optional meta line. */
+function ActivityTimelineSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <ol className="space-y-3">
+      {Array.from({ length: rows }).map((_, i) => (
+        <li key={i} className="flex gap-3">
+          <Skeleton className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0" delay={stagger(i, 60)} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline justify-between gap-2">
+              <SkeletonLine lh="h-[18px]" w={["w-32", "w-40", "w-28", "w-36", "w-24"][i % 5]} delay={stagger(i, 60, 20)} />
+              <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-12" className="shrink-0" delay={stagger(i, 60, 40)} />
+            </div>
+            {i % 2 === 0 && <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-40" delay={stagger(i, 60, 60)} />}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** Twin of the notes list: 28px avatar + "author · time" + text lines. */
+function NotesListSkeleton({ rows = 2 }: { rows?: number }) {
+  return (
+    <div className="space-y-3 pt-2 border-t border-border/40">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex gap-3">
+          <SkeletonAvatar size="w-7 h-7" delay={stagger(i)} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline gap-2">
+              <SkeletonLine lh="h-[18px]" w="w-24" delay={stagger(i, 80, 20)} />
+              <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-12" delay={stagger(i, 80, 40)} />
+            </div>
+            <SkeletonLine lh="h-[19.5px]" w="w-full" className="mt-0.5" delay={stagger(i, 80, 60)} />
+            <SkeletonLine lh="h-[19.5px]" w={i === 0 ? "w-2/3" : "w-1/3"} delay={stagger(i, 80, 80)} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** One insight card body: a store/feed/export entry with title, status, sub-line, chips. */
+function InsightEntrySkeleton({ i, chips }: { i: number; chips: number }) {
+  return (
+    <div className="text-[12px]">
+      <div className="flex items-center justify-between gap-2">
+        <SkeletonLine lh="h-[18px]" w="w-32" delay={stagger(i, 80)} />
+        <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-12" delay={stagger(i, 80, 20)} />
+      </div>
+      <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-40" delay={stagger(i, 80, 40)} />
+      {chips > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-1.5">
+          {Array.from({ length: chips }).map((_, k) => (
+            <Skeleton key={k} className="h-[19px] w-12 rounded" delay={stagger(i, 80, 60 + k * 20)} />
+          ))}
+        </div>
+      )}
+      <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-28" className="mt-1" delay={stagger(i, 80, 100)} />
+    </div>
+  );
+}
+
+/** Full page twin for app/partners/[sub]/loading.tsx (hero + all cards). */
+export function PartnerDetailSkeleton() {
+  return (
+    <div className="flex-1 min-h-0 overflow-auto">
+      {/* Hero */}
+      <div className="relative px-4 md:px-8 pt-6 md:pt-8 pb-5 md:pb-6 border-b border-border/50 overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-muted/40 via-transparent to-transparent pointer-events-none" />
+        <div className="relative flex items-center gap-4 min-w-0">
+          <SkeletonAvatar size="w-12 h-12" />
+          <div className="min-w-0">
+            {/* text-xl md:text-2xl leading-none */}
+            <Skeleton className="h-5 md:h-6 w-48 rounded-md" delay={40} />
+            <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-40" className="mt-1" delay={80} />
+            <div className="flex items-center gap-3 mt-2">
+              <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-24" delay={120} />
+              <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-14" delay={140} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="px-4 md:px-8 py-6 space-y-6 max-w-6xl">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <Card icon={Store} title="Shopify" accent="emerald">
+            <div className="space-y-3">
+              <InsightEntrySkeleton i={0} chips={3} />
+            </div>
+          </Card>
+          <Card icon={Download} title="Exports" accent="indigo">
+            <div className="space-y-3">
+              <ul className="space-y-1.5">
+                {[0, 1, 2, 3].map((i) => (
+                  <li key={i} className="flex items-center justify-between gap-2 text-[12px]">
+                    <SkeletonLine lh="h-[18px]" w={["w-36", "w-28", "w-40", "w-32"][i]} delay={stagger(i, 60, 40)} />
+                    <SkeletonLine lh="h-[18px]" w="w-8" delay={stagger(i, 60, 60)} />
+                  </li>
+                ))}
+              </ul>
+              <div className="pt-2 border-t border-border/40">
+                <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1.5">
+                  Recent downloads
+                </p>
+                <ul className="space-y-1">
+                  {[0, 1, 2].map((i) => (
+                    <li key={i} className="flex items-center justify-between gap-2 text-[11px]">
+                      <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-10" delay={stagger(i, 60, 300)} />
+                      <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-16" delay={stagger(i, 60, 320)} />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </Card>
+          <Card icon={Rss} title="Own Sources" accent="violet">
+            <div className="space-y-3">
+              <InsightEntrySkeleton i={1} chips={0} />
+              <InsightEntrySkeleton i={2} chips={0} />
+            </div>
+          </Card>
+        </div>
+
+        <Card icon={BarChart3} title="Most interacted with" accent="sky">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2.5">
+            <div className="space-y-2">
+              {[90, 70, 55, 40, 25].map((w, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-24" className="w-32 shrink-0" delay={stagger(i, 50)} />
+                  <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                    <Skeleton className="h-full rounded-full" style={{ width: `${w}%` }} delay={stagger(i, 50, 20)} />
+                  </div>
+                  <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-4" className="w-6 justify-end" delay={stagger(i, 50, 40)} />
+                </div>
+              ))}
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1.5">
+                Top exports (30d)
+              </p>
+              <ul className="space-y-1.5">
+                {[0, 1, 2].map((i) => (
+                  <li key={i} className="flex items-center justify-between gap-2 text-[12px]">
+                    <SkeletonLine lh="h-[18px]" w={["w-40", "w-32", "w-36"][i]} delay={stagger(i, 60, 200)} />
+                    <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-6" delay={stagger(i, 60, 220)} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </Card>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card icon={ActivityIcon} title="Activity" accent="amber">
+            <ActivityTimelineSkeleton />
+          </Card>
+          <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
+            <div className="px-5 py-3 border-b border-border/50 bg-muted/30 flex items-center gap-2.5">
+              <div className="w-5 h-5 rounded-md bg-background border border-border/60 flex items-center justify-center">
+                <MessageSquare className="w-3 h-3 text-muted-foreground" />
+              </div>
+              <span className="text-[12px] font-semibold text-foreground">Internal notes</span>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="flex gap-3">
+                <SkeletonAvatar size="w-7 h-7" />
+                <div className="flex-1 min-w-0 space-y-2">
+                  {/* rows=3 textarea: 3×19.5 + 16 + 2 */}
+                  <Skeleton className="h-[76.5px] w-full rounded-md" delay={40} />
+                  <div className="flex items-center justify-between gap-2">
+                    <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-48" delay={80} />
+                    <Skeleton className="h-7 w-[92px] rounded-md" delay={100} />
+                  </div>
+                </div>
+              </div>
+              <NotesListSkeleton />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
