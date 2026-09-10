@@ -510,6 +510,39 @@ export function pdfSupported(kind: DocKind): boolean {
   return !!reportIdForKind(kind);
 }
 
+// Parameters sent with every /report call. These are the same
+// `ADD_ATT_HIDDEN_*` attributes Metakocka's own report generator uses (dump one
+// with `&dump_for_report_rest=true` on any report URL in the web app). Without
+// the two image flags the REST endpoint renders the bare template — no company
+// logo and no letterhead — even though the web app shows both, because the
+// REST path does not inherit the company's print defaults.
+//
+//   ADD_ATT_HIDDEN_SHOW_LOGOTIP_IMAGE     — the company logo configured in MK
+//   ADD_ATT_HIDDEN_SHOW_BACKGROUND_IMAGE  — the company letterhead / memorandum
+//   ADD_ATT_HIDDEN_MK_BACKGROUND_IMAGE_ID — optional: pin a specific letterhead
+//                                           (MK_REPORT_BACKGROUND_IMAGE_ID)
+//   ADD_ATT_HIDDEN_DEFAULT_LOCALE         — optional: force the report language
+//                                           (MK_REPORT_LOCALE, e.g. "en"); by
+//                                           default MK picks it from the doc.
+type ReportParam = { type: string; value: string };
+
+function reportParams(): ReportParam[] {
+  const params: ReportParam[] = [
+    { type: "REPORT_TYPE", value: "PDF" },
+    { type: "ADD_ATT_HIDDEN_SHOW_LOGOTIP_IMAGE", value: "true" },
+    { type: "ADD_ATT_HIDDEN_SHOW_BACKGROUND_IMAGE", value: "true" },
+  ];
+  const backgroundId = process.env.MK_REPORT_BACKGROUND_IMAGE_ID?.trim();
+  if (backgroundId) {
+    params.push({ type: "ADD_ATT_HIDDEN_MK_BACKGROUND_IMAGE_ID", value: backgroundId });
+  }
+  const locale = process.env.MK_REPORT_LOCALE?.trim();
+  if (locale) {
+    params.push({ type: "ADD_ATT_HIDDEN_DEFAULT_LOCALE", value: locale });
+  }
+  return params;
+}
+
 // ── sales price lists ─────────────────────────────────────────────────────────
 
 // MK exposes no "list price lists" endpoint. The closest source of truth is
@@ -782,7 +815,7 @@ export async function getDocumentPdf(
         company_id: getCompanyId(),
         mk_id: mkId,
         report_id: reportId,
-        params: [{ type: "REPORT_TYPE", value: "PDF" }],
+        params: reportParams(),
       }),
       signal: controller.signal,
       cache: "no-store",

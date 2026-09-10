@@ -545,11 +545,22 @@ MK_REST_BASE=https://main.metakocka.si   # optional (default)
 MK_REPORT_ID_INVOICE=38   # optional — defaults to MK's standard bill report (verified)
 MK_REPORT_ID_OFFER=37     # optional — defaults to MK's standard offer report (verified)
 MK_REPORT_ID_ORDER=<id>   # optional — no default; set to enable the order PDF button
+MK_REPORT_BACKGROUND_IMAGE_ID=<id>  # optional — pin a specific MK letterhead image
+MK_REPORT_LOCALE=en       # optional — force the report language; default: MK picks per document
 ```
 
 Invoice + offer PDF export work out of the box (report IDs 38 / 37). Orders have
 no reliable standard report, so the order PDF button only appears when
 `MK_REPORT_ID_ORDER` is set.
+
+**Every PDF is rendered with the company's configured logo + letterhead.** The
+REST `/report` endpoint does not inherit the company's print defaults, so
+`reportParams()` in `lib/metakocka.ts` always sends
+`ADD_ATT_HIDDEN_SHOW_LOGOTIP_IMAGE=true` and
+`ADD_ATT_HIDDEN_SHOW_BACKGROUND_IMAGE=true` alongside `REPORT_TYPE=PDF` — the
+same `ADD_ATT_HIDDEN_*` attributes MK's own generator uses (dump a report's
+full parameter set by appending `&dump_for_report_rest=true` to its URL in the
+MK web app). Add further report attributes there, never in the routes.
 
 ### API Routes (`app/api/admin/`)
 
