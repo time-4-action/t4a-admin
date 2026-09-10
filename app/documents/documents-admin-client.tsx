@@ -1,8 +1,8 @@
 "use client";
 import { FileText } from "lucide-react";
-import CustomerHeader, { CustomerInfoStrip } from "./customer-header";
+import CustomerHeader, { CustomerInfoStrip, CustomerInfoStripSkeleton } from "./customer-header";
 import { useSelectedCustomer } from "./use-customer";
-import { DocumentList } from "./documents-shared";
+import { DocumentList, DocumentListSkeleton } from "./documents-shared";
 import { DOC_KIND_LABELS, type DocKind } from "@/types/documents";
 
 // Admin document list page (Invoices / Offers / Orders) for the selected customer.
@@ -19,14 +19,12 @@ export default function DocumentsAdminClient({ kind }: { kind: DocKind }) {
       <div className="flex-1 overflow-y-auto py-6">
         <div className="px-4 md:px-8 space-y-4">
           {!ready ? (
-            <div className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/50">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-4 px-4 py-3.5" style={{ animationDelay: `${i * 80}ms` }}>
-                  <div className="skeleton h-4 w-28 rounded" />
-                  <div className="ml-auto skeleton h-4 w-20 rounded" />
-                </div>
-              ))}
-            </div>
+            // Same two blocks DocumentList shows once a customer is known, so the
+            // page keeps one continuous shape from "resolving customer" to "loaded".
+            <>
+              <CustomerInfoStripSkeleton />
+              <DocumentListSkeleton kind={kind} />
+            </>
           ) : customer ? (
             <>
               <CustomerInfoStrip customer={customer} />

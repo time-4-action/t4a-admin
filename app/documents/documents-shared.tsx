@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   Download,
   FileText,
@@ -194,19 +195,7 @@ export function DocumentList({
   const state = useDocumentList(listUrl, kind);
   const isInvoice = kind === "invoice";
 
-  if (state.status === "loading") {
-    return (
-      <div className="divide-y divide-border/50 rounded-2xl border border-border bg-surface overflow-hidden">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="flex items-center gap-4 px-4 py-3.5" style={{ animationDelay: `${i * 80}ms` }}>
-            <div className="skeleton h-4 w-28 rounded" />
-            <div className="skeleton h-4 w-24 rounded" />
-            <div className="ml-auto skeleton h-4 w-20 rounded" />
-          </div>
-        ))}
-      </div>
-    );
-  }
+  if (state.status === "loading") return <DocumentListSkeleton kind={kind} />;
 
   if (state.status === "error") {
     return (
@@ -756,6 +745,186 @@ export function DocumentDetail({
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── skeleton twins ───────────────────────────────────────────────────────────
+// Structural copies of DocumentList / DocumentDetail. The card chrome, column
+// headers and section labels are static and render for real; only the document
+// data shimmers. Used by both the in-component loading state and the route-level
+// loading.tsx files (portal + admin), so the list and detail pages never change
+// shape between "loading" and "loaded".
+
+export function DocumentListSkeleton({ kind, rows = 8 }: { kind: DocKind; rows?: number }) {
+  const isInvoice = kind === "invoice";
+  return (
+    <div className="space-y-4">
+      {isInvoice && (
+        <div className="grid grid-cols-3 rounded-2xl border border-border bg-surface overflow-hidden divide-x divide-border/60">
+          {["Invoiced", "Paid", "Outstanding"].map((label, i) => (
+            <div key={label} className="px-4 py-3">
+              <p className="text-[11px] text-muted-foreground">{label}</p>
+              {/* text-[15px] → 22.5px; text-[10px] → 15px */}
+              <SkeletonLine lh="h-[22.5px]" h="h-4" w="w-24" className="mt-0.5" delay={stagger(i, 60)} />
+              <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-14" className="mt-0.5" delay={stagger(i, 60, 30)} />
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+        <div className="flex items-center gap-4 px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border/60 bg-muted/25">
+          <span className="flex-1 min-w-0">Document</span>
+          <span className="hidden sm:block w-16 text-center">Products</span>
+          <span className="w-44 text-right">Status</span>
+          <span className="w-28 text-right">Amount</span>
+        </div>
+        <div className="divide-y divide-border/50">
+          {Array.from({ length: rows }).map((_, i) => (
+            <div key={i} className="flex items-center gap-4 px-4 py-3.5">
+              <div className="min-w-0 flex-1">
+                {/* text-[13px] → 19.5px; text-[11px] → 16.5px */}
+                <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-28" delay={stagger(i)} />
+                <SkeletonLine lh="h-[16.5px]" h="h-2.5" w={["w-48", "w-40", "w-56", "w-44"][i % 4]} className="mt-0.5" delay={stagger(i, 80, 20)} />
+              </div>
+              <div className="hidden sm:flex w-16 justify-center shrink-0">
+                <SkeletonLine lh="h-[19.5px]" w="w-5" delay={stagger(i, 80, 40)} />
+              </div>
+              <div className="w-44 flex items-center justify-end shrink-0">
+                <Skeleton className="h-[20.5px] w-16 rounded-full" delay={stagger(i, 80, 60)} />
+              </div>
+              <div className="w-28 flex justify-end shrink-0">
+                <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-20" delay={stagger(i, 80, 80)} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function DocumentDetailSkeleton({
+  kind,
+  showPartner = false,
+  wide = false,
+  lines = 4,
+}: {
+  kind: DocKind;
+  showPartner?: boolean;
+  wide?: boolean;
+  lines?: number;
+}) {
+  const isInvoice = kind === "invoice";
+  const KindIcon = KIND_ICON[kind];
+  const kindLabel = kind.charAt(0).toUpperCase() + kind.slice(1);
+  return (
+    <div className={cn("px-4 md:px-8 py-6 md:py-8 space-y-4 overflow-y-auto h-full", wide ? "" : "max-w-5xl mx-auto")}>
+      <span className="inline-block text-[12px] text-muted-foreground">← Back</span>
+
+      {/* Hero */}
+      <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+        <div className="px-5 py-4 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <KindIcon className="h-3.5 w-3.5 text-teal-500" /> {kindLabel}
+            </div>
+            {/* text-xl md:text-2xl → 28px / 32px line box */}
+            <SkeletonLine lh="h-7 md:h-8" h="h-5 md:h-6" w="w-40" className="mt-1" delay={40} />
+            <div className="mt-2 flex items-center gap-x-3">
+              <SkeletonLine lh="h-[18px]" w="w-32" delay={80} />
+              {isInvoice && <SkeletonLine lh="h-[18px]" w="w-24" delay={100} />}
+            </div>
+          </div>
+          <Skeleton className="h-[20.5px] w-16 rounded-full shrink-0" delay={60} />
+        </div>
+        <div className="px-5 py-3 border-t border-border/60 bg-muted/20 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-[11px] text-muted-foreground">Total</p>
+            {/* text-2xl leading-none → 24px */}
+            <Skeleton className="h-6 w-28 mt-0.5 rounded-md" delay={120} />
+          </div>
+          <Skeleton className="h-[34px] w-[130px] rounded-xl shrink-0" delay={140} />
+        </div>
+      </div>
+
+      {showPartner && (
+        <div className="rounded-2xl border border-border bg-surface px-4 py-3 flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted shrink-0">
+            <Building2 className="h-4 w-4 text-muted-foreground" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Customer</p>
+            <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-48" delay={160} />
+            <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-24" delay={180} />
+          </div>
+        </div>
+      )}
+
+      {/* Line items */}
+      <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
+          <span className="text-[12px] font-semibold text-foreground">Products</span>
+          <Skeleton className="h-[20.5px] w-7 rounded-full" delay={200} />
+        </div>
+        <div className="flex items-center gap-3 px-4 py-2 text-[10px] uppercase tracking-wide text-muted-foreground border-b border-border/40">
+          <span className="flex-1 min-w-0">Product</span>
+          <span className="hidden sm:block w-16 text-right shrink-0">Qty</span>
+          <span className="hidden sm:block w-24 text-right shrink-0">Price</span>
+          <span className="hidden sm:block w-14 text-right shrink-0">Disc</span>
+          <span className="w-24 text-right shrink-0">Total</span>
+        </div>
+        <div className="divide-y divide-border/50">
+          {Array.from({ length: lines }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+              <Skeleton className="h-10 w-10 rounded-lg shrink-0" delay={stagger(i, 60, 220)} />
+              <div className="min-w-0 flex-1">
+                <SkeletonLine lh="h-[19.5px]" h="h-3.5" w={["w-56", "w-40", "w-64", "w-48"][i % 4]} delay={stagger(i, 60, 240)} />
+                <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-20" delay={stagger(i, 60, 260)} />
+                <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-32" className="sm:hidden mt-0.5" delay={stagger(i, 60, 260)} />
+              </div>
+              <div className="hidden sm:flex w-16 justify-end shrink-0"><SkeletonLine lh="h-[18px]" w="w-8" delay={stagger(i, 60, 280)} /></div>
+              <div className="hidden sm:flex w-24 justify-end shrink-0"><SkeletonLine lh="h-[18px]" w="w-16" delay={stagger(i, 60, 300)} /></div>
+              <div className="hidden sm:flex w-14 justify-end shrink-0"><SkeletonLine lh="h-[18px]" w="w-4" delay={stagger(i, 60, 320)} /></div>
+              <div className="flex w-24 justify-end shrink-0"><SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-16" delay={stagger(i, 60, 340)} /></div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Totals */}
+      <div className="rounded-2xl border border-border bg-surface px-4 py-3">
+        {["Subtotal", "Tax"].map((label, i) => (
+          <div key={label} className="flex items-baseline justify-between gap-4 py-1">
+            <span className="text-[12px] text-muted-foreground">{label}</span>
+            <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-20" delay={stagger(i, 60, 400)} />
+          </div>
+        ))}
+        <div className="border-t border-border/60 mt-1.5 pt-2">
+          <div className="flex items-baseline justify-between gap-4 py-1">
+            <span className="text-[12px] font-semibold text-foreground">Total</span>
+            <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-24" delay={520} />
+          </div>
+        </div>
+      </div>
+
+      {/* Payment (invoices) */}
+      {isInvoice && (
+        <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
+            <span className="text-[12px] font-semibold text-foreground">Payment</span>
+            <Skeleton className="h-[20.5px] w-16 rounded-full" delay={540} />
+          </div>
+          <div className="grid grid-cols-3 divide-x divide-border/50">
+            {["Paid", "Remaining", "Due date"].map((label, i) => (
+              <div key={label} className="px-4 py-3">
+                <p className="text-[11px] text-muted-foreground">{label}</p>
+                <SkeletonLine lh="h-[22.5px]" h="h-4" w="w-20" className="mt-0.5" delay={stagger(i, 60, 560)} />
+              </div>
+            ))}
           </div>
         </div>
       )}

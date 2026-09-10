@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Search, ChevronsUpDown, Building2, Check } from "lucide-react";
 import type { MkPartner } from "@/types/documents";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 
 // Top-right customer switcher on the admin document pages. Shows the current
 // customer and lets an admin search and switch to any other. Controlled: the
@@ -89,7 +90,18 @@ export default function CustomerSelect({
             </div>
           </div>
           <div className="max-h-72 overflow-y-auto py-1">
-            {loading && <p className="px-3 py-3 text-[12px] text-muted-foreground">Searching…</p>}
+            {loading &&
+              [0, 1, 2, 3].map((i) => (
+                <div key={i} className="flex w-full items-center gap-2.5 px-3 py-2">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-muted shrink-0">
+                    <Building2 className="h-3.5 w-3.5 text-muted-foreground/40" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <SkeletonLine lh="h-[19.5px]" h="h-3.5" w={["w-40", "w-32", "w-44", "w-36"][i]} delay={stagger(i, 60)} />
+                    <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-48" delay={stagger(i, 60, 30)} />
+                  </div>
+                </div>
+              ))}
             {!loading && partners.length === 0 && (
               <p className="px-3 py-3 text-[12px] text-muted-foreground">No customers found.</p>
             )}

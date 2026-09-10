@@ -1,5 +1,6 @@
 import { Building2, Mail, Phone, MapPin, ReceiptText, User } from "lucide-react";
 import type { MkAddress, MkContact, MkPartner } from "@/types/documents";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 
 // Full customer profile — a shared, presentational card view used by both the
 // admin Documents "Customer" page and the customer's own portal "Account" page.
@@ -169,6 +170,63 @@ export default function CustomerProfile({ customer }: { customer: MkPartner }) {
             ))}
           </Card>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Twin of the profile above: hero, then the same masonry with Details,
+// Contact and Addresses cards. Labels and card chrome render for real.
+export function CustomerProfileSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-border bg-surface px-5 py-4 flex items-start gap-4">
+        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-teal-500/10 shrink-0">
+          <Building2 className="h-6 w-6 text-teal-500" />
+        </span>
+        <div className="min-w-0">
+          {/* text-xl md:text-2xl leading-tight → 25px / 30px */}
+          <SkeletonLine lh="h-[25px] md:h-[30px]" h="h-5 md:h-6" w="w-56" />
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <Skeleton className="h-[20.5px] w-24 rounded-full" delay={40} />
+            <Skeleton className="h-[20.5px] w-28 rounded-full" delay={60} />
+          </div>
+        </div>
+      </div>
+
+      <div className="columns-1 md:columns-2 gap-4 [&>*]:mb-4 [&>*]:break-inside-avoid">
+        <Card title="Details" icon={ReceiptText}>
+          {["Customer code", "Tax number", "Type", "Payment terms", "Currency", "Language"].map((label, i) => (
+            <div key={label} className="flex items-baseline justify-between gap-4 py-1.5 border-b border-border/40 last:border-0">
+              <span className="text-[12px] text-muted-foreground shrink-0">{label}</span>
+              <SkeletonLine lh="h-[19.5px]" h="h-3.5" w={["w-20", "w-24", "w-28", "w-16", "w-10", "w-8"][i]} delay={stagger(i, 40, 80)} />
+            </div>
+          ))}
+        </Card>
+        <Card title="Contact" icon={Mail} bodyClass="divide-y divide-border/40">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center gap-3 px-4 py-2">
+              <span className="flex items-center gap-1.5 min-w-0 flex-1">
+                <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <SkeletonLine lh="h-[18px]" w={["w-40", "w-32", "w-44"][i]} delay={stagger(i, 60, 320)} />
+              </span>
+              <span className="flex items-center gap-1.5 shrink-0">
+                <Phone className="h-3 w-3 text-muted-foreground shrink-0" />
+                <SkeletonLine lh="h-[18px]" w="w-24" delay={stagger(i, 60, 340)} />
+              </span>
+            </div>
+          ))}
+        </Card>
+        <Card title="Addresses" icon={MapPin} bodyClass="divide-y divide-border/40">
+          {[0, 1].map((i) => (
+            <div key={i} className="px-4 py-2.5">
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-[19px] w-14 rounded-full shrink-0" delay={stagger(i, 60, 500)} />
+                <SkeletonLine lh="h-[19.5px]" h="h-3.5" w={i === 0 ? "w-56" : "w-48"} delay={stagger(i, 60, 520)} />
+              </div>
+            </div>
+          ))}
+        </Card>
       </div>
     </div>
   );
