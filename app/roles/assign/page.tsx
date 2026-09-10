@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { isAiRole, isDevRole } from "@/lib/ai-role";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonAvatar, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   Check, Search, Bot, ShieldCheck, ShieldAlert, AlertTriangle, ArrowLeft,
   UserCheck, Users, Plus, Minus, Loader2,
@@ -102,12 +103,14 @@ function BatchRow({
   role,
   count,
   total,
+  loading,
   onGrantAll,
   onRemoveAll,
 }: {
   role: Role;
   count: number;
   total: number;
+  loading?: boolean;
   onGrantAll: () => void;
   onRemoveAll: () => void;
 }) {
@@ -147,7 +150,10 @@ function BatchRow({
         {role.description && <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{role.description}</p>}
       </div>
 
-      {/* Count badge */}
+      {/* Count badge — shimmers while the selected users' access is still loading */}
+      {loading ? (
+        <Skeleton className="h-[26px] w-10 rounded-lg shrink-0" />
+      ) : (
       <div className={cn(
         "px-2.5 py-1 rounded-lg text-[11px] font-semibold tabular-nums shrink-0",
         allHave ? kind === "ai" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
@@ -158,6 +164,7 @@ function BatchRow({
       )}>
         {count}/{total}
       </div>
+      )}
 
       {/* Action buttons */}
       <div className="flex items-center gap-1.5 shrink-0">
@@ -208,6 +215,7 @@ function ConfirmToggle({ on, onToggle, kind }: { on: boolean; onToggle: () => vo
 
 export default function AssignAccessPage() {
   const [users, setUsers] = useState<User[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
   const [roles, setRoles] = useState<Role[]>([]);
   const [search, setSearch] = useState("");
 
@@ -233,7 +241,10 @@ export default function AssignAccessPage() {
 
   // ── Load data ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    fetch("/api/admin/users").then(r => r.ok ? r.json() : []).then(d => { if (Array.isArray(d)) setUsers(d); });
+    fetch("/api/admin/users")
+      .then(r => r.ok ? r.json() : [])
+      .then(d => { if (Array.isArray(d)) setUsers(d); })
+      .finally(() => setUsersLoading(false));
     fetch("/api/admin/roles").then(r => r.ok ? r.json() : []).then((d: Role[]) => {
       if (!Array.isArray(d)) return;
       const order = { ai: 0, admin: 1, default: 2 };
@@ -443,6 +454,17 @@ export default function AssignAccessPage() {
 
           {/* User rows */}
           <div className="flex-1 overflow-y-auto">
+            {usersLoading && Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="w-full flex items-center gap-3 px-4 py-3 border-b border-border/40">
+                <Skeleton className="w-4 h-4 rounded shrink-0" delay={stagger(i, 60)} />
+                <SkeletonAvatar size="w-7 h-7" delay={stagger(i, 60, 20)} />
+                <div className="min-w-0 flex-1">
+                  {/* leading-tight: 13px → 16.25px, 11px → 13.75px */}
+                  <SkeletonLine lh="h-4" w="w-28" delay={stagger(i, 60, 40)} />
+                  <SkeletonLine lh="h-[14px]" h="h-2.5" w="w-40" delay={stagger(i, 60, 60)} />
+                </div>
+              </div>
+            ))}
             {filteredUsers.map((user) => {
               const isSelected = selectedIds.has(user.id);
               const isLoading = loadingIds.has(user.id);
@@ -476,7 +498,7 @@ export default function AssignAccessPage() {
                 </button>
               );
             })}
-            {filteredUsers.length === 0 && (
+            {!usersLoading && filteredUsers.length === 0 && (
               <p className="text-xs text-muted-foreground text-center py-8">No users found.</p>
             )}
           </div>
@@ -515,8 +537,19 @@ export default function AssignAccessPage() {
               {roles.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No access types available. <a href="/roles/new" className="underline">Create one</a>.</p>
               ) : loadingIds.has(singleUid!) ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  {["Current Access", "Available Access"].map((label, c) => (
+                    <div key={label} className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</span>
+                      </div>
+                      <div className="min-h-[110px] rounded-2xl border-2 border-dashed border-border/40 bg-muted/10 p-3 flex flex-col gap-2">
+                        {Array.from({ length: c === 0 ? 1 : 2 }).map((_, k) => (
+                          <Skeleton key={k} className="h-9 w-full rounded-xl" delay={stagger(k, 60, c * 40)} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
@@ -563,14 +596,6 @@ export default function AssignAccessPage() {
                 </div>
               </div>
 
-              {/* Loading indicator */}
-              {loadingIds.size > 0 && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Loading access for {loadingIds.size} user{loadingIds.size > 1 ? "s" : ""}…
-                </div>
-              )}
-
               {roles.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No access types available. <a href="/roles/new" className="underline">Create one</a>.</p>
               ) : (
@@ -584,6 +609,7 @@ export default function AssignAccessPage() {
                         role={role}
                         count={count}
                         total={readyUsers.length}
+                        loading={loadingIds.size > 0}
                         onGrantAll={() => grantToAll(role.id)}
                         onRemoveAll={() => removeFromAll(role.id)}
                       />
