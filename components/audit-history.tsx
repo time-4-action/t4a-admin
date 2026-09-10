@@ -186,7 +186,7 @@ export function AuditHistoryEntriesSkeleton({ rows = 2 }: { rows?: number }) {
 }
 
 /** The whole history card (header + entries) for route-level `loading.tsx`. */
-export function AuditHistoryCardSkeleton({ title = "Change history" }: { title?: string }) {
+export function AuditHistoryCardSkeleton({ title = "Change history", rows = 1 }: { title?: string; rows?: number }) {
   return (
     <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
       <div className="px-5 py-3 border-b border-border/50 bg-muted/30 flex items-center gap-2.5">
@@ -197,7 +197,7 @@ export function AuditHistoryCardSkeleton({ title = "Change history" }: { title?:
         <Skeleton className="h-[18px] w-6 rounded-full" />
       </div>
       <div className="p-5">
-        <AuditHistoryEntriesSkeleton />
+        <AuditHistoryEntriesSkeleton rows={rows} />
       </div>
     </div>
   );

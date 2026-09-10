@@ -701,9 +701,9 @@ export function PartnerDetailSkeleton() {
           <Card icon={Download} title="Exports" accent="indigo">
             <div className="space-y-3">
               <ul className="space-y-1.5">
-                {[0, 1, 2, 3].map((i) => (
+                {[0, 1, 2].map((i) => (
                   <li key={i} className="flex items-center justify-between gap-2 text-[12px]">
-                    <SkeletonLine lh="h-[18px]" w={["w-36", "w-28", "w-40", "w-32"][i]} delay={stagger(i, 60, 40)} />
+                    <SkeletonLine lh="h-[18px]" w={["w-36", "w-28", "w-40"][i]} delay={stagger(i, 60, 40)} />
                     <SkeletonLine lh="h-[18px]" w="w-8" delay={stagger(i, 60, 60)} />
                   </li>
                 ))}
@@ -713,7 +713,7 @@ export function PartnerDetailSkeleton() {
                   Recent downloads
                 </p>
                 <ul className="space-y-1">
-                  {[0, 1, 2].map((i) => (
+                  {[0, 1].map((i) => (
                     <li key={i} className="flex items-center justify-between gap-2 text-[11px]">
                       <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-10" delay={stagger(i, 60, 300)} />
                       <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-16" delay={stagger(i, 60, 320)} />
@@ -726,7 +726,6 @@ export function PartnerDetailSkeleton() {
           <Card icon={Rss} title="Own Sources" accent="violet">
             <div className="space-y-3">
               <InsightEntrySkeleton i={1} chips={0} />
-              <InsightEntrySkeleton i={2} chips={0} />
             </div>
           </Card>
         </div>

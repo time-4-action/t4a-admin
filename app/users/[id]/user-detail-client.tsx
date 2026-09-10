@@ -885,7 +885,7 @@ export function UserConversationsSkeleton({ rows = 4 }: { rows?: number }) {
             {/* text-[13px] title → 19.5px line */}
             <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-3/4" delay={stagger(i, 60)} />
             <div className="flex items-center gap-2 mt-1">
-              <Skeleton className="h-5 w-24 rounded-md" delay={stagger(i, 60, 20)} />
+              <Skeleton className="h-[19px] w-24 rounded-md" delay={stagger(i, 60, 20)} />
               <SkeletonLine lh="h-[16.5px]" w="w-16" delay={stagger(i, 60, 40)} />
               <SkeletonLine lh="h-[16.5px]" w="w-24" delay={stagger(i, 60, 60)} />
             </div>
@@ -900,11 +900,11 @@ export function UserConversationsSkeleton({ rows = 4 }: { rows?: number }) {
   );
 }
 
-function SidebarField({ label, delay }: { label: string; delay: number }) {
+function SidebarField({ label, delay, h = "h-8" }: { label: string; delay: number; h?: string }) {
   return (
     <div className="space-y-1.5">
       <label className="text-[11px] font-medium text-muted-foreground">{label}</label>
-      <Skeleton className="h-8 w-full rounded-md" delay={delay} />
+      <Skeleton className={cn("w-full rounded-md", h)} delay={delay} />
     </div>
   );
 }
@@ -927,7 +927,8 @@ export function UserDetailSidebarSkeleton() {
       <SidebarCard icon={Gauge} title="Spending Limit">
         <div className="space-y-3">
           <SidebarField label="Amount" delay={240} />
-          <SidebarField label="Reset period" delay={300} />
+          {/* SelectTrigger renders 36px tall even with h-8 (size variant wins) */}
+          <SidebarField label="Reset period" delay={300} h="h-9" />
           <div className="flex justify-end pt-0.5">
             <Skeleton className="h-7 w-14 rounded-md" delay={360} />
           </div>

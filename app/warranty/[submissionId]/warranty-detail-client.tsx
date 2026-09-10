@@ -1553,7 +1553,7 @@ export function ClaimDetailSkeleton() {
         <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
           <CardHeadStatic icon={Receipt} title="Problem as described by the customer" />
           <div className="p-5">
-            {["w-full", "w-11/12", "w-2/3"].map((w, i) => (
+            {["w-full", "w-2/3"].map((w, i) => (
               <SkeletonLine key={w} lh="h-[19.5px]" w={w} delay={stagger(i, 60)} />
             ))}
           </div>
@@ -1575,7 +1575,7 @@ export function ClaimDetailSkeleton() {
               </div>
             </div>
             <div className="space-y-3 pt-2 border-t border-border/40">
-              {[0, 1].map((i) => (
+              {[0].map((i) => (
                 <div key={i} className="flex gap-3">
                   <SkeletonAvatar size="w-7 h-7" delay={stagger(i, 80, 120)} />
                   <div className="flex-1 min-w-0">
