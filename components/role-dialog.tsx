@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { isAiRole, isDevRole } from "@/lib/ai-role";
-import { Bot, ShieldAlert, ShieldCheck, Check, AlertTriangle, ArrowLeft } from "lucide-react";
+import { Bot, ShieldAlert, ShieldCheck, Check, AlertTriangle, ArrowLeft, Loader2 } from "lucide-react";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 interface Role {
@@ -53,6 +54,7 @@ export default function RoleDialog({ user, onClose }: { user: any; onClose: () =
   const [activeIds, setActiveIds] = useState<string[]>([]);
   const [originalIds, setOriginalIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(false);
   const [confirmToggles, setConfirmToggles] = useState<Record<string, boolean>>({});
 
@@ -75,7 +77,7 @@ export default function RoleDialog({ user, onClose }: { user: any; onClose: () =
         setActiveIds(ids);
         setOriginalIds(ids);
       }
-    });
+    }).finally(() => setLoading(false));
   }, [user.id]);
 
   function toggle(id: string) {
@@ -128,8 +130,23 @@ export default function RoleDialog({ user, onClose }: { user: any; onClose: () =
             </DialogHeader>
 
             <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-0.5 -mr-1">
-              {allRoles.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-8 text-center">Loading…</p>
+              {loading ? (
+                [0, 1, 2].map((i) => (
+                  <div
+                    key={i}
+                    className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl border border-border bg-background"
+                  >
+                    <Skeleton className="w-8 h-8 rounded-lg shrink-0" delay={stagger(i)} />
+                    <div className="flex-1 min-w-0">
+                      {/* text-[13px] leading-tight → 16px; text-[11px] → 16.5px */}
+                      <SkeletonLine lh="h-4" h="h-3.5" w="w-28" delay={stagger(i, 80, 30)} />
+                      <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-44" className="mt-0.5" delay={stagger(i, 80, 60)} />
+                    </div>
+                    <Skeleton className="w-5 h-5 rounded-full shrink-0" delay={stagger(i, 80, 90)} />
+                  </div>
+                ))
+              ) : allRoles.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">No access types available.</p>
               ) : (
                 allRoles.map((role) => {
                   const active = activeIds.includes(role.id);
@@ -315,6 +332,7 @@ export default function RoleDialog({ user, onClose }: { user: any; onClose: () =
                     allConfirmed && !hasAdminInConfirm && "bg-blue-500 hover:bg-blue-600 border-blue-500 text-white",
                   )}
                 >
+                  {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                   {saving ? "Saving…" : "Confirm & save"}
                 </Button>
               </div>

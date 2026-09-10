@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
 
 interface EditUserDialogProps {
   user: { id: string; name: string; email: string; picture?: string };
@@ -72,6 +73,7 @@ export default function EditUserDialog({ user, onClose, onSaved }: EditUserDialo
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={save} disabled={saving || !name || !email}>
+            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
             {saving ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>

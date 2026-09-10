@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Bot, AlertTriangle, Check } from "lucide-react";
+import { Bot, AlertTriangle, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
@@ -103,6 +103,7 @@ export default function AiAccessDialog({ user, onConfirm, onClose }: Props) {
               confirmed && "bg-blue-500 hover:bg-blue-600 border-blue-500 text-white"
             )}
           >
+            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
             {saving ? "Saving…" : "Grant access"}
           </Button>
         </DialogFooter>

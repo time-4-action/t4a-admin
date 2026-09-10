@@ -13,6 +13,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   DndContext,
   DragEndEvent,
@@ -240,21 +241,7 @@ export function UserConversations({ userId }: { userId: string }) {
       .finally(() => setLoading(false));
   }, [userId]);
 
-  if (loading) {
-    return (
-      <div className="space-y-2">
-        {[...Array(4)].map((_, i) => (
-          <div key={i} className="border border-border/60 rounded-2xl p-4 space-y-2 bg-background shadow-sm">
-            <div className="skeleton h-3.5 w-3/4 rounded" style={{ animationDelay: `${i * 60}ms` }} />
-            <div className="flex gap-2">
-              <div className="skeleton h-3 w-24 rounded" style={{ animationDelay: `${i * 60 + 20}ms` }} />
-              <div className="skeleton h-3 w-16 rounded" style={{ animationDelay: `${i * 60 + 40}ms` }} />
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  }
+  if (loading) return <UserConversationsSkeleton />;
 
   if (conversations.length === 0) {
     return (
@@ -809,6 +796,169 @@ export function UserDetailSidebar({
         )}
       </SidebarCard>
 
+    </div>
+  );
+}
+
+// ─── Skeleton twins ───────────────────────────────────────────────────────────
+// Structural copies of the components above, used by `loading.tsx` while the
+// server page resolves and by UserConversations while it fetches. Wrappers keep
+// the exact loaded classes; only the data shimmers.
+
+export function UserDetailStatsSkeleton() {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="bg-background rounded-2xl border border-border/60 px-5 py-4 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-20" delay={stagger(i, 100)} />
+            <Skeleton className="w-7 h-7 rounded-lg" delay={stagger(i, 100, 30)} />
+          </div>
+          {/* text-2xl → 32px line box */}
+          <SkeletonLine lh="h-8" h="h-6" w="w-24" delay={stagger(i, 100, 60)} />
+          <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-14" className="mt-1" delay={stagger(i, 100, 90)} />
+          {i === 2 && (
+            <div className="mt-3 space-y-1">
+              <div className="flex items-center justify-between">
+                <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-16" delay={stagger(i, 100, 120)} />
+                <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-8" delay={stagger(i, 100, 150)} />
+              </div>
+              <Skeleton className="h-1.5 rounded-full w-full" delay={stagger(i, 100, 180)} />
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function UserUsageTableSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="bg-background rounded-2xl border border-border/60 overflow-hidden overflow-x-auto shadow-sm">
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent border-b border-border/60">
+            {["Model", "Input", "Output", "Cache read", "Cache create", "Cost"].map((h, i) => (
+              <TableHead
+                key={h}
+                className={cn(
+                  "text-[10px] uppercase tracking-widest font-semibold text-muted-foreground h-9",
+                  i > 0 ? "text-right" : "pl-5"
+                )}
+              >
+                {h}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {Array.from({ length: rows }).map((_, i) => (
+            <TableRow key={i} className="border-b border-border/40">
+              <TableCell className="pl-5 py-3">
+                <Skeleton className="h-5 w-40 rounded-md" delay={stagger(i)} />
+              </TableCell>
+              {[0, 1, 2, 3].map((j) => (
+                <TableCell key={j}>
+                  <SkeletonLine lh="h-[18px]" w="w-12" className="justify-end" delay={stagger(i, 80, 20 * (j + 1))} />
+                </TableCell>
+              ))}
+              <TableCell className="pr-5">
+                <SkeletonLine lh="h-[18px]" w="w-14" className="justify-end" delay={stagger(i, 80, 100)} />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+export function UserConversationsSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-start gap-3 px-4 py-3.5 border border-border/60 rounded-2xl bg-background shadow-sm"
+        >
+          <div className="flex-1 min-w-0">
+            {/* text-[13px] title → 19.5px line */}
+            <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-3/4" delay={stagger(i, 60)} />
+            <div className="flex items-center gap-2 mt-1">
+              <Skeleton className="h-5 w-24 rounded-md" delay={stagger(i, 60, 20)} />
+              <SkeletonLine lh="h-[16.5px]" w="w-16" delay={stagger(i, 60, 40)} />
+              <SkeletonLine lh="h-[16.5px]" w="w-24" delay={stagger(i, 60, 60)} />
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 ml-2 mt-0.5">
+            <SkeletonLine lh="h-[18px]" h="h-3.5" w="w-12" delay={stagger(i, 60, 80)} />
+            <span className="w-3.5 h-3.5" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SidebarField({ label, delay }: { label: string; delay: number }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-[11px] font-medium text-muted-foreground">{label}</label>
+      <Skeleton className="h-8 w-full rounded-md" delay={delay} />
+    </div>
+  );
+}
+
+export function UserDetailSidebarSkeleton() {
+  return (
+    <div className="p-4 space-y-3">
+      <SidebarCard icon={Pencil} title="Edit Details">
+        <div className="space-y-3">
+          <SidebarField label="Name" delay={0} />
+          <SidebarField label="Email" delay={60} />
+          <SidebarField label="Avatar URL" delay={120} />
+          <div className="flex items-center justify-between pt-0.5">
+            <SkeletonLine lh="h-[16.5px]" w="w-24" delay={180} />
+            <Skeleton className="h-7 w-14 rounded-md" delay={200} />
+          </div>
+        </div>
+      </SidebarCard>
+
+      <SidebarCard icon={Gauge} title="Spending Limit">
+        <div className="space-y-3">
+          <SidebarField label="Amount" delay={240} />
+          <SidebarField label="Reset period" delay={300} />
+          <div className="flex justify-end pt-0.5">
+            <Skeleton className="h-7 w-14 rounded-md" delay={360} />
+          </div>
+        </div>
+      </SidebarCard>
+
+      <SidebarCard icon={UserCog} title="Access">
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            {["Assigned", "Available"].map((label, c) => (
+              <div key={label} className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{label}</span>
+                </div>
+                <div className="min-h-[80px] rounded-xl border-2 border-dashed border-border/40 bg-muted/20 p-2 flex flex-col gap-1">
+                  {Array.from({ length: c === 0 ? 1 : 2 }).map((_, k) => (
+                    <Skeleton key={k} className="h-[30px] w-full rounded-lg" delay={stagger(k, 60, 400 + c * 40)} />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-end">
+            <Skeleton className="h-7 w-14 rounded-md" delay={520} />
+          </div>
+        </div>
+      </SidebarCard>
+
+      <SidebarCard icon={Lock} title="Danger Zone">
+        <Skeleton className="h-[38px] w-full rounded-xl" delay={560} />
+      </SidebarCard>
     </div>
   );
 }

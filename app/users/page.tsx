@@ -16,6 +16,7 @@ import { Search, Bot, Gauge, ShieldCheck, ShieldAlert, Pencil, Trash2, UserPlus,
 
 const isAdminRole = (name: string) => name.toLowerCase().includes("admin");
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonAvatar, SkeletonLine, stagger } from "@/components/ui/skeleton";
 
 interface Role { id: string; name: string; }
 
@@ -108,7 +109,9 @@ async function toggleAiAccess(user: any) {
         <div className="h-14 flex items-center justify-between px-4 md:px-8">
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
             <h1 className="font-display text-lg font-medium tracking-tight text-foreground shrink-0">Users</h1>
-            {users.length > 0 && (
+            {loading ? (
+              <Skeleton className="h-5 w-8 rounded-full shrink-0" />
+            ) : users.length > 0 && (
               <span className="text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
                 {users.length}
               </span>
@@ -183,21 +186,21 @@ async function toggleAiAccess(user: any) {
                     <TableRow key={i} className="border-b border-border/60">
                       <TableCell className="pl-5 py-3">
                         <div className="flex items-center gap-3">
-                          <div className="w-7 h-7 rounded-full skeleton shrink-0" style={{ animationDelay: `${i * 80}ms` }} />
-                          <div className="space-y-1.5">
-                            <div className="h-3 w-28 rounded skeleton" style={{ animationDelay: `${i * 80 + 40}ms` }} />
-                            <div className="h-2.5 w-40 rounded skeleton" style={{ animationDelay: `${i * 80 + 80}ms` }} />
+                          <SkeletonAvatar size="w-7 h-7" delay={stagger(i)} />
+                          <div>
+                            <SkeletonLine lh="h-4" w="w-28" delay={stagger(i, 80, 40)} />
+                            <SkeletonLine lh="h-[14px]" h="h-2.5" w="w-40" delay={stagger(i, 80, 80)} />
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell><div className="h-3 w-12 rounded skeleton" style={{ animationDelay: `${i * 80}ms` }} /></TableCell>
-                      <TableCell><div className="h-5 w-16 rounded-full skeleton" style={{ animationDelay: `${i * 80 + 20}ms` }} /></TableCell>
-                      <TableCell><div className="h-4 w-20 rounded-full skeleton" style={{ animationDelay: `${i * 80 + 40}ms` }} /></TableCell>
-                      <TableCell><div className="h-3 w-16 rounded skeleton" style={{ animationDelay: `${i * 80 + 60}ms` }} /></TableCell>
+                      <TableCell><SkeletonLine lh="h-[19.5px]" w="w-12" delay={stagger(i)} /></TableCell>
+                      <TableCell><Skeleton className="h-[26px] w-[68px] rounded-full" delay={stagger(i, 80, 20)} /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-20 rounded-full" delay={stagger(i, 80, 40)} /></TableCell>
+                      <TableCell><SkeletonLine lh="h-[16.5px]" w="w-16" delay={stagger(i, 80, 60)} /></TableCell>
                       <TableCell className="pr-4">
                         <div className="flex items-center gap-1 justify-end">
-                          {[0,1,2,3].map(j => (
-                            <div key={j} className="h-7 w-7 rounded-md skeleton" style={{ animationDelay: `${i * 80 + j * 30}ms` }} />
+                          {[0, 1, 2, 3].map((j) => (
+                            <Skeleton key={j} className="h-7 w-7 rounded-md" delay={stagger(i, 80, j * 30)} />
                           ))}
                         </div>
                       </TableCell>

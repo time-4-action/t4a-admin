@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
 
 interface DeleteUserDialogProps {
   user: { id: string; name: string };
@@ -56,6 +57,7 @@ export default function DeleteUserDialog({ user, onClose, onDeleted }: DeleteUse
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+            {deleting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
             {deleting ? "Deleting…" : "Delete"}
           </Button>
         </DialogFooter>
