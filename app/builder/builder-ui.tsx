@@ -32,6 +32,7 @@ import {
   Smartphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { usePatrikComponents } from "@/lib/use-patrik-components";
 import type { PresetSummary } from "@/types/builder";
@@ -205,12 +206,25 @@ export function PreviewPanel({
       {/* Pure-black surface: the components are dark-native and transparent,
           so this mirrors the black patrikinternational.com pages regardless
           of the admin theme. */}
-      <div className="p-4 md:p-6 overflow-x-auto" style={{ background: "#000000" }}>
+      <div className="relative p-4 md:p-6 overflow-x-auto" style={{ background: "#000000" }}>
         <div
           ref={ref}
           className="min-h-[120px] mx-auto"
           style={width ? { width, maxWidth: "100%" } : undefined}
         />
+        {/* Until patrik-components.js has loaded the markup sits here unstyled —
+            cover it with a faint shimmer on the same black surface so the panel
+            keeps its size and the rendered component simply fades in. */}
+        {!ready && (
+          <div className="absolute inset-0 p-4 md:p-6" style={{ background: "#000000" }} aria-hidden>
+            <div
+              className="min-h-[120px] mx-auto flex items-center justify-center"
+              style={width ? { width, maxWidth: "100%" } : undefined}
+            >
+              <Skeleton className="h-[120px] w-full max-w-md rounded-xl opacity-20 dark:opacity-40" />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -522,7 +536,19 @@ export function SavedPresets({
                 <span className="text-[10px] text-muted-foreground font-normal">shared with the team</span>
                 {loading && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
               </div>
-              {presets.length === 0 && !loading ? (
+              {loading && presets.length === 0 ? (
+                <div className="max-h-64 overflow-auto -mx-1 px-1 space-y-0.5">
+                  {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className="flex items-center gap-1.5 rounded-lg px-2 py-1.5">
+                      <span className="flex-1 min-w-0">
+                        {/* leading-tight: 12px → 15px, 10px → 12.5px */}
+                        <SkeletonLine lh="h-[15px]" w={["w-32", "w-24", "w-40", "w-28"][i]} delay={stagger(i, 60)} />
+                        <SkeletonLine lh="h-[12.5px]" h="h-2" w="w-24" className="mt-0.5" delay={stagger(i, 60, 30)} />
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : presets.length === 0 && !loading ? (
                 <p className="text-[11px] text-muted-foreground py-1">
                   Nothing saved yet. Name a build above to save it.
                 </p>

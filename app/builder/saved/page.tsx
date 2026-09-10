@@ -16,6 +16,7 @@ import {
   List,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { usePatrikComponents } from "@/lib/use-patrik-components";
 import type { PresetSummary } from "@/types/builder";
@@ -223,30 +224,70 @@ function SavedRow({ p, index }: { p: PresetSummary; index: number }) {
   );
 }
 
+// Thumbnail stand-in: the black site surface the MiniPreview paints, with a
+// faint shimmer so the card keeps its footprint until the preview mounts.
+function ThumbSkeleton({ className, delay }: { className: string; delay: number }) {
+  return (
+    <div className={cn("relative overflow-hidden shrink-0", className)} style={{ background: "#000000" }}>
+      <div className="absolute inset-0 flex items-center justify-center p-6">
+        <Skeleton className="h-full w-full max-h-24 max-w-[200px] rounded-xl opacity-20 dark:opacity-40" delay={delay} />
+      </div>
+    </div>
+  );
+}
+
+// Twin of BuildMeta: "version · editor · time" line + the two count icons.
+function BuildMetaSkeleton({ delay }: { delay: number }) {
+  return (
+    <div className="flex items-center gap-3 text-[11px] text-muted-foreground min-w-0">
+      <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-40" className="min-w-0" delay={delay} />
+      <span className="ml-auto inline-flex items-center gap-1 shrink-0">
+        <MessageSquare className="w-3 h-3" />
+        <Skeleton className="h-2.5 w-2" delay={delay + 20} />
+      </span>
+      <span className="inline-flex items-center gap-1 shrink-0">
+        <History className="w-3 h-3" />
+        <Skeleton className="h-2.5 w-2" delay={delay + 40} />
+      </span>
+    </div>
+  );
+}
+
 function CardSkeleton({ i, view }: { i: number; view: View }) {
   if (view === "list") {
     return (
       <div className="bg-surface border border-border rounded-xl overflow-hidden shadow-sm flex items-stretch">
-        <div className="skeleton w-44 sm:w-56 min-h-[104px]" style={{ animationDelay: `${i * 80}ms` }} />
-        <div className="flex-1 p-4 space-y-2">
-          <div className="skeleton h-3.5 w-1/3 rounded" style={{ animationDelay: `${i * 80 + 40}ms` }} />
-          <div className="skeleton h-3 w-1/4 rounded" style={{ animationDelay: `${i * 80 + 80}ms` }} />
+        <ThumbSkeleton className="w-44 sm:w-56 self-stretch min-h-[104px]" delay={stagger(i)} />
+        <div className="flex-1 min-w-0 p-4 flex flex-col justify-center gap-1.5">
+          <div className="flex items-center gap-2 min-w-0">
+            <Skeleton className="w-6 h-6 rounded-md shrink-0" delay={stagger(i, 80, 40)} />
+            {/* text-[13.5px] leading-tight → ~17px */}
+            <SkeletonLine lh="h-[17px]" h="h-3.5" w={["w-40", "w-32", "w-48", "w-36", "w-44"][i % 5]} delay={stagger(i, 80, 60)} />
+            <Skeleton className="hidden sm:block h-[15px] w-20 shrink-0" delay={stagger(i, 80, 80)} />
+            <ChevronRight className="ml-auto w-4 h-4 text-muted-foreground/30 shrink-0" />
+          </div>
+          <div className="max-w-md">
+            <BuildMetaSkeleton delay={stagger(i, 80, 100)} />
+          </div>
         </div>
       </div>
     );
   }
   return (
-    <div className="bg-surface border border-border rounded-2xl overflow-hidden shadow-sm">
-      <div className="skeleton h-48 w-full" style={{ animationDelay: `${i * 80}ms` }} />
-      <div className="p-4 space-y-2.5">
-        <div className="flex items-center gap-2">
-          <div className="skeleton w-7 h-7 rounded-lg" style={{ animationDelay: `${i * 80 + 40}ms` }} />
-          <div className="space-y-1.5 flex-1">
-            <div className="skeleton h-3.5 w-2/3 rounded" style={{ animationDelay: `${i * 80 + 80}ms` }} />
-            <div className="skeleton h-2.5 w-1/3 rounded" style={{ animationDelay: `${i * 80 + 120}ms` }} />
+    <div className="bg-surface border border-border rounded-2xl overflow-hidden shadow-sm flex flex-col">
+      <ThumbSkeleton className="h-48" delay={stagger(i)} />
+      <div className="p-4 flex-1 flex flex-col gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <Skeleton className="w-7 h-7 rounded-lg shrink-0" delay={stagger(i, 80, 40)} />
+          <div className="min-w-0 flex-1">
+            <SkeletonLine lh="h-[17px]" h="h-3.5" w={["w-2/3", "w-1/2", "w-3/4", "w-3/5"][i % 4]} delay={stagger(i, 80, 60)} />
+            <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-20" delay={stagger(i, 80, 80)} />
           </div>
+          <ChevronRight className="w-4 h-4 text-muted-foreground/30 shrink-0" />
         </div>
-        <div className="skeleton h-3 w-1/2 rounded" style={{ animationDelay: `${i * 80 + 160}ms` }} />
+        <div className="mt-auto pt-1">
+          <BuildMetaSkeleton delay={stagger(i, 80, 100)} />
+        </div>
       </div>
     </div>
   );
@@ -327,7 +368,9 @@ export default function SavedBuildsPage() {
           <h1 className="font-display text-lg font-medium tracking-tight text-foreground">
             Saved Builds
           </h1>
-          {presets && presets.length > 0 && (
+          {presets === null ? (
+            <Skeleton className="h-[19px] w-7 rounded-full" />
+          ) : presets.length > 0 && (
             <span className="inline-flex items-center text-[10px] font-semibold text-muted-foreground bg-muted rounded-full px-2 py-0.5 tabular-nums">
               {presets.length}
             </span>
