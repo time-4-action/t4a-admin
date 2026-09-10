@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { DetailCrumbBar } from "@/components/detail-crumb-bar";
 import { callPartnerPortal } from "@/lib/partner-api";
 import { auth0 } from "@/lib/auth";
 import { getRoleUser } from "@/lib/role-users";
@@ -47,17 +46,11 @@ export default async function PartnerDetailPage({ params }: PageProps) {
 
   return (
     <div className="flex flex-col h-full bg-background">
-      <header className="h-12 border-b border-border/60 flex items-center px-4 md:px-6 shrink-0 bg-background/95 backdrop-blur-sm sticky top-0 z-20">
-        <Link
-          href="/partners"
-          className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors shrink-0"
-        >
-          <ArrowLeft className="w-3 h-3" />
-          Partners
-        </Link>
-        <span className="mx-2 text-border/60 select-none text-xs">/</span>
-        <span className="text-[12px] font-medium text-foreground truncate">{displayName}</span>
-      </header>
+      <DetailCrumbBar
+        backHref="/partners"
+        backLabel="Partners"
+        current={<span className="text-[12px] font-medium text-foreground truncate">{displayName}</span>}
+      />
 
       <PartnerDetailClient
         sub={sub}

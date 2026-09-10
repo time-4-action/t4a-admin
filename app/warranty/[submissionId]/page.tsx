@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
+import { DetailCrumbBar } from "@/components/detail-crumb-bar";
 import { callWarranty } from "@/lib/warranty-api";
 import { auth0 } from "@/lib/auth";
 import { WarrantyStatusBadge } from "@/components/warranty-status-badge";
@@ -53,31 +53,27 @@ export default async function ClaimDetailPage({ params }: PageProps) {
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Sticky breadcrumb bar */}
-      <header className="h-12 border-b border-border/60 flex items-center justify-between px-4 md:px-6 shrink-0 bg-background/95 backdrop-blur-sm sticky top-0 z-20">
-        <div className="flex items-center min-w-0">
-          <Link
-            href="/warranty"
-            className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors shrink-0"
-          >
-            <ArrowLeft className="w-3 h-3" />
-            Claims
-          </Link>
-          <span className="mx-2 text-border/60 select-none text-xs">/</span>
+      <DetailCrumbBar
+        backHref="/warranty"
+        backLabel="Claims"
+        current={
           <span className="text-[12px] font-medium text-foreground truncate font-mono">
             #{doc.submissionId.slice(0, 8)}
           </span>
-        </div>
-        <a
-          href={publicUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-border text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
-          title="Open the page the customer sees"
-        >
-          <ExternalLink className="w-3 h-3" />
-          <span className="hidden sm:inline">Open customer view</span>
-        </a>
-      </header>
+        }
+        right={
+          <a
+            href={publicUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-border text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+            title="Open the page the customer sees"
+          >
+            <ExternalLink className="w-3 h-3" />
+            <span className="hidden sm:inline">Open customer view</span>
+          </a>
+        }
+      />
 
       {/* Hero — name, product, current status */}
       <div className="relative px-4 md:px-8 pt-6 md:pt-8 pb-5 md:pb-6 border-b border-border/50 overflow-hidden shrink-0">

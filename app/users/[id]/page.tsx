@@ -5,8 +5,8 @@ import { Conversation } from "@/models/conversation";
 import { getMgmtClient } from "@/lib/mgmt";
 import { isDevRole, isAiRole } from "@/lib/ai-role";
 import { UserDetailStats, UserUsageTable, UserDetailSidebar, UserConversations } from "./user-detail-client";
-import Link from "next/link";
-import { ArrowLeft, Bot, ShieldAlert, ShieldCheck } from "lucide-react";
+import { DetailCrumbBar } from "@/components/detail-crumb-bar";
+import { Bot, ShieldAlert, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 function RoleBadge({ name }: { name: string }) {
@@ -73,17 +73,12 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
     <div className="flex flex-col h-full bg-background">
 
       {/* Sticky top bar */}
-      <header className="h-12 border-b border-border/60 flex items-center px-4 md:px-6 shrink-0 bg-background/90 backdrop-blur-sm sticky top-0 z-20">
-        <Link
-          href="/users"
-          className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="w-3 h-3" />
-          Users
-        </Link>
-        <span className="mx-2 text-border/60 select-none text-xs">/</span>
-        <span className="text-[12px] font-medium text-foreground truncate">{auth0User.name}</span>
-      </header>
+      <DetailCrumbBar
+        backHref="/users"
+        backLabel="Users"
+        className="bg-background/90"
+        current={<span className="text-[12px] font-medium text-foreground truncate">{auth0User.name}</span>}
+      />
 
       {/* Body */}
       <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
