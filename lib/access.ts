@@ -97,6 +97,7 @@ export const ROUTE_RULES: { prefix: string; section: SectionKey }[] = [
   { prefix: "/users", section: "general" },
   { prefix: "/settings", section: "system" },
   // section-specific API routes
+  { prefix: "/api/builder", section: "builder" },
   { prefix: "/api/warranty", section: "warranty" },
   { prefix: "/api/partners", section: "partners" },
   { prefix: "/api/automation", section: "automation" },

@@ -32,9 +32,10 @@ export interface IPreorderSubmission extends Document {
   status: SubmissionStatus;
   terms: IPreorderTerms;
   lines: ISubmissionLine[];
-  totals: { qty: number; amount: number };
+  // `amount` = gross line sum, `discount` = Σ per-tab volume discounts, `net` = payable.
+  totals: { qty: number; amount: number; discount?: number; net?: number };
   // Value/qty of the lines an admin has actually CONFIRMED (subset of totals).
-  confirmedTotals: { qty: number; amount: number };
+  confirmedTotals: { qty: number; amount: number; discount?: number; net?: number };
   submittedAt?: Date | null;
   // Customer-initiated request to unlock a submitted preorder for further edits.
   unlockRequestNote?: string | null;
@@ -99,10 +100,14 @@ const PreorderSubmissionSchema = new Schema<IPreorderSubmission>(
     totals: {
       qty: { type: Number, default: 0 },
       amount: { type: Number, default: 0 },
+      discount: { type: Number, default: 0 },
+      net: { type: Number, default: 0 },
     },
     confirmedTotals: {
       qty: { type: Number, default: 0 },
       amount: { type: Number, default: 0 },
+      discount: { type: Number, default: 0 },
+      net: { type: Number, default: 0 },
     },
     submittedAt: { type: Date, default: null },
     unlockRequestNote: { type: String, default: null },

@@ -11,6 +11,7 @@ const MAP: Record<string, { path: string; key: string }> = {
   warehouse: { path: "/api/v1/schedules/warehouse-sync", key: "warehouseSync" },
   products: { path: "/api/v1/schedules/product-sync", key: "productSync" },
   customers: { path: "/api/v1/schedules/customer-sync", key: "customerSync" },
+  pricelists: { path: "/api/v1/schedules/pricelist-sync", key: "pricelistSync" },
 };
 
 // PUT { cron } — update a sync's cron schedule.

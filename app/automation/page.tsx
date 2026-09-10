@@ -41,7 +41,10 @@ export default function AutomationOverviewPage() {
           available stock from the T4A warehouse and writes it into its matching virtual warehouse in CREAGLOBE.{" "}
           <span className="text-foreground font-medium">Products sync</span> mirrors the product catalogue one way — T4A is the source of
           truth, CREAGLOBE is updated to match. <span className="text-foreground font-medium">Customers sync</span> does the same for
-          customers (partners), matched by tax number then name. Open a sync from the menu for its status, schedule and controls.
+          customers (partners), matched by tax number then name.{" "}
+          <span className="text-foreground font-medium">Pricelists sync</span> copies product prices, but only for the
+          price-list pairs someone has explicitly mapped — a list&apos;s code does not mean the same thing in both
+          companies. Open a sync from the menu for its status, schedule and controls.
         </p>
 
         {error && (

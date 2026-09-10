@@ -130,13 +130,19 @@ export function stateTone(s?: MkSyncState, starting?: boolean): Tone {
 
 // Roll a whole status object up to a single tone for the page header.
 export function overallTone(status: AutomationStatus | null, anyStarting: boolean): Tone {
-  const anyRunning = !!(status?.warehouse.isRunning || status?.products.isRunning || status?.customers.isRunning);
+  const anyRunning = !!(
+    status?.warehouse.isRunning ||
+    status?.products.isRunning ||
+    status?.customers.isRunning ||
+    status?.pricelists.isRunning
+  );
   if (anyRunning || anyStarting) return "running";
   if (!status) return "idle";
   if (
     status.warehouse.lastRun?.status === "error" ||
     status.products.lastRun?.status === "error" ||
-    status.customers.lastRun?.status === "error"
+    status.customers.lastRun?.status === "error" ||
+    status.pricelists.lastRun?.status === "error"
   )
     return "error";
   return "ok";
@@ -268,7 +274,17 @@ export function CronEditorModal({
 // ── run details modal ───────────────────────────────────────────────────────
 
 // changes<Name> → "Updated in <Name>", newIn<Name> → "Created in <Name>".
+const PRICELIST_BUCKET_LABELS: Record<string, string> = {
+  added: "Prices added",
+  updated: "Prices updated",
+  unchanged: "Already in line",
+  blockedByLimit: "Blocked by limit",
+  extraInCreaglobe: "Extra in CREAGLOBE",
+  skippedMissingProduct: "Product not in CREAGLOBE",
+};
+
 function bucketLabel(key: string): string {
+  if (PRICELIST_BUCKET_LABELS[key]) return PRICELIST_BUCKET_LABELS[key];
   if (key.startsWith("changes")) return `Updated in ${key.slice("changes".length)}`;
   if (key.startsWith("newIn")) return `Created in ${key.slice("newIn".length)}`;
   return key;
@@ -306,10 +322,10 @@ export function DryRunBadge() {
   );
 }
 
-// True when a run's details mark it as a dry run (customer preview).
+// True when a run's details mark it as a dry run (customer or pricelist preview).
 export function isDryRun(run: MkRun): boolean {
   const d = parseRunDetails(run.details);
-  return d?.type === "customers" && d.dryRun === true;
+  return (d?.type === "customers" || d?.type === "pricelists") && d.dryRun === true;
 }
 
 export function RunDetailsModal({ run, onClose }: { run: MkRun | null; onClose: () => void }) {
@@ -317,8 +333,15 @@ export function RunDetailsModal({ run, onClose }: { run: MkRun | null; onClose: 
   const warehouseErrorCount = details?.type === "warehouse" ? details.errorCount ?? 0 : 0;
   const productErrorCount = details?.type === "products" ? details.errorCount : 0;
   const customerErrorCount = details?.type === "customers" ? details.errorCount : 0;
+  const pricelistErrorCount = details?.type === "pricelists" ? details.errorCount : 0;
   const title =
-    run?.type === "warehouse" ? "Warehouse sync" : run?.type === "customers" ? "Customers sync" : "Products sync";
+    run?.type === "warehouse"
+      ? "Warehouse sync"
+      : run?.type === "customers"
+        ? "Customers sync"
+        : run?.type === "pricelists"
+          ? "Pricelists sync"
+          : "Products sync";
   return (
     <Dialog open={!!run} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
@@ -356,7 +379,7 @@ export function RunDetailsModal({ run, onClose }: { run: MkRun | null; onClose: 
 
               {/* A fatal error (the sync threw before completing) — shown only when there is no
                   per-item error list to display instead. */}
-              {run.status === "error" && run.error && productErrorCount === 0 && warehouseErrorCount === 0 && customerErrorCount === 0 && (
+              {run.status === "error" && run.error && productErrorCount === 0 && warehouseErrorCount === 0 && customerErrorCount === 0 && pricelistErrorCount === 0 && (
                 <div className="rounded-lg border border-rose-300/40 bg-rose-50 dark:bg-rose-950/30 px-3 py-2 text-[12px] text-rose-700 dark:text-rose-300 break-words">
                   {run.error}
                 </div>
@@ -549,6 +572,199 @@ export function RunDetailsModal({ run, onClose }: { run: MkRun | null; onClose: 
                     run.status === "ok" && (
                       <p className="text-[12px] text-emerald-600 dark:text-emerald-400">
                         {details.dryRun ? "Plan computed without errors." : "All changes applied without errors."}
+                      </p>
+                    )
+                  )}
+                </>
+              )}
+
+              {/* pricelist (price) sync: per mapped list pair, blocked moves, per-item errors */}
+              {details?.type === "pricelists" && (
+                <>
+                  {details.dryRun && (
+                    <div className="rounded-lg border border-indigo-300/40 bg-indigo-50 dark:bg-indigo-950/30 px-3 py-2 text-[12px] text-indigo-700 dark:text-indigo-300">
+                      Preview run — this computed the plan but did <span className="font-medium">not</span> write any price to CREAGLOBE.
+                    </div>
+                  )}
+
+                  {details.noMappings && (
+                    <div className="rounded-lg border border-amber-300/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-300">
+                      No price lists are mapped yet, so this run did nothing. Map a T4A list to a
+                      CREAGLOBE list on the Pricelists page first.
+                    </div>
+                  )}
+
+                  {!details.noMappings && (
+                    <div className="grid grid-cols-3 gap-2">
+                      {details.buckets
+                        .filter((b) => b.count > 0)
+                        .map((b) => (
+                          <div
+                            key={b.key}
+                            className={cn(
+                              "rounded-lg border px-3 py-2 text-[12px]",
+                              b.key === "blockedByLimit"
+                                ? "border-amber-300/50 bg-amber-50 dark:bg-amber-950/30"
+                                : "border-border bg-background/50",
+                            )}
+                          >
+                            <p className="text-muted-foreground text-[10px] uppercase tracking-wide truncate" title={b.key}>
+                              {bucketLabel(b.key)}
+                            </p>
+                            <p
+                              className={cn(
+                                "tabular-nums font-medium mt-0.5",
+                                b.key === "blockedByLimit"
+                                  ? "text-amber-700 dark:text-amber-300"
+                                  : "text-foreground",
+                              )}
+                            >
+                              {b.count}
+                            </p>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+
+                  {(details.counts.blocked ?? 0) > 0 && (
+                    <div className="rounded-lg border border-amber-300/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-300">
+                      <span className="font-medium">{details.counts.blocked} price change(s) were refused</span> for
+                      moving further than the mapping&apos;s allowed percentage. Nothing was written for those rows —
+                      check the pair really holds the same kind of price on both sides (net vs gross), then raise or
+                      clear the limit.
+                    </div>
+                  )}
+
+                  {(details.warnings?.length ?? 0) > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                        Needs attention
+                      </p>
+                      <div className="rounded-lg border border-amber-300/50 bg-amber-50 dark:bg-amber-950/30 divide-y divide-amber-300/30 overflow-hidden">
+                        {details.warnings!.map((w, i) => (
+                          <div key={i} className="px-3 py-2 text-[12px] text-amber-700 dark:text-amber-300">
+                            {w.list && <span className="font-medium">{w.list}: </span>}
+                            {w.message}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* per mapped list pair */}
+                  {details.perList.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Per price list</p>
+                      <div className="rounded-lg border border-border divide-y divide-border/60 overflow-hidden">
+                        {details.perList.map((L, i) => (
+                          <div key={i} className="px-3 py-2 text-[12px]">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-medium text-foreground">{L.source.title ?? L.source.code}</span>
+                              <span className="text-[10px] font-mono text-muted-foreground">T4A {L.source.code}</span>
+                              <ArrowRight className="w-3 h-3 text-muted-foreground/60" />
+                              <span className="text-[10px] font-mono text-muted-foreground">CG {L.target.code}</span>
+                              {L.target.title && L.target.title !== L.source.title && (
+                                <span className="text-[10px] text-amber-600 dark:text-amber-400">({L.target.title})</span>
+                              )}
+                            </div>
+                            {L.skipped ? (
+                              <p className="text-amber-700 dark:text-amber-300 mt-0.5">
+                                {L.skipped === "source-list-not-found"
+                                  ? "Skipped — the T4A list has no products on it, or its code changed."
+                                  : "Skipped — the CREAGLOBE list was not seen. It is empty or does not exist."}
+                              </p>
+                            ) : (
+                              <p className="text-muted-foreground mt-0.5 tabular-nums">
+                                {L.added} added · {L.updated} updated · {L.unchanged} already in line
+                                {L.blocked > 0 && (
+                                  <span className="text-amber-700 dark:text-amber-300"> · {L.blocked} blocked</span>
+                                )}
+                                {L.extra > 0 && <span> · {L.extra} extra in CREAGLOBE (left alone)</span>}
+                                {L.skippedMissingProduct > 0 && <span> · {L.skippedMissingProduct} product not in CREAGLOBE</span>}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* what changed, per product */}
+                  {(details.changes?.length ?? 0) > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {details.dryRun ? "What would change, per product" : "What changed, per product"}
+                        {details.changeCount != null &&
+                          details.changes!.length < details.changeCount &&
+                          ` (showing first ${details.changes!.length} of ${details.changeCount})`}
+                      </p>
+                      <div className="rounded-lg border border-border divide-y divide-border/60 overflow-hidden max-h-72 overflow-y-auto">
+                        {details.changes!.map((c, i) => (
+                          <div key={i} className="px-3 py-2 text-[12px]">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span
+                                className={cn(
+                                  "text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border",
+                                  c.action === "add"
+                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/50"
+                                    : c.action === "blocked"
+                                      ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/50"
+                                      : "bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800/50",
+                                )}
+                              >
+                                {c.action === "add" ? "Added" : c.action === "blocked" ? "Blocked" : "Updated"}
+                              </span>
+                              <span className="font-mono text-foreground">{c.productCode}</span>
+                              <span className="text-[10px] text-muted-foreground truncate max-w-[14rem]">{c.list}</span>
+                            </div>
+                            <p
+                              className={cn(
+                                "mt-0.5 break-words",
+                                c.action === "blocked" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground",
+                              )}
+                            >
+                              {c.summary}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {details.errorCount > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">
+                        {details.errorCount} price update{details.errorCount === 1 ? "" : "s"} failed
+                        {details.errors.length < details.errorCount && ` (showing first ${details.errors.length})`}
+                      </p>
+                      <div className="rounded-lg border border-border divide-y divide-border/60 overflow-hidden">
+                        {details.errors.map((e, i) => (
+                          <div key={i} className="px-3 py-2 text-[12px]">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {e.product_code && <span className="font-mono text-foreground">{e.product_code}</span>}
+                              {e.list && <span className="text-[10px] text-muted-foreground">list {e.list}</span>}
+                              {e.scope === "mapping" && (
+                                <span className="text-[10px] uppercase tracking-wide text-muted-foreground border border-border rounded px-1">
+                                  mapping
+                                </span>
+                              )}
+                              {e.system && <span className="text-[10px] text-muted-foreground">in {e.system}</span>}
+                            </div>
+                            <p className="text-rose-600 dark:text-rose-400 mt-0.5 break-words">{e.message}</p>
+                            {e.payload && (
+                              <pre className="mt-1 text-[10px] font-mono text-muted-foreground bg-muted/40 rounded p-1.5 overflow-x-auto whitespace-pre-wrap break-all">
+                                {e.payload}
+                              </pre>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    run.status === "ok" &&
+                    !details.noMappings && (
+                      <p className="text-[12px] text-emerald-600 dark:text-emerald-400">
+                        {details.dryRun ? "Plan computed without errors." : "All price changes applied without errors."}
                       </p>
                     )
                   )}
@@ -774,7 +990,7 @@ export function useAutomation() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [starting, setStarting] = useState<Record<SyncType, boolean>>({ warehouse: false, products: false, customers: false });
+  const [starting, setStarting] = useState<Record<SyncType, boolean>>({ warehouse: false, products: false, customers: false, pricelists: false });
   const [editing, setEditing] = useState<SyncType | null>(null);
   const [savingCron, setSavingCron] = useState(false);
   const [cronError, setCronError] = useState<string | null>(null);
@@ -798,7 +1014,7 @@ export function useAutomation() {
     } finally {
       if (mounted.current) {
         setLoading(false);
-        setStarting({ warehouse: false, products: false, customers: false });
+        setStarting({ warehouse: false, products: false, customers: false, pricelists: false });
       }
     }
   }, []);
@@ -811,8 +1027,13 @@ export function useAutomation() {
     };
   }, [load]);
 
-  const anyRunning = !!(status?.warehouse.isRunning || status?.products.isRunning || status?.customers.isRunning);
-  const anyStarting = starting.warehouse || starting.products || starting.customers;
+  const anyRunning = !!(
+    status?.warehouse.isRunning ||
+    status?.products.isRunning ||
+    status?.customers.isRunning ||
+    status?.pricelists.isRunning
+  );
+  const anyStarting = starting.warehouse || starting.products || starting.customers || starting.pricelists;
   useEffect(() => {
     if (!anyRunning && !anyStarting) return;
     const id = setInterval(load, 4000);
@@ -896,7 +1117,12 @@ export function useAutomation() {
 // Merge both run lists for the combined history table, newest first.
 export function mergeRuns(status: AutomationStatus | null): MkRun[] {
   if (!status) return [];
-  return [...status.runs.warehouse, ...status.runs.products, ...status.runs.customers].sort((a, b) => {
+  return [
+    ...status.runs.warehouse,
+    ...status.runs.products,
+    ...status.runs.customers,
+    ...status.runs.pricelists,
+  ].sort((a, b) => {
     const ta = new Date(parseSqlDate(a.started_at ?? "")).getTime() || 0;
     const tb = new Date(parseSqlDate(b.started_at ?? "")).getTime() || 0;
     return tb - ta;
@@ -916,6 +1142,7 @@ export function SingleSyncPage({
   itemLabel,
   howItWorks,
   previewable = false,
+  extra,
 }: {
   type: SyncType;
   title: string;
@@ -925,6 +1152,9 @@ export function SingleSyncPage({
   howItWorks: React.ReactNode;
   // When true, show a "Preview (dry run)" action that computes the plan without writing.
   previewable?: boolean;
+  // Page-specific content rendered between the cards and the run history (the pricelist
+  // page puts its price-list mapping editor here).
+  extra?: React.ReactNode;
 }) {
   const {
     status,
@@ -1027,6 +1257,8 @@ export function SingleSyncPage({
             </div>
           )
         )}
+
+        {extra}
 
         {status && (
           <section className="space-y-2">

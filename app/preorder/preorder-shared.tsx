@@ -16,6 +16,7 @@ import {
   Eye,
   Send,
   Loader2,
+  Percent,
 } from "lucide-react";
 import {
   Dialog,
@@ -28,9 +29,13 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   rowUnitPrice,
-  computeTotals,
   computeTabTotals,
+  sumTabTotals,
+  activeTiers,
+  totalsNet,
+  totalsDiscount,
   type PreorderCampaign,
+  type PreorderSubmissionTotals,
   type PreorderTab,
   type PreorderRow,
   type PreorderTerms,
@@ -576,6 +581,99 @@ function Stepper({ value, onChange }: { value: number; onChange: (n: number) => 
   );
 }
 
+// ── Volume discount tiers ────────────────────────────────────────────────────
+// What the partner sees of a tab's discount ladder: the tier they've reached, how far
+// the next one is, and the whole ladder. Renders nothing when the tab has no tiers.
+export function TabTierBanner({
+  tab,
+  quantities,
+  currency,
+  className,
+}: {
+  tab: PreorderTab;
+  quantities: QtyMap;
+  currency: string;
+  className?: string;
+}) {
+  const ladder = activeTiers(tab.tiers);
+  const totals = useMemo(() => computeTabTotals({ tabs: [tab] }, quantities)[0], [tab, quantities]);
+  if (ladder.length === 0) return null;
+
+  const reached = totals.tier;
+  const next = totals.nextTier;
+  // Progress towards the next tier, measured from the tier already reached.
+  const from = reached?.minAmount ?? 0;
+  const pct = next ? Math.min(100, Math.max(0, ((totals.amount - from) / (next.minAmount - from)) * 100)) : 100;
+
+  return (
+    <div
+      className={cn(
+        "rounded-xl border px-4 py-3",
+        reached
+          ? "border-lime-300 dark:border-lime-800 bg-lime-50/60 dark:bg-lime-950/20"
+          : "border-border bg-surface",
+        className,
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <Percent className={cn("w-3.5 h-3.5 shrink-0", reached ? "text-lime-600" : "text-muted-foreground")} />
+        {reached ? (
+          <span className="text-[13px] font-medium text-lime-700 dark:text-lime-300">
+            {reached.name || "Volume discount"} unlocked — −{reached.discountPct}% on everything in {tab.name || "this tab"}
+          </span>
+        ) : (
+          <span className="text-[13px] font-medium text-foreground">Volume discount available in {tab.name || "this tab"}</span>
+        )}
+        <div className="flex-1" />
+        {reached && (
+          <span className="text-[12px] tabular-nums text-lime-700 dark:text-lime-300 font-semibold">
+            −{fmtMoney(totals.discount, currency)}
+          </span>
+        )}
+      </div>
+
+      {next && (
+        <div className="mt-2">
+          <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+            <div
+              className="h-full rounded-full bg-lime-500 transition-[width] duration-300"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <div className="mt-1 text-[11px] text-muted-foreground">
+            {fmtMoney(totals.toNextTier, currency)} more in this tab unlocks{" "}
+            <span className="font-medium text-foreground">{next.name || "the next tier"}</span> · −{next.discountPct}%
+          </div>
+        </div>
+      )}
+
+      <div className="mt-2 flex flex-wrap gap-1">
+        {ladder.map((t) => {
+          const hit = !!reached && t.minAmount <= reached.minAmount;
+          const current = reached?.id === t.id;
+          return (
+            <span
+              key={t.id}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
+                current
+                  ? "bg-lime-600 text-white font-semibold"
+                  : hit
+                    ? "bg-lime-100 dark:bg-lime-900/40 text-lime-700 dark:text-lime-300"
+                    : "bg-muted text-muted-foreground",
+              )}
+            >
+              {current && <Check className="w-2.5 h-2.5" />}
+              {t.name || "Tier"} −{t.discountPct}%
+              <span className="tabular-nums opacity-70">from {fmtMoney(t.minAmount, currency)}</span>
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Summary panel ────────────────────────────────────────────────────────────
 export function OrderSummaryPanel({
   campaign,
@@ -586,13 +684,14 @@ export function OrderSummaryPanel({
   campaign: PreorderCampaign;
   quantities: QtyMap;
   currency: string;
-  confirmed?: { qty: number; amount: number }; // admin-confirmed subset (review/locked view)
+  confirmed?: PreorderSubmissionTotals; // admin-confirmed subset (review/locked view)
 }) {
-  const totals = useMemo(() => computeTotals(campaign, quantities), [campaign, quantities]);
   const tabTotals = useMemo(
     () => computeTabTotals(campaign, quantities).filter((t) => t.amount > 0),
     [campaign, quantities],
   );
+  const totals = useMemo(() => sumTabTotals(tabTotals), [tabTotals]);
+  const discounted = totals.discount ?? 0;
 
   return (
     <div className="rounded-xl border border-border bg-surface p-4 space-y-4">
@@ -602,15 +701,40 @@ export function OrderSummaryPanel({
           <span className="text-[13px] text-muted-foreground">Items</span>
           <span className="text-[15px] font-semibold tabular-nums text-foreground">{totals.qty}</span>
         </div>
+        {discounted > 0 && (
+          <>
+            <div className="flex items-baseline justify-between">
+              <span className="text-[13px] text-muted-foreground">Subtotal</span>
+              <span className="text-[13px] tabular-nums text-muted-foreground">{fmtMoney(totals.amount, currency)}</span>
+            </div>
+            <div className="flex items-baseline justify-between">
+              <span className="text-[13px] text-lime-700 dark:text-lime-400">Volume discount</span>
+              <span className="text-[13px] font-medium tabular-nums text-lime-700 dark:text-lime-400">
+                −{fmtMoney(discounted, currency)}
+              </span>
+            </div>
+          </>
+        )}
         <div className="flex items-baseline justify-between">
           <span className="text-[13px] text-muted-foreground">{confirmed ? "Ordered total" : "Total"}</span>
-          <span className="text-[18px] font-bold tabular-nums text-foreground">{fmtMoney(totals.amount, currency)}</span>
+          <span className="text-[18px] font-bold tabular-nums text-foreground">{fmtMoney(totalsNet(totals), currency)}</span>
         </div>
         <div className="text-[10px] text-muted-foreground text-right -mt-0.5">incl. VAT</div>
         {confirmed && (
-          <div className="flex items-baseline justify-between mt-1 pt-1 border-t border-border/50">
-            <span className="text-[13px] text-lime-700 dark:text-lime-400">Confirmed{confirmed.qty > 0 ? ` · ${confirmed.qty}` : ""}</span>
-            <span className="text-[16px] font-bold tabular-nums text-lime-700 dark:text-lime-400">{fmtMoney(confirmed.amount, currency)}</span>
+          <div className="mt-1 pt-1 border-t border-border/50">
+            <div className="flex items-baseline justify-between">
+              <span className="text-[13px] text-lime-700 dark:text-lime-400">
+                Confirmed{confirmed.qty > 0 ? ` · ${confirmed.qty}` : ""}
+              </span>
+              <span className="text-[16px] font-bold tabular-nums text-lime-700 dark:text-lime-400">
+                {fmtMoney(totalsNet(confirmed), currency)}
+              </span>
+            </div>
+            {totalsDiscount(confirmed) > 0 && (
+              <div className="text-[10px] text-muted-foreground text-right -mt-0.5">
+                after −{fmtMoney(totalsDiscount(confirmed), currency)} volume discount
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -620,11 +744,26 @@ export function OrderSummaryPanel({
           <div className="text-[11px] font-medium text-muted-foreground mb-1.5">By tab</div>
           <ul className="space-y-1">
             {tabTotals.map((t) => (
-              <li key={t.tabId} className="flex items-center justify-between text-[12px]">
-                <span className="text-muted-foreground truncate">
-                  {t.tabName} <span className="tabular-nums text-muted-foreground/70">· {t.qty}</span>
-                </span>
-                <span className="tabular-nums text-foreground font-medium">{fmtMoney(t.amount, currency)}</span>
+              <li key={t.tabId} className="text-[12px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground truncate">
+                    {t.tabName} <span className="tabular-nums text-muted-foreground/70">· {t.qty}</span>
+                  </span>
+                  <span className="tabular-nums font-medium text-foreground">{fmtMoney(t.net, currency)}</span>
+                </div>
+                {t.discount > 0 && (
+                  <div className="flex items-center justify-between text-[11px] text-lime-700 dark:text-lime-400">
+                    <span className="truncate">
+                      {t.tier?.name || "Volume discount"} −{t.discountPct}%
+                    </span>
+                    <span className="tabular-nums">−{fmtMoney(t.discount, currency)}</span>
+                  </div>
+                )}
+                {t.discount === 0 && t.nextTier && (
+                  <div className="text-[11px] text-muted-foreground/80 truncate">
+                    {fmtMoney(t.toNextTier, currency)} more → {t.nextTier.name || "next tier"} −{t.nextTier.discountPct}%
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -667,7 +806,10 @@ export function PreorderReviewModal({
         .filter((x) => x.rows.length > 0),
     }))
     .filter((t) => t.groups.length > 0);
-  const totals = computeTotals(campaign, quantities);
+  const tabTotals = computeTabTotals(campaign, quantities);
+  const byTab = new Map(tabTotals.map((t) => [t.tabId, t]));
+  const totals = sumTabTotals(tabTotals);
+  const discount = totals.discount ?? 0;
   const empty = totals.qty === 0;
 
   return (
@@ -685,37 +827,73 @@ export function PreorderReviewModal({
           </p>
         ) : (
           <div className="max-h-[55vh] overflow-y-auto -mx-1 px-1 space-y-4">
-            {ordered.map(({ tab, groups }) => (
-              <div key={tab.id}>
-                <div className="text-[11px] uppercase tracking-wider font-semibold text-lime-700 dark:text-lime-400 mb-1">{tab.name}</div>
-                {groups.map(({ g, rows }) => (
-                  <div key={g.id} className="mb-2">
-                    <div className="text-[11px] font-medium text-muted-foreground">{g.name}</div>
-                    <ul className="mt-0.5 divide-y divide-border/50">
-                      {rows.map((r) => {
-                        const qty = quantities[r.id] || 0;
-                        const line = qty * rowUnitPrice(r);
-                        return (
-                          <li key={r.id} className="flex items-center gap-2 py-1 text-[12px]">
-                            <span className="flex-1 truncate text-foreground">{r.name}</span>
-                            <span className="tabular-nums text-muted-foreground">{qty} ×</span>
-                            <span className="tabular-nums text-muted-foreground w-20 text-right">{fmtMoney(rowUnitPrice(r), currency)}</span>
-                            <span className="tabular-nums font-medium w-24 text-right">{fmtMoney(line, currency)}</span>
-                          </li>
-                        );
-                      })}
-                    </ul>
+            {ordered.map(({ tab, groups }) => {
+              const tt = byTab.get(tab.id);
+              return (
+                <div key={tab.id}>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="text-[11px] uppercase tracking-wider font-semibold text-lime-700 dark:text-lime-400">{tab.name}</div>
+                    {tt && tt.discount > 0 && (
+                      <span className="text-[11px] font-medium text-lime-700 dark:text-lime-400">
+                        {tt.tier?.name || "Volume discount"} −{tt.discountPct}%
+                      </span>
+                    )}
                   </div>
-                ))}
-              </div>
-            ))}
+                  {groups.map(({ g, rows }) => (
+                    <div key={g.id} className="mb-2">
+                      <div className="text-[11px] font-medium text-muted-foreground">{g.name}</div>
+                      <ul className="mt-0.5 divide-y divide-border/50">
+                        {rows.map((r) => {
+                          const qty = quantities[r.id] || 0;
+                          const line = qty * rowUnitPrice(r);
+                          return (
+                            <li key={r.id} className="flex items-center gap-2 py-1 text-[12px]">
+                              <span className="flex-1 truncate text-foreground">{r.name}</span>
+                              <span className="tabular-nums text-muted-foreground">{qty} ×</span>
+                              <span className="tabular-nums text-muted-foreground w-20 text-right">{fmtMoney(rowUnitPrice(r), currency)}</span>
+                              <span className="tabular-nums font-medium w-24 text-right">{fmtMoney(line, currency)}</span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ))}
+                  {tt && tt.discount > 0 && (
+                    <div className="flex items-center justify-between text-[12px] border-t border-border/50 pt-1">
+                      <span className="text-muted-foreground">
+                        {tab.name} after {tt.tier?.name || "discount"}
+                      </span>
+                      <span className="tabular-nums text-lime-700 dark:text-lime-400 font-medium">
+                        −{fmtMoney(tt.discount, currency)} → {fmtMoney(tt.net, currency)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
         {!empty && (
-          <div className="flex items-center justify-between border-t border-border pt-3 text-[13px]">
-            <span className="text-muted-foreground">Total · {totals.qty} item{totals.qty === 1 ? "" : "s"} <span className="text-[11px]">(incl. VAT)</span></span>
-            <span className="text-[16px] font-bold tabular-nums text-foreground">{fmtMoney(totals.amount, currency)}</span>
+          <div className="border-t border-border pt-3 space-y-1 text-[13px]">
+            {discount > 0 && (
+              <>
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span>Subtotal</span>
+                  <span className="tabular-nums">{fmtMoney(totals.amount, currency)}</span>
+                </div>
+                <div className="flex items-center justify-between text-lime-700 dark:text-lime-400">
+                  <span>Volume discount</span>
+                  <span className="tabular-nums font-medium">−{fmtMoney(discount, currency)}</span>
+                </div>
+              </>
+            )}
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">
+                Total · {totals.qty} item{totals.qty === 1 ? "" : "s"} <span className="text-[11px]">(incl. VAT)</span>
+              </span>
+              <span className="text-[16px] font-bold tabular-nums text-foreground">{fmtMoney(totalsNet(totals), currency)}</span>
+            </div>
           </div>
         )}
         {terms.shippingAddress && (

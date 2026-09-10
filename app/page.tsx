@@ -17,6 +17,7 @@ import {
   Cog,
   Handshake,
   Boxes,
+  Tags,
   RefreshCw,
   Warehouse,
   Zap,
@@ -102,6 +103,7 @@ const sections: {
       { href: "/automation",           icon: LayoutDashboard, title: "Overview",  desc: "Both syncs + combined run history" },
       { href: "/automation/warehouse", icon: Warehouse,       title: "Warehouse", desc: "T4A stock → CREAGLOBE" },
       { href: "/automation/products",  icon: Boxes,           title: "Products",  desc: "One-way catalogue sync T4A → CREAGLOBE" },
+      { href: "/automation/pricelists", icon: Tags,           title: "Pricelists", desc: "Mapped price lists T4A → CREAGLOBE" },
     ],
   },
   {

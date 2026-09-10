@@ -28,6 +28,7 @@ import { computeConfirmedTotals } from "@/types/preorder";
 import { cn } from "@/lib/utils";
 import {
   TabBar,
+  TabTierBanner,
   PreorderGridTab,
   PreorderGuidedTab,
   OrderSummaryPanel,
@@ -313,6 +314,14 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
                 <Lock className="w-4 h-4 shrink-0" />
                 This preorder is submitted and locked. You&rsquo;re viewing what you ordered and its current status. Contact us if you need changes.
               </div>
+            )}
+            {activeTab && (
+              <TabTierBanner
+                tab={activeTab}
+                quantities={quantities}
+                currency={campaign.currency}
+                className="mb-4"
+              />
             )}
             {!activeTab ? (
               <div className="text-center text-[13px] text-muted-foreground py-16">

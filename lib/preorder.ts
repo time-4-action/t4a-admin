@@ -20,7 +20,9 @@ import type {
   PreorderSubmission as SubmissionView,
   PreorderSubmissionSummary,
   PreorderAccessSummary,
+  PreorderSubmissionTotals,
   PreorderTab,
+  PreorderTier,
 } from "@/types/preorder";
 
 export { connectDB };
@@ -63,8 +65,40 @@ export function toAccessSummary(doc: IPreorderAccess): PreorderAccessSummary {
   };
 }
 
+// Totals as the wire sees them. `net` is DERIVED, never read back from the document:
+// submissions saved before volume discounts existed carry the schema default (0), which
+// would otherwise read as a free order.
+function totalsView(
+  t?: { qty?: number; amount?: number; discount?: number; net?: number } | null,
+): PreorderSubmissionTotals {
+  const qty = t?.qty ?? 0;
+  const amount = t?.amount ?? 0;
+  const discount = t?.discount ?? 0;
+  return { qty, amount, discount, net: Math.round((amount - discount) * 100) / 100 };
+}
+
 function iso(d?: Date | null): string | null {
   return d ? new Date(d).toISOString() : null;
+}
+
+// Clean the volume-discount ladder a builder sends up: keep it in range (a % outside
+// 0–100 would fail schema validation and reject the whole save), give every tier an id,
+// and store it sorted by threshold so every reader sees the same ladder.
+export function sanitizeTiers(tiers: unknown): PreorderTier[] {
+  if (!Array.isArray(tiers)) return [];
+  return tiers
+    .map((raw, i) => {
+      const t = (raw ?? {}) as Partial<PreorderTier>;
+      const minAmount = Math.max(0, Number(t.minAmount) || 0);
+      const discountPct = Math.min(100, Math.max(0, Number(t.discountPct) || 0));
+      return {
+        id: String(t.id || `tier-${i}-${Math.random().toString(36).slice(2, 8)}`),
+        name: String(t.name ?? "").trim().slice(0, 60),
+        minAmount,
+        discountPct,
+      };
+    })
+    .sort((a, b) => a.minAmount - b.minAmount);
 }
 
 function countRows(tabs: PreorderTab[] | IPreorderCampaign["tabs"]): number {
@@ -131,8 +165,8 @@ export function toSubmissionView(doc: IPreorderSubmission): SubmissionView {
       confirmedQty: l.confirmedQty ?? null,
       lineStatus: l.lineStatus,
     })),
-    totals: { qty: doc.totals?.qty ?? 0, amount: doc.totals?.amount ?? 0 },
-    confirmedTotals: { qty: doc.confirmedTotals?.qty ?? 0, amount: doc.confirmedTotals?.amount ?? 0 },
+    totals: totalsView(doc.totals),
+    confirmedTotals: totalsView(doc.confirmedTotals),
     submittedAt: iso(doc.submittedAt),
     updatedAt: iso(doc.updatedAt),
     unlockRequest: doc.unlockRequestedAt
@@ -159,8 +193,8 @@ export function toSubmissionSummary(
     partnerName: doc.partnerName,
     partnerEmail: doc.partnerEmail,
     status: doc.status,
-    totals: { qty: doc.totals?.qty ?? 0, amount: doc.totals?.amount ?? 0 },
-    confirmedTotals: { qty: doc.confirmedTotals?.qty ?? 0, amount: doc.confirmedTotals?.amount ?? 0 },
+    totals: totalsView(doc.totals),
+    confirmedTotals: totalsView(doc.confirmedTotals),
     submittedAt: iso(doc.submittedAt),
     updatedAt: iso(doc.updatedAt),
     hasUnlockRequest: !!doc.unlockRequestedAt,

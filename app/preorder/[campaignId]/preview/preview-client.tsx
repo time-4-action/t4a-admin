@@ -29,6 +29,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   TabBar,
+  TabTierBanner,
   PreorderGridTab,
   PreorderGuidedTab,
   OrderSummaryPanel,
@@ -217,6 +218,9 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
           <div className="min-w-0">
+            {activeTab && (
+              <TabTierBanner tab={activeTab} quantities={quantities} currency={currency} className="mb-4" />
+            )}
             {!activeTab ? (
               <div className="text-center text-[13px] text-muted-foreground py-16">This sheet has no tabs yet.</div>
             ) : mode === "grid" ? (
