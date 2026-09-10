@@ -18,7 +18,16 @@ import {
 } from "@/components/ui/dialog";
 import { ArrowLeft, Loader2, Check, CheckCheck, Mail, Phone, MapPin, Truck, MessageSquare, Lock, LockOpen, Minus, Plus, RotateCcw, ShoppingCart, ExternalLink, Trash2, MoreVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { TabBar, PreorderGridTab, OrderSummaryPanel, fmtMoney } from "@/app/preorder/preorder-shared";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
+import {
+  TabBar,
+  PreorderGridTab,
+  OrderSummaryPanel,
+  fmtMoney,
+  SheetHeaderSkeleton,
+  PreorderGridSkeleton,
+  OrderSummaryPanelSkeleton,
+} from "@/app/preorder/preorder-shared";
 import {
   SUBMISSION_STATUS_LABELS,
   LINE_STATUS_LABELS,
@@ -321,9 +330,51 @@ export default function SubmissionClient({
 
   if (loading) {
     return (
-      <div className="p-6 md:p-8 space-y-4">
-        <div className="h-6 w-56 rounded skeleton" />
-        <div className="h-96 rounded-xl skeleton" />
+      <div className="flex flex-col h-full">
+        <SheetHeaderSkeleton
+          backHref={`/preorder/${campaignId}`}
+          right={
+            <>
+              <span className="hidden sm:inline-flex min-w-[68px]" />
+              <div className="flex items-center rounded-lg border border-border overflow-hidden">
+                <Button variant="ghost" size="sm" disabled className="h-8 rounded-none border-0"><CheckCheck className="w-3.5 h-3.5" /> Confirm all</Button>
+                <span className="w-px self-stretch bg-border" />
+                <Button variant="ghost" size="sm" disabled className="h-8 rounded-none border-0 text-muted-foreground"><RotateCcw className="w-3.5 h-3.5" /> Reset</Button>
+              </div>
+              <Skeleton className="h-8 w-[132px] rounded-md" />
+              <Skeleton className="h-8 w-8 rounded-md" delay={40} />
+            </>
+          }
+        />
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
+            <div className="min-w-0">
+              <PreorderGridSkeleton
+                readOnly
+                qtyHeader="Ordered"
+                extraHeader={<th className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-2 text-left w-40">Fulfilment</th>}
+              />
+            </div>
+            <aside className="lg:sticky lg:top-4 space-y-3">
+              <OrderSummaryPanelSkeleton confirmed />
+              <div className="rounded-xl border border-border bg-surface p-4 space-y-2.5 text-[12px]">
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Metakocka</div>
+                <SkeletonLine lh="h-[18px]" w="w-full" delay={80} />
+                <SkeletonLine lh="h-[18px]" w="w-2/3" delay={100} />
+                <Skeleton className="h-9 w-full rounded-md" delay={120} />
+              </div>
+              <div className="rounded-xl border border-border bg-surface p-4 space-y-2 text-[12px]">
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Partner details</div>
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <Skeleton className="w-3.5 h-3.5 rounded shrink-0 mt-0.5" delay={stagger(i, 60, 140)} />
+                    <SkeletonLine lh="h-[18px]" w={["w-40", "w-24", "w-48"][i]} delay={stagger(i, 60, 160)} />
+                  </div>
+                ))}
+              </div>
+            </aside>
+          </div>
+        </div>
       </div>
     );
   }

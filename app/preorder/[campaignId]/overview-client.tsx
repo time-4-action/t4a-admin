@@ -28,6 +28,7 @@ import {
   Mail,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
 import {
   CAMPAIGN_STATUS_LABELS,
@@ -111,19 +112,7 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
     return { count: subs.length, submitted: submitted.length, totalQty, totalAmount, confirmedAmount, unlockedCount };
   }, [subs, unlocked]);
 
-  if (loading) {
-    return (
-      <div className="p-6 md:p-8 space-y-4">
-        <div className="h-6 w-56 rounded skeleton" />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-20 rounded-xl skeleton" style={{ animationDelay: `${i * 80}ms` }} />
-          ))}
-        </div>
-        <div className="h-64 rounded-xl skeleton" />
-      </div>
-    );
-  }
+  if (loading) return <OverviewSkeleton />;
 
   if (error || !campaign) {
     return (
@@ -266,6 +255,98 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
                     </TableCell>
                   </TableRow>
                 )}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Structural twin of the loaded overview below: same sticky header, KPI grid
+// and table; static chrome (buttons, labels, headers) renders for real.
+const KPI_META: { icon: React.ElementType; label: string; accent?: boolean }[] = [
+  { icon: Link2, label: "Unlocked" },
+  { icon: Users, label: "Preorders" },
+  { icon: CheckCircle2, label: "Submitted" },
+  { icon: Package, label: "Items" },
+  { icon: Wallet, label: "Ordered value" },
+  { icon: CheckCircle2, label: "Confirmed value", accent: true },
+];
+
+function OverviewSkeleton() {
+  const th = "text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9";
+  return (
+    <div className="flex flex-col h-full">
+      <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
+        <div className="flex items-center gap-3 px-4 md:px-6 h-14">
+          <Link href="/preorder" className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back">
+            <ArrowLeft className="w-4 h-4" />
+          </Link>
+          <div className="min-w-0">
+            {/* text-[15px] leading-tight → 18.75px; pill row text-[11px] → 19.5px */}
+            <SkeletonLine lh="h-[19px]" h="h-3.5" w="w-48" />
+            <div className="flex items-center gap-2 h-[19.5px]">
+              <Skeleton className="h-[19.5px] w-12 rounded-full" delay={40} />
+              <Skeleton className="h-2.5 w-24" delay={60} />
+            </div>
+          </div>
+          <div className="flex-1" />
+          <Button variant="outline" size="sm" className="h-8" disabled><Link2 className="w-3.5 h-3.5" /> Copy invite link</Button>
+          <Button variant="ghost" size="sm" className="h-8" disabled><Eye className="w-3.5 h-3.5" /> Preview</Button>
+          <Button variant="outline" size="sm" className="h-8" disabled><UserPlus className="w-3.5 h-3.5" /> Fill for customer</Button>
+          <Button variant="outline" size="sm" className="h-8" disabled><Pencil className="w-3.5 h-3.5" /> Edit sheet</Button>
+        </div>
+      </header>
+
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
+        <div className="space-y-5">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            {KPI_META.map(({ icon: Icon, label, accent }, i) => (
+              <div key={label} className={cn("rounded-xl border p-3", accent ? "border-lime-300 dark:border-lime-800/60 bg-lime-50/60 dark:bg-lime-950/20" : "border-border bg-surface")}>
+                <div className={cn("flex items-center gap-1.5 text-[11px]", accent ? "text-lime-700 dark:text-lime-400" : "text-muted-foreground")}>
+                  <Icon className="w-3.5 h-3.5" /> {label}
+                </div>
+                {/* text-[20px] leading-none → 20px */}
+                <Skeleton className="h-5 w-16 mt-1" delay={stagger(i, 60)} />
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-xl border border-border bg-surface overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-border text-[13px] font-semibold text-foreground">Preorders</div>
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent border-b border-border">
+                  <TableHead className={cn(th, "pl-5")}>Partner</TableHead>
+                  <TableHead className={th}>Status</TableHead>
+                  <TableHead className={cn(th, "text-right")}>Items</TableHead>
+                  <TableHead className={cn(th, "text-right")}>Ordered</TableHead>
+                  <TableHead className={cn(th, "text-right")}>Confirmed</TableHead>
+                  <TableHead className={th}>Submitted</TableHead>
+                  <TableHead className="h-9 w-[40px]" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <TableRow key={i} className="border-b border-border/60">
+                    <TableCell className="pl-5 py-2.5">
+                      <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-36" delay={stagger(i, 60)} />
+                      <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-44" delay={stagger(i, 60, 20)} />
+                    </TableCell>
+                    <TableCell><Skeleton className="h-[20.5px] w-20 rounded-full" delay={stagger(i, 60, 40)} /></TableCell>
+                    <TableCell><SkeletonLine lh="h-[18px]" w="w-6" className="justify-end" delay={stagger(i, 60, 60)} /></TableCell>
+                    <TableCell><SkeletonLine lh="h-[18px]" w="w-16" className="justify-end" delay={stagger(i, 60, 80)} /></TableCell>
+                    <TableCell><SkeletonLine lh="h-[18px]" w="w-16" className="justify-end" delay={stagger(i, 60, 100)} /></TableCell>
+                    <TableCell><SkeletonLine lh="h-[18px]" w="w-20" delay={stagger(i, 60, 120)} /></TableCell>
+                    <TableCell className="pr-4">
+                      <div className="flex items-center justify-end">
+                        <ChevronRight className="w-4 h-4 text-muted-foreground/30" />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           </div>

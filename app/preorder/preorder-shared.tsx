@@ -17,7 +17,9 @@ import {
   Send,
   Loader2,
   Percent,
+  ArrowLeft,
 } from "lucide-react";
+import Link from "next/link";
 import {
   Dialog,
   DialogContent,
@@ -27,6 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   rowUnitPrice,
   computeTabTotals,
@@ -909,5 +912,154 @@ export function PreorderReviewModal({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── Skeleton twins ───────────────────────────────────────────────────────────
+// Structural copies of the sheet chrome shared by the admin preview, the
+// submission review and the customer fill page. Static chrome (table headers,
+// section labels, back link) renders for real; only the sheet data shimmers.
+
+/** Sticky h-14 header row + tab bar, as every sheet page renders it. */
+export function SheetHeaderSkeleton({
+  backHref,
+  right,
+  tabs = 3,
+}: {
+  backHref: string;
+  right?: ReactNode;
+  tabs?: number;
+}) {
+  return (
+    <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-20">
+      <div className="flex items-center gap-3 px-4 md:px-6 h-14">
+        <Link href={backHref} className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back">
+          <ArrowLeft className="w-4 h-4" />
+        </Link>
+        <div className="min-w-0">
+          {/* text-[15px] leading-tight → 18.75px; text-[11px] → 16.5px */}
+          <SkeletonLine lh="h-[19px]" h="h-3.5" w="w-48" />
+          <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-32" delay={40} />
+        </div>
+        <div className="flex-1" />
+        {right}
+      </div>
+      <div className="px-4 md:px-6 pb-2">
+        <TabBarSkeleton count={tabs} />
+      </div>
+    </header>
+  );
+}
+
+/** Twin of TabBar: rounded-full pills, text-[13px] + py-1.5 → 31.5px tall. */
+export function TabBarSkeleton({ count = 3 }: { count?: number }) {
+  return (
+    <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+      {Array.from({ length: count }).map((_, i) => (
+        <Skeleton
+          key={i}
+          className={cn("shrink-0 h-[31.5px] rounded-full", ["w-24", "w-28", "w-20", "w-32"][i % 4])}
+          delay={stagger(i, 60)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Twin of PreorderGridTab: real column headers, one group row, N product rows. */
+export function PreorderGridSkeleton({
+  rows = 6,
+  qtyHeader = "Qty",
+  extraHeader,
+  readOnly = false,
+}: {
+  rows?: number;
+  qtyHeader?: string;
+  extraHeader?: ReactNode;
+  readOnly?: boolean;
+}) {
+  const th = "text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-2";
+  return (
+    <div className="rounded-xl border border-border bg-surface overflow-x-auto">
+      <table className="w-full text-[12px] border-collapse">
+        <thead className="sticky top-0 z-10 bg-surface">
+          <tr className="border-b border-border">
+            <th className={cn(th, "text-left pl-4 min-w-[220px]")}>Product</th>
+            <th className={cn(th, "text-left")}>SKU</th>
+            <th className={cn(th, "text-right")}>RRP</th>
+            <th className={cn(th, "text-right")}>Partner</th>
+            <th className={cn(th, "text-right w-28")}>{qtyHeader}</th>
+            <th className={cn(th, "text-right pr-4 w-24")}>Total</th>
+            {extraHeader}
+          </tr>
+        </thead>
+        <tbody>
+          <tr className="bg-muted/40">
+            <td colSpan={extraHeader ? 7 : 6} className="px-4 py-1.5">
+              <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-32" />
+            </td>
+          </tr>
+          {Array.from({ length: rows }).map((_, i) => (
+            <tr key={i} className="border-b border-border/40">
+              <td className="pl-4 pr-2 py-1.5">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Skeleton className="w-8 h-8 rounded shrink-0" delay={stagger(i, 50)} />
+                  <SkeletonLine lh="h-[18px]" w={["w-40", "w-32", "w-48", "w-36"][i % 4]} delay={stagger(i, 50, 20)} />
+                </div>
+              </td>
+              <td className="px-2 py-1.5"><SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-20" delay={stagger(i, 50, 40)} /></td>
+              <td className="px-2 py-1.5"><SkeletonLine lh="h-[18px]" w="w-14" className="justify-end" delay={stagger(i, 50, 60)} /></td>
+              <td className="px-2 py-1.5"><SkeletonLine lh="h-[18px]" w="w-14" className="justify-end" delay={stagger(i, 50, 80)} /></td>
+              <td className="px-2 py-1.5">
+                {readOnly ? (
+                  <SkeletonLine lh="h-[18px]" w="w-6" className="justify-end" delay={stagger(i, 50, 100)} />
+                ) : (
+                  <div className="flex justify-end">
+                    <div className="flex items-center gap-1">
+                      <Skeleton className="w-7 h-7 rounded-md" delay={stagger(i, 50, 100)} />
+                      <Skeleton className="h-7 w-12 rounded-md" delay={stagger(i, 50, 110)} />
+                      <Skeleton className="w-7 h-7 rounded-md" delay={stagger(i, 50, 120)} />
+                    </div>
+                  </div>
+                )}
+              </td>
+              <td className="px-2 pr-4 py-1.5"><SkeletonLine lh="h-[18px]" w="w-14" className="justify-end" delay={stagger(i, 50, 140)} /></td>
+              {extraHeader && (
+                <td className="px-2 py-1.5"><Skeleton className="h-7 w-full max-w-[140px] rounded-md" delay={stagger(i, 50, 160)} /></td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Twin of OrderSummaryPanel: label, Items row, Total row, "incl. VAT". */
+export function OrderSummaryPanelSkeleton({ confirmed = false }: { confirmed?: boolean }) {
+  return (
+    <div className="rounded-xl border border-border bg-surface p-4 space-y-4">
+      <div>
+        <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Order summary</div>
+        <div className="mt-2 flex items-baseline justify-between">
+          <span className="text-[13px] text-muted-foreground">Items</span>
+          <SkeletonLine lh="h-[22.5px]" h="h-3.5" w="w-6" delay={40} />
+        </div>
+        <div className="flex items-baseline justify-between">
+          <span className="text-[13px] text-muted-foreground">{confirmed ? "Ordered total" : "Total"}</span>
+          {/* text-[18px] → 27px line */}
+          <SkeletonLine lh="h-[27px]" h="h-4" w="w-24" delay={80} />
+        </div>
+        <div className="text-[10px] text-muted-foreground text-right -mt-0.5">incl. VAT</div>
+        {confirmed && (
+          <div className="mt-1 pt-1 border-t border-border/50">
+            <div className="flex items-baseline justify-between">
+              <span className="text-[13px] text-lime-700 dark:text-lime-400">Confirmed</span>
+              <SkeletonLine lh="h-6" h="h-4" w="w-20" delay={120} />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

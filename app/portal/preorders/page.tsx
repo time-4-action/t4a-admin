@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ShoppingCart, Clock, ChevronRight, CheckCircle2, PencilLine } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   type PreorderCampaignSummary,
   type SubmissionStatus,
@@ -52,7 +53,19 @@ export default function PortalPreordersPage() {
           {loading && (
             <div className="space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="h-24 rounded-xl skeleton" style={{ animationDelay: `${i * 80}ms` }} />
+                <div key={i} className="flex items-center gap-4 rounded-xl border border-border bg-surface p-4">
+                  <Skeleton className="w-11 h-11 rounded-xl shrink-0" delay={stagger(i)} />
+                  <div className="min-w-0 flex-1">
+                    {/* text-[14px] → 21px; meta text-[12px] → 18px */}
+                    <SkeletonLine lh="h-[21px]" h="h-3.5" w="w-48" delay={stagger(i, 80, 20)} />
+                    <div className="flex items-center gap-3 mt-0.5">
+                      <SkeletonLine lh="h-[18px]" w="w-16" delay={stagger(i, 80, 40)} />
+                      <SkeletonLine lh="h-[18px]" w="w-32" delay={stagger(i, 80, 60)} />
+                    </div>
+                  </div>
+                  <Skeleton className="h-[20.5px] w-20 rounded-full shrink-0" delay={stagger(i, 80, 80)} />
+                  <ChevronRight className="w-4 h-4 text-muted-foreground/30 shrink-0" />
+                </div>
               ))}
             </div>
           )}
