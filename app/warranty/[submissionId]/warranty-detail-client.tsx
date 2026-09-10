@@ -61,7 +61,8 @@ import {
 } from "../assignee-picker";
 import { OptionPicker } from "../option-picker";
 import { ChangeLogModal } from "@/components/change-log-modal";
-import { AuditHistory } from "@/components/audit-history";
+import { AuditHistory, AuditHistoryCardSkeleton } from "@/components/audit-history";
+import { Skeleton, SkeletonAvatar, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import type { AuditChange } from "@/types/warranty";
 
 const IMAGE_EXTS = /\.(jpe?g|png|gif|webp|avif|heic|heif)$/i;
@@ -1435,5 +1436,179 @@ function ProductCard({ doc }: { doc: WarrantySubmission }) {
         { label: "Days used", value: doc.daysOfUse },
       ]}
     />
+  );
+}
+
+// ============================================================================
+// Skeleton twin — used by app/warranty/[submissionId]/loading.tsx
+// ============================================================================
+// Same cards, headers, labels and grid as ClaimDetailClient above; only the
+// claim's values shimmer. Card chrome (titles, icons, field labels) is static
+// and renders for real so the loaded page drops into place without a shift.
+
+function CardHeadStatic({ icon: Icon, title }: { icon: React.ElementType; title: string }) {
+  return (
+    <div className="px-5 py-3 border-b border-border/50 bg-muted/30 flex items-center gap-2.5">
+      <div className="w-5 h-5 rounded-md bg-background border border-border/60 flex items-center justify-center">
+        <Icon className="w-3 h-3 text-muted-foreground" />
+      </div>
+      <span className="text-[12px] font-semibold text-foreground">{title}</span>
+    </div>
+  );
+}
+
+/** Same geometry as StatusPipeline: 2 nodes → gateway → fork → 2-row branch. */
+function PipelineSkeleton() {
+  const node = (d: number) => (
+    <Skeleton className="w-[124px] shrink-0 rounded-lg" style={{ height: NODE_H }} delay={d} />
+  );
+  const arrow = <span className="shrink-0" style={{ width: 38, height: NODE_H }} aria-hidden />;
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-3">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Pipeline · click a stage to move the claim
+        </p>
+      </div>
+      <div className="overflow-x-auto pb-1 -mx-1 px-1">
+        <div className="flex items-center w-max mx-auto" style={{ minHeight: BRANCH_H }}>
+          {node(0)}
+          {arrow}
+          {node(60)}
+          {arrow}
+          <div className="relative grid shrink-0 place-items-center" style={{ width: 48, height: 48 }}>
+            <Skeleton className="h-8 w-8 rotate-45 rounded-md" delay={120} />
+          </div>
+          <span className="shrink-0" style={{ width: 52, height: BRANCH_H }} aria-hidden />
+          <div className="flex flex-col" style={{ gap: ROW_GAP }}>
+            <div className="flex items-center">
+              {node(180)}
+              {arrow}
+              {node(240)}
+            </div>
+            <div className="flex items-center">{node(300)}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const MINI_CARD_ROWS: { icon: React.ElementType; title: string; labels: string[] }[] = [
+  { icon: Package, title: "Product", labels: ["Product", "Category", "SKU", "EAN", "Serial", "Failed", "Days used"] },
+  { icon: User, title: "Customer", labels: ["Name", "Company", "Type", "Email", "Phone", "Address"] },
+  { icon: Receipt, title: "Purchase", labels: ["Invoice", "Issued by", "Purchased", "Country"] },
+];
+const MINI_VALUE_WIDTHS = ["w-3/4", "w-1/2", "w-2/3", "w-5/6", "w-1/3", "w-1/2", "w-1/4"];
+
+export function ClaimDetailSkeleton() {
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="px-4 md:px-8 py-6 max-w-6xl mx-auto space-y-6">
+        {/* Workflow */}
+        <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-border/50 bg-muted/30 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-5 h-5 rounded-md bg-background border border-border/60 flex items-center justify-center">
+                <Activity className="w-3 h-3 text-muted-foreground" />
+              </div>
+              <span className="text-[12px] font-semibold text-foreground">Workflow</span>
+            </div>
+            <span className="text-[10px] text-muted-foreground">All changes saved</span>
+          </div>
+          <div className="p-5 space-y-5">
+            <PipelineSkeleton />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {["Assigned to", "Warranty type", "Suggestion", "Factory", "Customer"].map((label, i) => (
+                <WorkflowField key={label} label={label} modified={false}>
+                  <Skeleton className="h-8 w-full rounded-md" delay={stagger(i, 50, 320)} />
+                </WorkflowField>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Product / Customer / Purchase */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {MINI_CARD_ROWS.map(({ icon, title, labels }, c) => (
+            <MiniCard
+              key={title}
+              icon={icon}
+              title={title}
+              rows={labels.map((label, i) => ({
+                label,
+                value: (
+                  <SkeletonLine
+                    lh="h-[18px]"
+                    w={MINI_VALUE_WIDTHS[(i + c) % MINI_VALUE_WIDTHS.length]}
+                    delay={stagger(i, 40, c * 60)}
+                  />
+                ),
+              }))}
+            />
+          ))}
+        </div>
+
+        {/* Problem */}
+        <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
+          <CardHeadStatic icon={Receipt} title="Problem as described by the customer" />
+          <div className="p-5">
+            {["w-full", "w-11/12", "w-2/3"].map((w, i) => (
+              <SkeletonLine key={w} lh="h-[19.5px]" w={w} delay={stagger(i, 60)} />
+            ))}
+          </div>
+        </div>
+
+        {/* Notes */}
+        <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
+          <CardHeadStatic icon={MessageSquare} title="Internal notes" />
+          <div className="p-5 space-y-4">
+            <div className="flex gap-3">
+              <SkeletonAvatar size="w-7 h-7" />
+              <div className="flex-1 min-w-0 space-y-2">
+                {/* rows=3 textarea: 3×19.5 + 16 + 2 */}
+                <Skeleton className="h-[76.5px] w-full rounded-md" delay={40} />
+                <div className="flex items-center justify-between">
+                  <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-56" delay={80} />
+                  <Skeleton className="h-7 w-[74px] rounded-md" delay={100} />
+                </div>
+              </div>
+            </div>
+            <div className="space-y-3 pt-2 border-t border-border/40">
+              {[0, 1].map((i) => (
+                <div key={i} className="flex gap-3">
+                  <SkeletonAvatar size="w-7 h-7" delay={stagger(i, 80, 120)} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2">
+                      <SkeletonLine lh="h-[18px]" w="w-24" delay={stagger(i, 80, 140)} />
+                      <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-12" delay={stagger(i, 80, 160)} />
+                    </div>
+                    <SkeletonLine lh="h-[19.5px]" w={i === 0 ? "w-3/4" : "w-1/2"} className="mt-0.5" delay={stagger(i, 80, 180)} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Uploads */}
+        <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
+          <CardHeadStatic icon={ImageIcon} title="Customer uploads" />
+          <div className="p-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="rounded-xl border border-border/60 bg-background overflow-hidden shadow-sm">
+                <Skeleton className="aspect-square w-full rounded-none" delay={stagger(i, 60, 200)} />
+                <div className="px-3 py-2">
+                  <SkeletonLine lh="h-[16.5px]" w="w-16" delay={stagger(i, 60, 240)} />
+                  <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-10" delay={stagger(i, 60, 260)} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <AuditHistoryCardSkeleton />
+      </div>
+    </div>
   );
 }
