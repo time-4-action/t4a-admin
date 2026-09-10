@@ -2,9 +2,11 @@
 import { RefreshCw, AlertTriangle, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   RunDetailsModal,
   RunHistoryTable,
+  RunHistoryTableSkeleton,
   StatusPill,
   useAutomation,
   mergeRuns,
@@ -26,7 +28,7 @@ export default function AutomationOverviewPage() {
         <div className="h-14 flex items-center justify-between px-4 md:px-8">
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
             <h1 className="font-display text-lg font-medium tracking-tight text-foreground shrink-0">Automation</h1>
-            {status && <StatusPill tone={tone} />}
+            {status ? <StatusPill tone={tone} /> : loading && <Skeleton className="h-[16.5px] w-14 rounded-full" />}
           </div>
           <Button variant="outline" size="sm" onClick={() => load()} disabled={loading} className="h-8 text-xs gap-1.5">
             <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} />
@@ -67,14 +69,7 @@ export default function AutomationOverviewPage() {
             <h2 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Run history</h2>
           </div>
           {loading && !status ? (
-            <div className="bg-surface border border-border rounded-xl divide-y divide-border/50 overflow-hidden">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-4 px-4 py-3">
-                  <div className="skeleton h-4 w-24 rounded" style={{ animationDelay: `${i * 80}ms` }} />
-                  <div className="ml-auto skeleton h-4 w-16 rounded" style={{ animationDelay: `${i * 80 + 40}ms` }} />
-                </div>
-              ))}
-            </div>
+            <RunHistoryTableSkeleton showType rows={6} />
           ) : (
             <RunHistoryTable runs={allRuns} onOpen={setOpenRun} showType />
           )}
