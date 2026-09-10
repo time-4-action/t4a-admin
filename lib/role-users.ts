@@ -1,4 +1,4 @@
-import { getMgmtClient } from "@/lib/mgmt";
+import { listAllRoles, listUsersInRole } from "@/lib/auth0-mgmt";
 
 export type RoleUser = {
   id: string;
@@ -15,13 +15,12 @@ export type RoleUser = {
  * Returns [] if no role with that name exists.
  */
 export async function getUsersWithRole(roleName: string): Promise<RoleUser[]> {
-  const mgmt = getMgmtClient();
   const wanted = roleName.toLowerCase();
-  const allRoles = ((await mgmt.roles.list()) as any).data as any[];
+  const allRoles = await listAllRoles();
   const role = allRoles.find((r: any) => r.name?.toLowerCase() === wanted);
   if (!role) return [];
 
-  const users = ((await mgmt.roles.users.list(role.id)) as any).data as any[];
+  const users = await listUsersInRole(role.id);
   return users
     .map((u: any) => ({
       id: u.user_id as string,

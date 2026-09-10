@@ -3,6 +3,7 @@ import { UserUsage } from "@/models/user-usage";
 import { UserLimit } from "@/models/user-limit";
 import { Conversation } from "@/models/conversation";
 import { getMgmtClient } from "@/lib/mgmt";
+import { invalidateAuth0Cache } from "@/lib/auth0-cache";
 import { NextRequest, NextResponse } from "next/server";
 
 // Cache the management API token to avoid a round-trip on every request
@@ -46,6 +47,7 @@ export async function PATCH(req: NextRequest) {
     const err = await res.json().catch(() => ({}));
     return NextResponse.json({ error: err.message ?? "Failed to update" }, { status: res.status });
   }
+  invalidateAuth0Cache();
   return NextResponse.json({ ok: true });
 }
 
@@ -56,6 +58,7 @@ export async function DELETE(req: NextRequest) {
   const mgmt = getMgmtClient();
 
   await mgmt.users.delete(userId);
+  invalidateAuth0Cache();
 
   if (purge) {
     await connectDB();

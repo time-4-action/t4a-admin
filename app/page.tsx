@@ -17,6 +17,7 @@ import {
   Cog,
   Handshake,
   Boxes,
+  Tags,
   RefreshCw,
   Warehouse,
   Zap,
@@ -27,6 +28,7 @@ import {
   ReceiptText,
   ClipboardList,
   Building2,
+  ShoppingCart,
 } from "lucide-react";
 
 const sections: {
@@ -101,6 +103,7 @@ const sections: {
       { href: "/automation",           icon: LayoutDashboard, title: "Overview",  desc: "Both syncs + combined run history" },
       { href: "/automation/warehouse", icon: Warehouse,       title: "Warehouse", desc: "T4A stock → CREAGLOBE" },
       { href: "/automation/products",  icon: Boxes,           title: "Products",  desc: "One-way catalogue sync T4A → CREAGLOBE" },
+      { href: "/automation/pricelists", icon: Tags,           title: "Pricelists", desc: "Mapped price lists T4A → CREAGLOBE" },
     ],
   },
   {
@@ -125,6 +128,16 @@ const sections: {
       { href: "/documents/invoices", icon: ReceiptText,    title: "Invoices", desc: "Browse any customer's invoices" },
       { href: "/documents/offers",   icon: FileText,       title: "Offers",   desc: "Browse any customer's offers" },
       { href: "/documents/orders",   icon: ClipboardList,  title: "Orders",   desc: "Browse any customer's orders" },
+    ],
+  },
+  {
+    label: "Preorder",
+    section: "preorder",
+    icon: ShoppingCart,
+    color: "text-lime-600 dark:text-lime-500",
+    bg: "bg-lime-600/10",
+    cards: [
+      { href: "/preorder", icon: ClipboardList, title: "Campaigns", desc: "Build order sheets and review preorders" },
     ],
   },
   {

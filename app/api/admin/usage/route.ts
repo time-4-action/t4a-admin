@@ -1,21 +1,20 @@
 import { connectDB } from "@/lib/mongodb";
 import { UserUsage } from "@/models/user-usage";
-import { getMgmtClient } from "@/lib/mgmt";
+import { listAllUsers } from "@/lib/auth0-mgmt";
 import { getDevUserIds } from "@/lib/dev-users";
 import { NextResponse } from "next/server";
 
 export async function GET() {
   try {
     await connectDB();
-    const mgmt = getMgmtClient();
 
     const [docs, auth0Users, devUserIds] = await Promise.all([
       UserUsage.find({}).lean(),
-      mgmt.users.list({ per_page: 100 }),
+      listAllUsers(),
       getDevUserIds(),
     ]);
 
-    const emailMap = Object.fromEntries(((auth0Users as any).data as any[]).map((u: any) => [u.user_id, u.email]));
+    const emailMap = Object.fromEntries(auth0Users.map((u: any) => [u.user_id, u.email]));
 
     type UsageRow = {
       userId: string; email: string; modelId: string;

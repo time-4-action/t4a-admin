@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   Radar,
   SlidersHorizontal,
+  LayoutGrid,
   ChevronRight,
   Download,
   MousePointerClick,
@@ -25,6 +26,13 @@ const builders = [
     title: "Range Bars",
     badge: "feel / rider goals",
     desc: "Horizontal bars showing a highlighted band between two poles or across labelled stops — ideal for feel and rider-goal scales. Add as many bars as you need.",
+  },
+  {
+    href: "/builder/layout",
+    icon: LayoutGrid,
+    title: "Section Layout",
+    badge: "rows & columns",
+    desc: "Compose a whole section from your saved builds: stack them, sit two or three side by side, drag them between rows, and set each column's width. Stacks by itself on phones.",
   },
 ];
 

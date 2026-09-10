@@ -33,11 +33,15 @@ import {
   Blocks,
   Radar,
   SlidersHorizontal,
+  LayoutGrid,
+  Bookmark,
   Boxes,
+  Tags,
   FileText,
   ReceiptText,
   ClipboardList,
   Building2,
+  ShoppingCart,
 } from "lucide-react";
 
 type NavLinkDef = {
@@ -103,6 +107,7 @@ const sections: NavSection[] = [
       { href: "/automation/warehouse", label: "Warehouse",         icon: Warehouse, matchPrefix: true },
       { href: "/automation/products",  label: "Products",          icon: Boxes, matchPrefix: true },
       { href: "/automation/customers", label: "Customers",         icon: Users, matchPrefix: true },
+      { href: "/automation/pricelists", label: "Pricelists",       icon: Tags, matchPrefix: true },
       { href: "/automation/access",    label: "Automation Access", icon: ShieldCheck, superAdminOnly: true },
     ],
   },
@@ -110,9 +115,11 @@ const sections: NavSection[] = [
     label: "Builder",
     section: "builder",
     links: [
+      { href: "/builder/saved",       label: "Saved Builds",    icon: Bookmark, matchPrefix: true },
       { href: "/builder",             label: "Section Builder", icon: Blocks },
       { href: "/builder/radar-chart", label: "Radar Chart",     icon: Radar },
       { href: "/builder/range-bars",  label: "Range Bars",      icon: SlidersHorizontal },
+      { href: "/builder/layout",      label: "Section Layout",  icon: LayoutGrid },
       { href: "/builder/access",      label: "Builder Access",  icon: ShieldCheck, superAdminOnly: true },
     ],
   },
@@ -124,6 +131,15 @@ const sections: NavSection[] = [
       { href: "/documents/invoices", label: "Invoices", icon: ReceiptText,   matchPrefix: true },
       { href: "/documents/offers",   label: "Offers",   icon: FileText,      matchPrefix: true },
       { href: "/documents/orders",   label: "Orders",   icon: ClipboardList, matchPrefix: true },
+      { href: "/documents/access",   label: "Documents Access", icon: ShieldCheck, superAdminOnly: true },
+    ],
+  },
+  {
+    label: "Preorder",
+    section: "preorder",
+    links: [
+      { href: "/preorder",        label: "Campaigns",       icon: ClipboardList, matchPrefix: true },
+      { href: "/preorder/access", label: "Preorder Access", icon: ShieldCheck, superAdminOnly: true },
     ],
   },
 ];
@@ -139,6 +155,7 @@ const SECTION_STYLE: Record<SectionKey, { icon: React.ElementType; color: string
   automation: { icon: Zap,       color: "text-rose-500",    bg: "bg-rose-500/10" },
   builder:    { icon: Blocks,    color: "text-blue-600 dark:text-blue-500", bg: "bg-blue-600/10" },
   documents:  { icon: FileText,  color: "text-teal-500",    bg: "bg-teal-500/10" },
+  preorder:   { icon: ShoppingCart, color: "text-lime-600 dark:text-lime-500", bg: "bg-lime-600/10" },
   system:     { icon: Cog,       color: "text-slate-500",   bg: "bg-slate-500/10" },
 };
 

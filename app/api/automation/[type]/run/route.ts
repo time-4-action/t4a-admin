@@ -10,10 +10,12 @@ const RUN_PATH: Record<string, string> = {
   warehouse: "/api/v1/warehouse/sync",
   products: "/api/v1/products/sync",
   customers: "/api/v1/customers/sync",
+  pricelists: "/api/v1/pricelists/sync",
 };
 
 // POST — trigger a sync now. The service responds 202 (started) or 409 (already running).
-// `?dryRun=true` is forwarded to the service (customer sync only) to preview without writing.
+// `?dryRun=true` is forwarded to the service (customer + pricelist syncs) to preview
+// without writing.
 export async function POST(request: Request, { params }: RouteParams) {
   const { type } = await params;
   let path = RUN_PATH[type];

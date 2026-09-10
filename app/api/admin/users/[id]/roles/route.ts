@@ -1,4 +1,6 @@
 import { getMgmtClient } from "@/lib/mgmt";
+import { listAllRoles } from "@/lib/auth0-mgmt";
+import { invalidateAuth0Cache } from "@/lib/auth0-cache";
 import { isDevRole } from "@/lib/ai-role";
 import { isSuperAdmin, isPrivilegedRoleName } from "@/lib/access";
 import { getCurrentRoles, getCurrentUserId } from "@/lib/current-user";
@@ -19,10 +21,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const userId = decodeURIComponent(id);
   const mgmt = getMgmtClient();
 
-  // Resolve role IDs to names to filter out the dev role
-  const allRoles = assign?.length || remove?.length
-    ? ((await mgmt.roles.list()) as any).data as any[]
-    : [];
+  // Resolve role IDs to names to filter out the dev role. Must see ALL roles —
+  // the privilege-escalation guard below relies on recognizing every admin-level
+  // role, so a truncated (first-page-only) list could let one slip through.
+  const allRoles = assign?.length || remove?.length ? await listAllRoles() : [];
   const devRoleIds = new Set(allRoles.filter((r: any) => isDevRole(r.name)).map((r: any) => r.id));
 
   const safeAssign = (assign ?? []).filter((rid) => !devRoleIds.has(rid));
@@ -66,5 +68,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (safeRemove.length) {
     await mgmt.users.roles.delete(userId, { roles: safeRemove });
   }
+  if (safeAssign.length || safeRemove.length) invalidateAuth0Cache();
   return NextResponse.json({ ok: true });
 }
