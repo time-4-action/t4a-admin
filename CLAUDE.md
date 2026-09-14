@@ -10,7 +10,13 @@ npm run build    # Build for production (outputs standalone bundle)
 npm run start    # Run the production build
 ```
 
-No linter or test runner is configured — there is no `lint` or `test` script in `package.json`.
+```bash
+npm test             # vitest (preorder business logic; Mongo tests use mongodb-memory-server)
+npm run typecheck    # tsc --noEmit
+npm run geo:build    # regenerate public/geo/*.json from world-atlas (output is committed)
+```
+
+No linter is configured.
 
 **Docker / production:**
 ```bash
@@ -69,6 +75,10 @@ MongoDB connection is cached on `global._mongooseConn` to survive Next.js hot-re
 | `UserLimit` | `userlimits` | Per-user spending cap with period (`daily/weekly/monthly/total`) and current spend. |
 | `Conversation` | `conversations` | One document per conversation; used only to count `convToday` on the dashboard. |
 | `BuilderPreset` | `builderpresets` | A saved Section Builder configuration, **shared** across everyone with builder access. `config` is the builder's own state blob (opaque to the server); carries creator/last-editor stamps, a `versionLabel`, a notes thread, and a capped version history. Index on `(builder, updatedAt)`. |
+| `PreorderCampaign` | `preordercampaigns` | One master order sheet (`tabs` → groups → rows) + embedded `markets[]`, `customerRules[]`, `priceBooks[]`, invite `shareToken`. See the Preorder module. |
+| `PreorderSubmission` | `preordersubmissions` | One partner's response per campaign (unique `(campaignId, partnerMkId)`): lines, totals, frozen `snapshot`, MK order reference `mkSalesOrder` + sync state `mkOrder`, publication flags, detached-order history. Indexes on `partnerMkId + mkOrder.state`, `mkSalesOrder.mkId`, `mkOrder.buyerOrder`. |
+| `PreorderAccess` | `preorderaccesses` | The invite grant (`(campaignId, partnerMkId)` unique) — the campaign access boundary. |
+| `MkCustomer` | `mkcustomers` | Directory of Metakocka partners (address, resolved country, manual country/pin, stale flag) feeding Markets & Customers; `MkCustomerSyncState` (singleton) tracks the full sync. |
 
 ### Dev-User Filtering
 
@@ -573,6 +583,180 @@ same `ADD_ATT_HIDDEN_*` attributes MK's own generator uses (dump a report's
 full parameter set by appending `&dump_for_report_rest=true` to its URL in the
 MK web app). Add further report attributes there, never in the routes.
 
+### Preorder module (`app/preorder/`, `app/portal/preorders/`)
+
+A B2B preorder platform: admins author ONE master campaign (an order sheet of
+tabs → groups → product rows with prices and per-tab volume-discount ladders),
+configure **markets** (country groups) and **customer overrides**, distribute a
+magic invite link, and customers fill the sheet in the portal. On submit a
+Metakocka `sales_order` is created **immediately**; staff then adjust the
+allocation in Metakocka, and an admin **publishes** the resulting order back to
+the customer. Gated by the `preorder` section
+(`SECTION_ROLES.preorder = ["admin", "preorder-admin"]`, role name via
+`NEXT_PUBLIC_PREORDER_ADMIN_ROLE_NAME` in `lib/preorder-role.ts`).
+
+**Access is invite-only, always.** A customer sees a campaign only with a
+`PreorderAccess` grant (created by opening the invite link while logged in as a
+matched Metakocka partner, `POST /api/portal/preorder/join`) or an existing
+submission (`partnerHasCampaignAccess` in `lib/preorder.ts`). Markets, countries,
+customer rules and directory membership never grant access; every portal route
+resolves the partner from the **session email** (`getSessionPartner`) and never
+from client input.
+
+| Page | Path | Notes |
+|---|---|---|
+| Campaigns | `/preorder` | List + create; `marketCount` / override badges. |
+| Overview | `/preorder/[id]` | KPIs (incl. In Metakocka / Published / Integration failures), latest preorders. Every campaign page carries the `CampaignNav` pills (Overview · Sheet · Markets & Customers · Preorders · Preview, `app/preorder/[campaignId]/campaign-nav.tsx`). |
+| Sheet | `/preorder/[id]/edit` | Builder (autosaves `tabs`). Row eye toggle = **restricted** (not in the default assortment). Re-price also refreshes the price books. |
+| Markets & Customers | `/preorder/[id]/markets` | Map / Markets / Customers views + contextual right drawers (`components/ui/drawer.tsx`, non-modal). See below. |
+| Preorders | `/preorder/[id]/submissions` | Full table with stage / Metakocka / visibility columns, filters incl. integration failures. |
+| Preorder detail | `/preorder/[id]/submissions/[sid]` | Three panels: **Requested preorder** (frozen snapshot), **Current Metakocka order** (live, compared line by line), **Customer visibility** (Show/Hide order to customer). Unlock detaches the MK order (optionally deletes it). |
+| Preview | `/preorder/[id]/preview` | Pick a partner (`?partner=<mkId>` deep link) → the sheet renders their **effective** campaign with an admin-only "Effective configuration" card (market, pricing, assortment, discounts, sources, warnings). "Fill for customer" submits through the same service as the portal. |
+| Portal | `/portal/preorders`, `/portal/preorders/[id]` | Customer list + fill page. After submit the page shows registration state (registering / saved-but-not-registered with Retry / processing) and, once published, **"Your confirmed order"** (requested vs confirmed per line, link to `/portal/orders/<mkId>`). |
+
+#### Effective campaign resolver (`lib/preorder-effective.ts`, pure)
+
+`resolveEffectiveCampaign(campaignAdmin, { partnerMkId, countryIso })` applies
+**customer rule > market > campaign default** per field and returns an
+`EffectiveCampaign` — a `PreorderCampaign`-shaped object (tabs filtered, row
+`partnerPrice` overlaid, `tab.tiers` replaced) plus an `effective` provenance
+block. Because the shape is unchanged, the pricing engine in `types/preorder.ts`
+(`computeTotals`, `rowUnitPrice`, …) and every fill component work on it as-is.
+The single server entry point is `loadEffectiveCampaignForPartner(doc, partner)`
+in `lib/preorder.ts` (portal GET, submit, admin preview, customer tables).
+
+- **Layers** are `CommercialConfig` objects (`partnerPricelist`, `currency`,
+  `deadline`, `note`, `minOrderAmount`, `hiddenIds`, `exposedIds`, `tiersByTab`).
+  An **absent** key inherits; a present key overrides — `tiersByTab: [{tabId, tiers: []}]`
+  means "no ladder on this tab", `hiddenIds: []` "hide nothing". Mongoose schemas
+  default these to `undefined` on purpose; read layers through `marketView` /
+  `customerRuleView`, never `"key" in subdoc` (sub-documents report every path).
+- **Market** = the rule's manual `marketId`, else the market whose `countries`
+  contain the partner's ISO code. A country belongs to at most one market
+  (validated in `lib/preorder-markets.ts`). Deleted market on a rule ⇒ warning +
+  country fallback. Unknown country ⇒ campaign defaults.
+- **Country** comes from MK's localized country *name* (get_partner has no ISO
+  code): `lib/countries.ts` (`i18n-iso-countries`, 13 locales + MK alias table,
+  `foreign_county=false` ⇒ `MK_HOME_COUNTRY`, default `SI`). A rule's `countryIso`
+  and the directory's `countryIsoManual` override it.
+- **Assortment**: default = rows without `restricted`; each layer removes rows
+  whose row / group / tab id is in `hiddenIds` and adds back ids in `exposedIds`
+  (exposed beats hidden within a layer). Empty groups/tabs are dropped; the
+  submit service validates quantities against the effective rows and drops the
+  rest (`dropped` in the response).
+- **Pricing**: the sheet's row prices ARE the campaign price list. A layer that
+  picks another list uses the campaign's **price book** for it
+  (`priceBooks[]`, refreshed by `POST …/price-books/refresh` and the builder's
+  Re-price via `lib/preorder-pricebooks.ts`); the book price replaces
+  `partnerPrice` and clears the manual `discountedPrice`; a missing entry keeps
+  the sheet price (`priceSource: "fallback"` + warning). No FX: a book currency
+  ≠ effective currency is a warning.
+- Deadline is display-only; `minOrderAmount` is enforced at customer submit only.
+
+#### Submission → Metakocka lifecycle (`lib/preorder-submit.ts`, `lib/preorder-mk.ts`)
+
+`saveOrSubmitPreorder()` is the one service behind
+`POST /api/portal/preorder/submissions` and `POST /api/admin/preorder/submissions`.
+Race safety without optimistic concurrency: each write is a single
+`findOneAndUpdate` upsert whose filter includes `status: "draft"` on the unique
+`(campaignId, partnerMkId)` slot — a locked document makes the filter miss, the
+upsert hits the unique index (E11000) ⇒ 409 `locked`. Submit stores the
+**commercial snapshot** (`snapshot`: resolved lines with unit prices, tiers,
+market, list, currency, sources — only ordered rows) and opens a registration
+window (`mkOrder.state = "pending"`, `submitRevision++`).
+
+`registerSalesOrder()` then creates the MK order from the **snapshot** (tier
+discount baked into `price_with_tax`; tax codes from `row.taxCode`, captured by
+`products/resolve` + `reprice`, batched MK read only for rows lacking one):
+
+1. **Lookup first, every time**: `get_document { doc_type: "sales_order", buyer_order }`
+   with the deterministic key `buyerOrderKey(id, rev) = T4A<id>.<rev>` (MK's
+   `buyer_order` is `char, 30`). Found ⇒ adopt. Inconclusive (MK down) ⇒ `failed`
+   without creating — never create blind.
+2. `put_document` (60 s budget — MK's own example takes ~48 s) with `buyer_order`,
+   `extra_column t4a_preorder_submission / t4a_preorder_campaign`,
+   `document_change_log_notes`. On failure re-lookup once, then `failed` +
+   `lastError`.
+3. Retries (`POST /api/portal/preorder/submissions/[id]/register` for the
+   customer, `POST /api/admin/preorder/submissions/[id]/sales-order` for admins)
+   take the lock from `failed` or a `pending` older than
+   `REGISTRATION_STALE_MS` (180 s). The MK calls go through an injectable
+   `MkOrderPort` (tests use `tests/helpers/mk-fake.ts`).
+
+`mkSalesOrder` (reference `{mkId, countCode, …}`, legacy shape) and `mkOrder`
+(sync state) are separate fields on purpose: the reference sub-schema has
+`required` fields, so a pending attempt must not live there. **Legacy
+submissions** (hand-pushed before this flow) have a reference and no `mkOrder`;
+they read as `stage: "registered"` and stay customer-visible — no migration.
+
+Publication: `POST …/submissions/[id]/publish { published }` re-reads the live
+order (a deleted order cannot be published), sets `resultPublishedToCustomer` /
+`At` / `By` and remembers `publishedHash` so later MK edits show as "changed
+since publish" to admins. **After publication the customer sees the live MK
+order** (`readSubmissionOrder`, 30 s single-flight cache per order via
+`cached()` in `lib/auth0-cache.ts`; `allocationFromDocument` in
+`lib/preorder-snapshot.ts` joins request vs order by product code). Unlocking a
+submission with an order requires `detachOrder` in the PATCH: the order moves to
+`mkSalesOrderHistory` (optionally `delete_document`) and the next submit uses a
+new revision key. Unlock is refused while a registration is in flight.
+
+**Documents filtering** (`lib/preorder-visibility.ts`): the customer's Orders
+list, order detail (`app/portal/portal-server.tsx`) and PDF route exclude sales
+orders that belong to an unpublished submission (`mkOrder.state = "created"` and
+not published) and every detached order — plus any order whose `buyer_order`
+matches `PREORDER_MARKER` (`/^T4A[0-9a-f]{24}\.\d{1,2}$/`) that is not a
+currently published one (orphans, lost links). The portal list's `total` is the
+filtered length. Admin `/api/admin/documents` stays unfiltered and returns a
+`preorder` annotation map for badges.
+
+Portal wire views never carry admin data: `toPortalCampaignView` strips markets,
+rules, price books, list names and provenance (only `effective.note` /
+`minOrderAmount` remain); `toPortalSubmissionView` strips MK ids and error text
+and exposes `registration: { state, canRetry }` + `published`.
+
+#### Markets & Customers (`app/preorder/[campaignId]/markets/`)
+
+- `models/mk-customer.ts` — the **customer directory**: every Metakocka partner
+  (`partnerMkId` unique, address, resolved `countryIso`, admin `countryIsoManual`,
+  `manualGeo` pin, `stale`). Filled by `POST /api/admin/preorder/customers/sync`
+  (one `get_partner { partner_name: "" }` pull, 120 s budget, `bulkWrite` in
+  batches; `MK_PARTNER_SYNC_MODE=sharded` falls back to per-letter queries) and
+  kept warm by cheap upserts on join / portal load / picker (`lib/mk-customers.ts`).
+  Metakocka is never called on a page render.
+- Map (`country-map.tsx`, d3-geo, loaded with `next/dynamic` `ssr:false`):
+  GeoJSON from `public/geo/{europe-50m,world-110m}.json` (built once by
+  `npm run geo:build` → `scripts/build-geo.ts` from `world-atlas`, ISO-2 ids +
+  largest-polygon centroids; commit the output). Countries painted per market
+  (`MARKET_COLORS` in `app/preorder/preorder-badges.tsx`), click / shift-click /
+  shift-drag selection, per-country customer bubbles, manual pins clustered in
+  screen space, hand-rolled pan/zoom (wheel listener attached non-passively).
+  **No geocoding provider**: MK has no coordinates; customers sit at the country
+  centroid unless an admin sets a pin (`PATCH /api/admin/preorder/customers/[id]`).
+- Config API under `/api/admin/preorder/campaigns/[id]/`: `markets` (GET, PUT
+  replace, POST create or `{assign:{marketId,countries}}`), `markets/[marketId]`
+  (PATCH, DELETE — rules pointing at it fall back to country), `customers`
+  (GET joined rows, `lib/preorder-customers.ts`), `customers/[partnerMkId]`
+  (GET detail + effective, PUT upsert rule, DELETE), `customers/geo` (per-country
+  aggregates + pins + sync state), `effective?partnerMkId=`,
+  `price-books/refresh`. Global: `/api/admin/preorder/customers` (directory
+  search), `…/customers/sync` (GET status / POST start),
+  `…/customers/[partnerMkId]` (GET, PATCH manual pin / country, POST refresh from MK).
+- `commercial-config-form.tsx` is the inheritance-aware editor shared by the
+  market and customer drawers: every field shows the inherited value + source
+  badge with **Override / Reset to inherited**; the inherited baseline is computed
+  client-side with the same pure resolver (campaign without that layer).
+
+Tests: `npm test` (vitest; `server-only` is stubbed, Mongo tests use
+`mongodb-memory-server`) — resolver precedence / assortment / pricing / tiers,
+snapshot immutability, countries, submit idempotency & race, MK failure/retry/
+adoption, publication, Documents visibility, markets API, directory upserts.
+`npm run typecheck` = `tsc --noEmit`.
+
+Optional env vars: `MK_HOME_COUNTRY` (default `SI`), `MK_PARTNER_SYNC_MODE`
+(`all` | `sharded`), `MK_DEFAULT_TAX_CODE` (last-resort MK tax code, default
+`EX4`), `MK_DEFAULT_VAT_RATE`, `PRODUCT_API_BASE` / `PRODUCT_API_KEY` (catalogue
+used by the sheet builder).
+
 ### API Routes (`app/api/admin/`)
 
 | Route | Methods | Notes |
@@ -615,6 +799,9 @@ NEXT_PUBLIC_PARTNER_ROLE_NAME         # Auth0 role that identifies a partner (de
 NEXT_PUBLIC_AUTOMATION_ADMIN_ROLE_NAME # Role that grants the Automation section (default: "automation-admin")
 NEXT_PUBLIC_BUILDER_ADMIN_ROLE_NAME  # Role that grants the Builder section (default: "builder-admin")
 NEXT_PUBLIC_DOCUMENTS_ADMIN_ROLE_NAME # Role that grants the Documents browse section (default: "documents-admin")
+NEXT_PUBLIC_PREORDER_ADMIN_ROLE_NAME  # Role that grants the Preorder section (default: "preorder-admin")
+MK_HOME_COUNTRY              # ISO-2 home country for domestic MK partners without an address country (default: SI)
+MK_PARTNER_SYNC_MODE         # Customer directory sync strategy: all (default) | sharded
 AUTH0_BASE_URL               # Production base URL (set by docker-compose)
 ```
 
