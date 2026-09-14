@@ -176,6 +176,19 @@
   .skeleton { animation: none; }
 }
 
+/* Markets map (app/preorder/[campaignId]/markets/country-map.tsx): land, borders and
+   the halo painted behind labels/bubbles so they stay legible on any market colour. */
+:root {
+  --map-land: oklch(0.80 0.012 240);
+  --map-border: oklch(0.98 0 0);
+  --map-halo: oklch(0.985 0.003 80);
+}
+.dark {
+  --map-land: oklch(0.34 0.01 240);
+  --map-border: oklch(0.20 0.008 240);
+  --map-halo: oklch(0.155 0.008 240);
+}
+
 /* Right-anchored side panel (components/ui/drawer.tsx). Radix stamps data-state. */
 @keyframes drawer-in {
   from { transform: translateX(100%); opacity: 0.6; }
