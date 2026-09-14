@@ -29,6 +29,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { Skeleton, stagger } from "@/components/ui/skeleton";
 import type {
   MkPricelistInfo,
   PricelistDiscovery,
@@ -346,7 +347,9 @@ export default function PricelistMappingEditor() {
           <h2 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">
             Price list mapping
           </h2>
-          {rows.length > 0 && (
+          {loading ? (
+            <Skeleton className="h-2.5 w-20" />
+          ) : rows.length > 0 && (
             <span className="text-[10px] text-muted-foreground tabular-nums">
               {enabledCount} of {rows.length} enabled
             </span>
@@ -398,14 +401,36 @@ export default function PricelistMappingEditor() {
       )}
 
       {loading ? (
-        <div className="rounded-xl border border-border bg-surface divide-y divide-border/50 overflow-hidden">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-4 px-4 py-3">
-              <div className="skeleton h-8 w-56 rounded-lg" style={{ animationDelay: `${i * 80}ms` }} />
-              <div className="skeleton h-8 w-56 rounded-lg" style={{ animationDelay: `${i * 80 + 40}ms` }} />
-              <div className="ml-auto skeleton h-8 w-20 rounded-lg" style={{ animationDelay: `${i * 80 + 80}ms` }} />
-            </div>
-          ))}
+        <div className="rounded-xl border border-border bg-surface overflow-hidden">
+          <div className="hidden md:grid grid-cols-[1fr_auto_1fr_6rem_5rem_2rem] gap-3 px-4 py-2 border-b border-border/60 bg-muted/30">
+            {["T4A price list (source)", "", "CREAGLOBE price list (target)", "Max change", "Enabled", ""].map((h, i) => (
+              <p key={i} className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {h}
+              </p>
+            ))}
+          </div>
+          <div className="divide-y divide-border/50">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="px-4 py-2.5">
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_6rem_5rem_2rem] gap-2 md:gap-3 items-center">
+                  <Skeleton className="h-8 w-full rounded-lg" delay={stagger(i)} />
+                  <ArrowRight className="hidden md:block w-4 h-4 text-muted-foreground/50 mx-auto shrink-0" />
+                  <Skeleton className="h-8 w-full rounded-lg" delay={stagger(i, 80, 40)} />
+                  <div className="flex items-center gap-1">
+                    <Skeleton className="h-8 w-16 rounded-md" delay={stagger(i, 80, 80)} />
+                    <span className="text-[11px] text-muted-foreground">%</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="w-11 h-6 rounded-full shrink-0" delay={stagger(i, 80, 120)} />
+                    <span className="md:hidden text-[11px] text-muted-foreground">Enabled</span>
+                  </div>
+                  <span className="p-1.5 justify-self-end">
+                    <Trash2 className="w-3.5 h-3.5 text-muted-foreground/30" />
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       ) : (
         <>

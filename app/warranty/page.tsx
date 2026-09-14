@@ -42,6 +42,7 @@ import {
   ChevronsUpDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonAvatar, SkeletonLine, stagger } from "@/components/ui/skeleton";
 
 type StatusFilter = "all" | WarrantyStatus | RejectedKey;
 type AssigneeFilter = "all" | "unassigned" | Assignee;
@@ -263,7 +264,9 @@ export default function ClaimsPage() {
             <h1 className="font-display text-lg font-medium tracking-tight text-foreground shrink-0">
               Warranty claims
             </h1>
-            {headerCount > 0 && (
+            {loading && headerCount === 0 ? (
+              <Skeleton className="h-5 w-8 rounded-full shrink-0" />
+            ) : headerCount > 0 && (
               <span className="text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0 tabular-nums">
                 {headerCount}
               </span>
@@ -406,7 +409,7 @@ function WarrantyCountStrip({
                   aria-hidden
                 />
                 {loading ? (
-                  <span className="h-4 w-5 rounded skeleton" />
+                  <Skeleton className="h-[15px] w-5" delay={i * 35} />
                 ) : (
                   <span
                     className={cn(
@@ -518,19 +521,26 @@ function ClaimsTable({
                   className="border-b border-border/60"
                 >
                   <TableCell className="pl-5 py-3">
-                    <div className="h-3 w-24 rounded skeleton" style={{ animationDelay: `${i * 80}ms` }} />
+                    <SkeletonLine lh="h-[18px]" w="w-24" delay={stagger(i)} />
                   </TableCell>
-                  <TableCell><div className="h-3 w-20 rounded skeleton" style={{ animationDelay: `${i * 80 + 20}ms` }} /></TableCell>
+                  <TableCell><SkeletonLine lh="h-[18px]" w="w-20" delay={stagger(i, 80, 20)} /></TableCell>
                   <TableCell>
-                    <div className="space-y-1.5">
-                      <div className="h-3 w-28 rounded skeleton" style={{ animationDelay: `${i * 80 + 40}ms` }} />
-                      <div className="h-2.5 w-36 rounded skeleton" style={{ animationDelay: `${i * 80 + 60}ms` }} />
+                    {/* leading-tight: 13px → 16.25px, 11px → 13.75px */}
+                    <SkeletonLine lh="h-4" w="w-28" delay={stagger(i, 80, 40)} />
+                    <SkeletonLine lh="h-[14px]" h="h-2.5" w="w-36" delay={stagger(i, 80, 60)} />
+                  </TableCell>
+                  <TableCell>
+                    <SkeletonLine lh="h-[19.5px]" w="w-32" delay={stagger(i, 80, 50)} />
+                    <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-24" delay={stagger(i, 80, 60)} />
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex h-7 w-[150px] items-center gap-1.5 rounded-md border border-input px-2">
+                      <SkeletonAvatar size="h-4 w-4" delay={stagger(i, 80, 70)} />
+                      <Skeleton className="h-3 w-20" delay={stagger(i, 80, 80)} />
                     </div>
                   </TableCell>
-                  <TableCell><div className="h-3 w-32 rounded skeleton" style={{ animationDelay: `${i * 80 + 50}ms` }} /></TableCell>
-                  <TableCell><div className="h-3 w-16 rounded skeleton" style={{ animationDelay: `${i * 80 + 70}ms` }} /></TableCell>
-                  <TableCell><div className="h-3 w-16 rounded skeleton" style={{ animationDelay: `${i * 80 + 80}ms` }} /></TableCell>
-                  <TableCell><div className="h-5 w-20 rounded-full skeleton" style={{ animationDelay: `${i * 80 + 90}ms` }} /></TableCell>
+                  <TableCell><SkeletonLine lh="h-[16.5px]" w="w-16" delay={stagger(i, 80, 80)} /></TableCell>
+                  <TableCell><Skeleton className="h-[26px] w-24 rounded-full" delay={stagger(i, 80, 90)} /></TableCell>
                   <TableCell />
                 </TableRow>
               );

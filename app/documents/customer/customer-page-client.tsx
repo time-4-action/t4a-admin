@@ -1,7 +1,7 @@
 "use client";
 import { Building2 } from "lucide-react";
 import CustomerHeader from "../customer-header";
-import CustomerProfile from "../customer-profile";
+import CustomerProfile, { CustomerProfileSkeleton } from "../customer-profile";
 import { useSelectedCustomer } from "../use-customer";
 
 // Admin Documents "Customer" page — the full profile of the selected customer.
@@ -14,13 +14,7 @@ export default function CustomerPageClient() {
       <div className="flex-1 overflow-y-auto py-6">
         <div className="px-4 md:px-8">
           {!ready ? (
-            <div className="space-y-4">
-              <div className="skeleton h-24 rounded-2xl" />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="skeleton h-40 rounded-2xl" />
-                <div className="skeleton h-40 rounded-2xl" />
-              </div>
-            </div>
+            <CustomerProfileSkeleton />
           ) : customer ? (
             <CustomerProfile customer={customer} />
           ) : (

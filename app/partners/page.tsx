@@ -20,6 +20,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonAvatar, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import type { PartnerListItem } from "@/types/partner";
 
 function initials(name: string, email: string): string {
@@ -121,7 +122,9 @@ export default function PartnersPage() {
             <h1 className="font-display text-lg font-medium tracking-tight text-foreground shrink-0">
               Partners
             </h1>
-            {!loading && (
+            {loading ? (
+              <Skeleton className="h-5 w-8 rounded-full shrink-0" />
+            ) : (
               <span className="text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0 tabular-nums">
                 {filtered.length}
               </span>
@@ -174,18 +177,32 @@ export default function PartnersPage() {
                   <TableRow key={`sk-${i}`} className="border-b border-border/60">
                     <TableCell className="pl-5 py-3">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-full skeleton" style={{ animationDelay: `${i * 80}ms` }} />
-                        <div className="space-y-1.5">
-                          <div className="h-3 w-28 rounded skeleton" style={{ animationDelay: `${i * 80 + 20}ms` }} />
-                          <div className="h-2.5 w-36 rounded skeleton" style={{ animationDelay: `${i * 80 + 40}ms` }} />
+                        <SkeletonAvatar size="w-7 h-7" delay={stagger(i)} />
+                        <div className="min-w-0">
+                          {/* leading-tight: 13px → 16.25px, 11px → 13.75px */}
+                          <SkeletonLine lh="h-4" w="w-28" delay={stagger(i, 80, 20)} />
+                          <SkeletonLine lh="h-[14px]" h="h-2.5" w="w-36" delay={stagger(i, 80, 40)} />
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell><div className="h-3 w-16 rounded skeleton" style={{ animationDelay: `${i * 80 + 50}ms` }} /></TableCell>
-                    <TableCell><div className="h-3 w-20 rounded skeleton" style={{ animationDelay: `${i * 80 + 60}ms` }} /></TableCell>
-                    <TableCell><div className="h-3 w-16 rounded skeleton" style={{ animationDelay: `${i * 80 + 70}ms` }} /></TableCell>
-                    <TableCell><div className="h-3 w-16 rounded skeleton" style={{ animationDelay: `${i * 80 + 80}ms` }} /></TableCell>
-                    <TableCell />
+                    {[
+                      { icon: Store, w: "w-10" },
+                      { icon: Download, w: "w-20" },
+                      { icon: Rss, w: "w-10" },
+                    ].map(({ icon: Icon, w }, j) => (
+                      <TableCell key={j}>
+                        <div className="flex items-center gap-1.5">
+                          <Icon className="w-3.5 h-3.5 text-muted-foreground" aria-hidden />
+                          <SkeletonLine lh="h-[18px]" w={w} delay={stagger(i, 80, 50 + j * 10)} />
+                        </div>
+                      </TableCell>
+                    ))}
+                    <TableCell><SkeletonLine lh="h-[18px]" w="w-16" delay={stagger(i, 80, 80)} /></TableCell>
+                    <TableCell className="pr-4">
+                      <div className="flex items-center justify-end">
+                        <ChevronRight className="w-4 h-4 text-muted-foreground/30" />
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))}
 

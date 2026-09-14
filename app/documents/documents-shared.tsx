@@ -1,9 +1,18 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Download,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
   FileText,
   ReceiptText,
   ClipboardList,
@@ -16,14 +25,17 @@ import {
   Globe,
   Image as ImageIcon,
   Truck,
+  MapPin,
   X,
 } from "lucide-react";
-import type {
-  DocDetail,
-  DocKind,
-  DocLine,
-  DocSummary,
-  PaymentState,
+import {
+  DOC_KIND_LABELS,
+  type DocDetail,
+  type DocKind,
+  type DocLine,
+  type DocSummary,
+  type MkPartnerRef,
+  type PaymentState,
 } from "@/types/documents";
 
 // Presentational + data building blocks shared by the customer B2B portal and
@@ -193,20 +205,17 @@ export function DocumentList({
 }) {
   const state = useDocumentList(listUrl, kind);
   const isInvoice = kind === "invoice";
+  const filters = useDocumentFilters(kind);
+  const allItems = state.status === "ready" ? state.items : EMPTY_ITEMS;
+  const sort = useDocumentSort(kind);
+  const filtered = useMemo(
+    () => sortDocuments(applyDocumentFilters(allItems, filters.value), sort.value),
+    [allItems, filters.value, sort.value],
+  );
+  const paging = usePaging(filtered.length, filters.value);
+  const pageItems = filtered.slice(paging.start, paging.start + PAGE_SIZE);
 
-  if (state.status === "loading") {
-    return (
-      <div className="divide-y divide-border/50 rounded-2xl border border-border bg-surface overflow-hidden">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="flex items-center gap-4 px-4 py-3.5" style={{ animationDelay: `${i * 80}ms` }}>
-            <div className="skeleton h-4 w-28 rounded" />
-            <div className="skeleton h-4 w-24 rounded" />
-            <div className="ml-auto skeleton h-4 w-20 rounded" />
-          </div>
-        ))}
-      </div>
-    );
-  }
+  if (state.status === "loading") return <DocumentListSkeleton kind={kind} />;
 
   if (state.status === "error") {
     return (
@@ -226,77 +235,488 @@ export function DocumentList({
     );
   }
 
+  const noun = DOC_KIND_LABELS[kind].plural.toLowerCase();
+
   return (
     <div className="space-y-4">
       {isInvoice && <InvoiceSummary items={state.items} />}
       <div className="rounded-2xl border border-border bg-surface overflow-hidden">
-        {/* Column header — widths match the rows below so they line up. */}
-        <div className="flex items-center gap-4 px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border/60 bg-muted/25">
-          <span className="flex-1 min-w-0">Document</span>
-          <span className="hidden sm:block w-16 text-center">Products</span>
-          <span className="w-44 text-right">Status</span>
-          <span className="w-28 text-right">Amount</span>
+        <DocumentFilterBar kind={kind} items={state.items} filters={filters} shown={filtered.length} />
+
+        {/* Column header — the same grid as the rows below. Sort lives on the
+            column headings; the status heading is the status filter itself. */}
+        <div className={cn(gridCols(kind), "hidden md:grid px-4 h-9 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border/60 bg-muted/25")}>
+          <SortHeader col="doc" sort={sort}>{DOC_KIND_LABELS[kind].singular}</SortHeader>
+          <SortHeader col="issued" sort={sort}>Issued</SortHeader>
+          {isInvoice && <SortHeader col="due" sort={sort}>Due</SortHeader>}
+          <SortHeader col="items" sort={sort} align="center">Items</SortHeader>
+          <StatusHeader kind={kind} items={state.items} filters={filters} />
+          <SortHeader col="amount" sort={sort} align="right">Amount</SortHeader>
         </div>
+
         <div className="divide-y divide-border/50">
-          {state.items.map((d) => {
-            const remaining = isInvoice ? amt(d.sumAll) - amt(d.sumPaid) : 0;
-            const showDue = isInvoice && d.payment && d.payment !== "na" && d.payment !== "paid" && remaining > 0.005;
-            const fresh = isNewOrder(d);
-            return (
-              <Link
-                key={d.mkId}
-                href={`${hrefBase}/${encodeURIComponent(d.mkId)}`}
-                className={cn(
-                  "group flex items-center gap-4 px-4 py-3.5 transition-colors focus-visible:outline-none",
-                  fresh
-                    ? "bg-lime-500/[0.07] hover:bg-lime-500/[0.12] focus-visible:bg-lime-500/[0.12]"
-                    : "hover:bg-muted/40 focus-visible:bg-muted/40",
-                )}
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-semibold text-foreground truncate group-hover:underline">
-                    {d.countCode}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                    {fmtDate(d.docDate)}
-                    {isInvoice && d.dueDate ? ` · due ${fmtDate(d.dueDate)}` : ""}
-                    {d.title ? ` · ${d.title}` : ""}
-                  </p>
-                </div>
-                <div className="hidden sm:block w-16 text-center shrink-0 text-[13px] text-muted-foreground tabular-nums">
-                  {d.itemCount ?? "—"}
-                </div>
-                <div className="w-44 flex items-center justify-end gap-2 shrink-0">
-                  {isInvoice ? (
-                    <PaymentBadge state={d.payment} />
-                  ) : (
-                    <>
-                      {isOnlineOrder(d) && <OnlineBadge />}
-                      {d.kind === "order" ? (
-                        <OrderStatusPill d={d} />
-                      ) : (
-                        <StatusPill label={d.statusDesc || d.statusCode} />
-                      )}
-                    </>
-                  )}
-                </div>
-                <div className="w-28 text-right shrink-0">
-                  <p className="text-[13px] font-semibold text-foreground tabular-nums">{fmtMoney(d.sumAll, d.currency)}</p>
-                  {showDue && (
-                    <p
-                      className={cn(
-                        "text-[11px] tabular-nums",
-                        d.payment === "overdue" ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400",
-                      )}
-                    >
-                      {fmtMoney(remaining.toFixed(2), d.currency)} due
-                    </p>
-                  )}
-                </div>
-              </Link>
-            );
-          })}
+          {pageItems.length === 0 && (
+            <div className="px-4 py-10 text-center text-[13px] text-muted-foreground">
+              No {noun} match these filters.{" "}
+              <button type="button" onClick={filters.reset} className="text-teal-600 dark:text-teal-400 hover:underline">
+                Clear filters
+              </button>
+            </div>
+          )}
+          {pageItems.map((d) => (
+            <DocumentRow
+              key={d.mkId}
+              d={d}
+              href={`${hrefBase}/${encodeURIComponent(d.mkId)}`}
+              activeStatus={filters.value.status}
+              onStatus={(key) => filters.set("status", filters.value.status === key ? "all" : key)}
+            />
+          ))}
         </div>
+        <Pager total={filtered.length} paging={paging} noun={noun} />
+      </div>
+    </div>
+  );
+}
+
+// The table grid. Every column gets a proportional share so the row reads as
+// a table at any width — no single column swallows the slack. Mobile collapses
+// to document + amount; the hidden columns fold into the document cell.
+function gridCols(kind: DocKind): string {
+  return kind === "invoice"
+    ? "grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.5fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-4"
+    : "grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,0.5fr)_minmax(0,1.2fr)_minmax(0,1fr)] items-center gap-x-4";
+}
+
+// Days from today to an ISO date (negative = past). Local midnight both sides.
+function daysUntil(iso?: string | null): number | undefined {
+  if (!iso) return undefined;
+  const target = new Date(iso + "T00:00:00").getTime();
+  if (!Number.isFinite(target)) return undefined;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target - today.getTime()) / 86_400_000);
+}
+
+// The due-date cell of an invoice row. It is the one thing a customer scans
+// the list for, so it is set large and coloured by urgency: overdue = rose
+// with the days overdue, due within a week = amber, settled = quiet.
+function DueCell({ d, compact = false }: { d: DocSummary; compact?: boolean }) {
+  if (!d.dueDate) return <span className="text-muted-foreground/50">—</span>;
+  const settled = d.payment === "paid" || d.payment === "na";
+  const days = daysUntil(d.dueDate);
+  let tone = "text-foreground";
+  let note: string | undefined;
+  if (settled) {
+    tone = "text-muted-foreground"; // the Paid pill already says it
+  } else if (d.payment === "overdue" || (days !== undefined && days < 0)) {
+    tone = "text-rose-600 dark:text-rose-400";
+    note = days === undefined ? "Overdue" : `${Math.abs(days)} ${Math.abs(days) === 1 ? "day" : "days"} overdue`;
+  } else if (days !== undefined && days <= 7) {
+    tone = "text-amber-600 dark:text-amber-400";
+    note = days === 0 ? "Due today" : days === 1 ? "Due tomorrow" : `Due in ${days} days`;
+  } else if (days !== undefined) {
+    note = `Due in ${days} days`;
+  }
+  if (compact) {
+    return (
+      <span className={cn("font-semibold", tone)}>
+        {fmtDate(d.dueDate)}
+        {note && <span className="font-normal opacity-80"> · {note}</span>}
+      </span>
+    );
+  }
+  return (
+    <div className="min-w-0">
+      <p className={cn("text-[15px] font-semibold tabular-nums leading-tight truncate", tone)}>{fmtDate(d.dueDate)}</p>
+      {note && <p className={cn("text-[11px] leading-tight mt-0.5 truncate", tone)}>{note}</p>}
+    </div>
+  );
+}
+
+function DocumentRow({
+  d,
+  href,
+  activeStatus,
+  onStatus,
+}: {
+  d: DocSummary;
+  href: string;
+  activeStatus: string;
+  onStatus: (key: string) => void;
+}) {
+  const isInvoice = d.kind === "invoice";
+  const fresh = isNewOrder(d);
+  const key = statusKey(d);
+  const status = (
+    <StatusFilterTrigger active={activeStatus === key} label={statusLabel(d.kind, key)} onClick={() => onStatus(key)}>
+      {isInvoice ? (
+        <PaymentBadge state={d.payment} />
+      ) : d.kind === "order" ? (
+        <OrderStatusPill d={d} />
+      ) : (
+        <StatusPill label={d.statusDesc || d.statusCode} />
+      )}
+    </StatusFilterTrigger>
+  );
+  const remaining = isInvoice ? amt(d.sumAll) - amt(d.sumPaid) : 0;
+  const partial = isInvoice && d.payment === "partial" && remaining > 0.005;
+
+  return (
+    <Link
+      href={href}
+      className={cn(
+        gridCols(d.kind),
+        "group px-4 py-3 transition-colors focus-visible:outline-none",
+        fresh
+          ? "bg-lime-500/[0.07] hover:bg-lime-500/[0.12] focus-visible:bg-lime-500/[0.12]"
+          : "hover:bg-muted/40 focus-visible:bg-muted/40",
+      )}
+    >
+      {/* Document */}
+      <div className="min-w-0">
+        <p className="text-[13px] font-semibold text-foreground truncate group-hover:underline">{d.countCode}</p>
+        {d.title && <p className="hidden md:block text-[11px] text-muted-foreground mt-0.5 truncate">{d.title}</p>}
+        {/* Folded-in columns on narrow screens */}
+        <p className="md:hidden text-[11px] text-muted-foreground mt-0.5 truncate">
+          {fmtDate(d.docDate)}
+          {d.title ? ` · ${d.title}` : ""}
+        </p>
+        {isInvoice && (
+          <p className="md:hidden text-[12px] mt-1">
+            <DueCell d={d} compact />
+          </p>
+        )}
+        <div className="md:hidden mt-1.5 flex items-center gap-1.5">
+          {!isInvoice && isOnlineOrder(d) && <OnlineBadge />}
+          {status}
+        </div>
+      </div>
+
+      {/* Issued */}
+      <p className="hidden md:block text-[13px] text-muted-foreground tabular-nums truncate">{fmtDate(d.docDate)}</p>
+
+      {/* Due (invoices) */}
+      {isInvoice && (
+        <div className="hidden md:block">
+          <DueCell d={d} />
+        </div>
+      )}
+
+      {/* Items */}
+      <p className="hidden md:block text-center text-[13px] text-muted-foreground tabular-nums">{d.itemCount ?? "—"}</p>
+
+      {/* Status */}
+      <div className="hidden md:flex items-center gap-1.5 min-w-0">
+        {!isInvoice && isOnlineOrder(d) && <OnlineBadge />}
+        {status}
+      </div>
+
+      {/* Amount */}
+      <div className="text-right self-start md:self-center">
+        <p className="text-[13px] font-semibold text-foreground tabular-nums">{fmtMoney(d.sumAll, d.currency)}</p>
+        {partial && (
+          <p className="text-[11px] tabular-nums text-amber-600 dark:text-amber-400">
+            {fmtMoney(remaining.toFixed(2), d.currency)} open
+          </p>
+        )}
+      </div>
+    </Link>
+  );
+}
+
+// A status pill inside a row link that filters the list by that status on
+// click (click again to clear). The row itself stays a plain <a>, so this is
+// a span with button semantics that swallows the click before the link sees
+// it; the active filter's pills get a ring so the state is visible in place.
+function StatusFilterTrigger({
+  active,
+  label,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  const fire = (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onClick();
+  };
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      title={active ? "Clear status filter" : `Show only ${label.toLowerCase()}`}
+      aria-pressed={active}
+      onClick={fire}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") fire(e);
+      }}
+      className={cn(
+        "inline-flex rounded-full transition-shadow hover:ring-2 hover:ring-teal-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        active && "ring-2 ring-teal-500",
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+// ── list filters + paging ────────────────────────────────────────────────────
+// Everything is client-side: the API already returns the partner's complete
+// list (every MK page merged), so search / status / amount just narrow that
+// array and the pager slices it. Filters reset the page to 1.
+
+export const PAGE_SIZE = 25;
+const EMPTY_ITEMS: DocSummary[] = [];
+
+type DocFilters = { q: string; status: string };
+const EMPTY_FILTERS: DocFilters = { q: "", status: "all" };
+
+function useDocumentFilters(kind: DocKind) {
+  const [value, setValue] = useState<DocFilters>(EMPTY_FILTERS);
+  // A different family (invoices → orders) starts with clean filters.
+  useEffect(() => setValue(EMPTY_FILTERS), [kind]);
+  const set = <K extends keyof DocFilters>(k: K, v: DocFilters[K]) => setValue((f) => ({ ...f, [k]: v }));
+  const active = value.q !== "" || value.status !== "all";
+  return { value, set, reset: () => setValue(EMPTY_FILTERS), active };
+}
+type DocFiltersApi = ReturnType<typeof useDocumentFilters>;
+
+// The status key a document is filtered by: invoices by payment state, orders
+// by MK's fulfilment status, anything else by its raw status text.
+function statusKey(d: DocSummary): string {
+  if (d.kind === "invoice") return d.payment ?? "na";
+  return (d.statusDesc || d.statusCode || "").toLowerCase() || "unknown";
+}
+
+function statusLabel(kind: DocKind, key: string): string {
+  if (kind === "invoice") return key === "na" ? "Nothing due" : (PAYMENT_META[key as PaymentState]?.label ?? key);
+  if (kind === "order" && ORDER_STATUS_META[key]) return ORDER_STATUS_META[key].label;
+  const pretty = key.replace(/_/g, " ");
+  return pretty.charAt(0).toUpperCase() + pretty.slice(1);
+}
+
+function applyDocumentFilters(items: DocSummary[], f: DocFilters): DocSummary[] {
+  const q = f.q.trim().toLowerCase();
+  return items.filter((d) => {
+    if (q && !`${d.countCode} ${d.title ?? ""}`.toLowerCase().includes(q)) return false;
+    if (f.status !== "all" && statusKey(d) !== f.status) return false;
+    return true;
+  });
+}
+
+// ── sorting ──────────────────────────────────────────────────────────────────
+
+type SortCol = "doc" | "issued" | "due" | "items" | "amount";
+type DocSort = { col: SortCol; dir: "asc" | "desc" };
+const DEFAULT_SORT: DocSort = { col: "issued", dir: "desc" };
+
+function useDocumentSort(kind: DocKind) {
+  const [value, setValue] = useState<DocSort>(DEFAULT_SORT);
+  useEffect(() => setValue(DEFAULT_SORT), [kind]);
+  // First click sorts the way people expect for that column (newest / largest
+  // first for dates and numbers, A→Z for the number), second click flips it.
+  const toggle = (col: SortCol) =>
+    setValue((v) =>
+      v.col === col ? { col, dir: v.dir === "asc" ? "desc" : "asc" } : { col, dir: col === "doc" ? "asc" : "desc" },
+    );
+  return { value, toggle };
+}
+type DocSortApi = ReturnType<typeof useDocumentSort>;
+
+function sortDocuments(items: DocSummary[], sort: DocSort): DocSummary[] {
+  const dir = sort.dir === "asc" ? 1 : -1;
+  const num = (v: number | undefined) => (v === undefined || !Number.isFinite(v) ? Number.NEGATIVE_INFINITY : v);
+  const cmp = (a: DocSummary, b: DocSummary): number => {
+    switch (sort.col) {
+      case "doc":
+        return a.countCode.localeCompare(b.countCode, undefined, { numeric: true });
+      case "issued":
+        return (a.docDate ?? "").localeCompare(b.docDate ?? "");
+      case "due":
+        return (a.dueDate ?? "").localeCompare(b.dueDate ?? "");
+      case "items":
+        return num(a.itemCount) - num(b.itemCount);
+      case "amount":
+        return num(toNum(a.sumAll)) - num(toNum(b.sumAll));
+    }
+  };
+  return [...items].sort((a, b) => cmp(a, b) * dir);
+}
+
+function SortHeader({
+  col,
+  sort,
+  align = "left",
+  children,
+}: {
+  col: SortCol;
+  sort: DocSortApi;
+  align?: "left" | "center" | "right";
+  children: React.ReactNode;
+}) {
+  const active = sort.value.col === col;
+  const Icon = !active ? ArrowUpDown : sort.value.dir === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <button
+      type="button"
+      onClick={() => sort.toggle(col)}
+      aria-sort={active ? (sort.value.dir === "asc" ? "ascending" : "descending") : "none"}
+      className={cn(
+        "group/sort inline-flex items-center gap-1 h-full min-w-0 uppercase tracking-wide transition-colors hover:text-foreground focus-visible:outline-none focus-visible:text-foreground",
+        align === "center" && "justify-center",
+        align === "right" && "justify-end",
+        active && "text-foreground",
+      )}
+    >
+      <span className="truncate">{children}</span>
+      <Icon
+        className={cn(
+          "h-3 w-3 shrink-0 transition-opacity",
+          active ? "opacity-100 text-teal-500" : "opacity-0 group-hover/sort:opacity-60",
+        )}
+      />
+    </button>
+  );
+}
+
+// The "Status" heading doubles as the status filter: a borderless select in
+// the header row, listing only the statuses present (with counts).
+function StatusHeader({ kind, items, filters }: { kind: DocKind; items: DocSummary[]; filters: DocFiltersApi }) {
+  const statuses = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const d of items) seen.set(statusKey(d), (seen.get(statusKey(d)) ?? 0) + 1);
+    return Array.from(seen.entries()).sort((a, b) => b[1] - a[1]);
+  }, [items]);
+  const active = filters.value.status !== "all";
+  return (
+    <div className="min-w-0 flex items-center">
+      <Select value={filters.value.status} onValueChange={(v) => filters.set("status", v)}>
+        <SelectTrigger
+          size="sm"
+          aria-label="Filter by status"
+          className={cn(
+            "h-6 max-w-full gap-1 rounded-md border-0 bg-transparent px-1.5 -ml-1.5 shadow-none text-[10px] font-semibold uppercase tracking-wide",
+            "hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring dark:bg-transparent dark:hover:bg-muted [&_svg]:size-3",
+            active ? "text-teal-600 dark:text-teal-400" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <SelectValue placeholder="Status" />
+        </SelectTrigger>
+        <SelectContent align="start">
+          <SelectItem value="all" className="text-xs">
+            <span className="uppercase tracking-wide font-semibold">Status</span>
+            <span className="ml-1 normal-case tracking-normal font-normal text-muted-foreground">all</span>
+          </SelectItem>
+          {statuses.map(([key, n]) => (
+            <SelectItem key={key} value={key} className="text-xs">
+              <span className="uppercase tracking-wide font-semibold">{statusLabel(kind, key)}</span>
+              <span className="ml-1 normal-case tracking-normal font-normal text-muted-foreground tabular-nums">{n}</span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function usePaging(count: number, resetKey: unknown) {
+  const [page, setPage] = useState(1);
+  // Any filter change (or a new list) jumps back to the first page.
+  useEffect(() => setPage(1), [resetKey]);
+  const pages = Math.max(1, Math.ceil(count / PAGE_SIZE));
+  const current = Math.min(page, pages);
+  return { page: current, pages, start: (current - 1) * PAGE_SIZE, setPage };
+}
+type Paging = ReturnType<typeof usePaging>;
+
+function DocumentFilterBar({
+  kind,
+  items,
+  filters,
+  shown,
+}: {
+  kind: DocKind;
+  items: DocSummary[];
+  filters: DocFiltersApi;
+  shown: number;
+}) {
+  // Search + count only; the status filter sits in the table header.
+  const f = filters.value;
+  const noun = DOC_KIND_LABELS[kind].plural.toLowerCase();
+
+  const field = "h-8 text-xs bg-background";
+
+  return (
+    <div className="px-3 py-2.5 border-b border-border/60 flex flex-wrap items-center gap-2">
+      <div className="relative w-full sm:w-56">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" aria-hidden />
+        <Input
+          placeholder={`Search ${noun}…`}
+          value={f.q}
+          onChange={(e) => filters.set("q", e.target.value)}
+          aria-label={`Search ${noun}`}
+          className={cn(field, "pl-8 w-full")}
+        />
+      </div>
+
+      {filters.active && (
+        <button
+          type="button"
+          onClick={filters.reset}
+          className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-[12px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <X className="h-3.5 w-3.5" /> Clear
+        </button>
+      )}
+
+      <p className="ml-auto text-[12px] text-muted-foreground tabular-nums">
+        {filters.active ? (
+          <>
+            <span className="font-semibold text-foreground">{shown}</span> of {items.length} {noun}
+          </>
+        ) : (
+          <>
+            <span className="font-semibold text-foreground">{items.length}</span> {noun}
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
+
+// Footer under the table: "1–25 of 132" + prev / next. Hidden when the
+// (filtered) list fits on one page so a short list stays a plain table.
+function Pager({ total, paging, noun }: { total: number; paging: Paging; noun: string }) {
+  if (total <= PAGE_SIZE) return null;
+  const from = paging.start + 1;
+  const to = Math.min(total, paging.start + PAGE_SIZE);
+  const btn =
+    "inline-flex items-center gap-1 h-8 px-2.5 rounded-md border border-border text-[12px] font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors disabled:opacity-40 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-border/60 bg-muted/20">
+      <p className="text-[12px] text-muted-foreground tabular-nums">
+        {from}–{to} of {total} {noun}
+      </p>
+      <div className="flex items-center gap-1.5">
+        <button type="button" className={btn} disabled={paging.page <= 1} onClick={() => paging.setPage(paging.page - 1)}>
+          <ChevronLeft className="h-3.5 w-3.5" /> Previous
+        </button>
+        <span className="text-[12px] text-muted-foreground tabular-nums px-1.5">
+          Page {paging.page} of {paging.pages}
+        </span>
+        <button
+          type="button"
+          className={btn}
+          disabled={paging.page >= paging.pages}
+          onClick={() => paging.setPage(paging.page + 1)}
+        >
+          Next <ChevronRight className="h-3.5 w-3.5" />
+        </button>
       </div>
     </div>
   );
@@ -559,15 +979,20 @@ export function DocumentDetail({
   pdfHref,
   backHref,
   showPartner = false,
+  showLinks = true,
   wide = false,
 }: {
   detail: DocDetail;
   pdfHref?: string;
   backHref?: string;
   showPartner?: boolean;
+  // Related documents (offers, delivery notes, …) are internal — the admin
+  // view shows them, the customer portal passes false.
+  showLinks?: boolean;
   wide?: boolean;
 }) {
   const isInvoice = detail.kind === "invoice";
+  const isOrder = detail.kind === "order";
   const currency = detail.currency;
   const online = isOnlineOrder(detail);
   const KindIcon = online ? Globe : KIND_ICON[detail.kind];
@@ -641,6 +1066,9 @@ export function DocumentDetail({
         </div>
       )}
 
+      {/* Billing + delivery addresses (invoices and orders) */}
+      {(isInvoice || isOrder) && detail.partner && <AddressesCard detail={detail} />}
+
       {/* Line items */}
       {detail.lines.length > 0 && (
         <div className="rounded-2xl border border-border bg-surface overflow-hidden">
@@ -654,6 +1082,7 @@ export function DocumentDetail({
           <div className="flex items-center gap-3 px-4 py-2 text-[10px] uppercase tracking-wide text-muted-foreground border-b border-border/40">
             <span className="flex-1 min-w-0">Product</span>
             <span className="hidden sm:block w-16 text-right shrink-0">Qty</span>
+            {isOrder && <span className="hidden sm:block w-16 text-right shrink-0">Shipped</span>}
             <span className="hidden sm:block w-24 text-right shrink-0">Price</span>
             <span className="hidden sm:block w-14 text-right shrink-0">Disc</span>
             <span className="w-24 text-right shrink-0">Total</span>
@@ -681,12 +1110,24 @@ export function DocumentDetail({
                       {l.amount ?? "—"}
                       {l.unit ? ` ${l.unit}` : ""} × {fmtMoney(l.price ?? l.priceWithTax, currency)}
                       {disc > 0 ? ` · −${disc}%` : ""}
+                      {isOrder && l.shipped !== undefined && (
+                        <>
+                          {" · "}
+                          <ShippedQty line={l} />
+                          {" shipped"}
+                        </>
+                      )}
                     </p>
                   </div>
                   <span className="hidden sm:block w-16 text-right text-[12px] text-muted-foreground tabular-nums shrink-0">
                     {l.amount ?? "—"}
                     {l.unit ? ` ${l.unit}` : ""}
                   </span>
+                  {isOrder && (
+                    <span className="hidden sm:block w-16 text-right text-[12px] tabular-nums shrink-0">
+                      <ShippedQty line={l} />
+                    </span>
+                  )}
                   <span className="hidden sm:block w-24 text-right text-[12px] text-muted-foreground tabular-nums shrink-0">
                     {fmtMoney(l.price ?? l.priceWithTax, currency)}
                   </span>
@@ -726,16 +1167,16 @@ export function DocumentDetail({
       {/* Payment (invoices) */}
       {isInvoice && <PaymentPanel detail={detail} />}
 
-      {/* Notes (rendered HTML, sanitized server-side) */}
+      {/* Additional instructions (MK notes_header; rendered HTML, sanitized server-side) */}
       {detail.notes && (
         <div className="rounded-2xl border border-border bg-surface px-4 py-3.5">
-          <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">Notes</p>
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">Additional instructions</p>
           <div className="doc-notes" dangerouslySetInnerHTML={{ __html: detail.notes }} />
         </div>
       )}
 
-      {/* Related documents — typed */}
-      {detail.links.length > 0 && (
+      {/* Related documents — typed; team-only */}
+      {showLinks && detail.links.length > 0 && (
         <div className="rounded-2xl border border-border bg-surface px-4 py-3.5">
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">Related documents</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -756,6 +1197,296 @@ export function DocumentDetail({
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Shipped quantity for an order line, coloured by fulfilment: all shipped →
+// green, some → amber, none → dimmed. Falls back to "—" when unknown.
+function ShippedQty({ line }: { line: DocLine }) {
+  if (line.shipped === undefined) return <span className="text-muted-foreground/40">—</span>;
+  const shipped = toNum(line.shipped) ?? 0;
+  const ordered = toNum(line.amount) ?? 0;
+  const tone =
+    shipped <= 0
+      ? "text-muted-foreground/60"
+      : shipped >= ordered
+        ? "text-emerald-600 dark:text-emerald-400"
+        : "text-amber-600 dark:text-amber-400";
+  return (
+    <span className={cn("font-medium", tone)}>
+      {line.shipped}
+      {line.unit ? ` ${line.unit}` : ""}
+    </span>
+  );
+}
+
+// One postal address as MK printed it on the document. Lines are skipped when
+// the partner record lacks them, so a name-only receiver still renders.
+function AddressBlock({ label, party, note }: { label: string; party: MkPartnerRef; note?: string }) {
+  const cityLine = [party.postNumber, party.city].filter(Boolean).join(" ");
+  const country = party.country
+    ? `${party.country}${party.countryIso ? ` (${party.countryIso})` : ""}`
+    : party.countryIso;
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-[13px] font-semibold text-foreground mt-0.5 break-words">{party.name || "—"}</p>
+      <div className="text-[12px] text-muted-foreground leading-snug mt-0.5 break-words">
+        {party.street && <p>{party.street}</p>}
+        {cityLine && <p>{cityLine}</p>}
+        {country && <p>{country}</p>}
+        {party.taxId && <p className="mt-1 text-[11px]">VAT {party.taxId}</p>}
+        {(party.email || party.phone) && (
+          <p className="mt-1 text-[11px]">{[party.email, party.phone].filter(Boolean).join(" · ")}</p>
+        )}
+      </div>
+      {note && <p className="text-[11px] italic text-muted-foreground/70 mt-1">{note}</p>}
+    </div>
+  );
+}
+
+// Billing + delivery addresses. MK's `partner` is the billing party; `receiver`
+// is set only when goods go somewhere else, so its absence means "same".
+function AddressesCard({ detail }: { detail: DocDetail }) {
+  const billing = detail.partner!;
+  const delivery = detail.receiver ?? billing;
+  const same = !detail.receiver;
+  return (
+    <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center gap-2">
+        <MapPin className="h-3.5 w-3.5 text-teal-500" />
+        <span className="text-[12px] font-semibold text-foreground">Addresses</span>
+        {detail.deliveryType && (
+          <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+            <Truck className="h-3.5 w-3.5" /> {detail.deliveryType}
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-border/60">
+        <div className="px-4 py-3">
+          <AddressBlock label="Billing address" party={billing} />
+        </div>
+        <div className="px-4 py-3">
+          <AddressBlock label="Delivery address" party={delivery} note={same ? "Same as billing address" : undefined} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── skeleton twins ───────────────────────────────────────────────────────────
+// Structural copies of DocumentList / DocumentDetail. The card chrome, column
+// headers and section labels are static and render for real; only the document
+// data shimmers. Used by both the in-component loading state and the route-level
+// loading.tsx files (portal + admin), so the list and detail pages never change
+// shape between "loading" and "loaded".
+
+export function DocumentListSkeleton({ kind, rows = 8 }: { kind: DocKind; rows?: number }) {
+  const isInvoice = kind === "invoice";
+  return (
+    <div className="space-y-4">
+      {isInvoice && (
+        <div className="grid grid-cols-3 rounded-2xl border border-border bg-surface overflow-hidden divide-x divide-border/60">
+          {["Invoiced", "Paid", "Outstanding"].map((label, i) => (
+            <div key={label} className="px-4 py-3">
+              <p className="text-[11px] text-muted-foreground">{label}</p>
+              {/* text-[15px] → 22.5px; text-[10px] → 15px */}
+              <SkeletonLine lh="h-[22.5px]" h="h-4" w="w-24" className="mt-0.5" delay={stagger(i, 60)} />
+              <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-14" className="mt-0.5" delay={stagger(i, 60, 30)} />
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+        {/* Toolbar — search, status, amount range, count (all h-8). */}
+        <div className="px-3 py-2.5 border-b border-border/60 flex flex-wrap items-center gap-2">
+          <Skeleton className="h-8 w-full sm:w-56 rounded-md" delay={0} />
+          <SkeletonLine lh="h-[18px]" h="h-3" w="w-20" className="ml-auto" delay={120} />
+        </div>
+        <div className={cn(gridCols(kind), "hidden md:grid px-4 h-9 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border/60 bg-muted/25")}>
+          <span className="self-center">{DOC_KIND_LABELS[kind].singular}</span>
+          <span className="self-center">Issued</span>
+          {isInvoice && <span className="self-center">Due</span>}
+          <span className="self-center text-center">Items</span>
+          <span className="self-center">Status</span>
+          <span className="self-center text-right">Amount</span>
+        </div>
+        <div className="divide-y divide-border/50">
+          {Array.from({ length: rows }).map((_, i) => (
+            <div key={i} className={cn(gridCols(kind), "px-4 py-3")}>
+              <div className="min-w-0">
+                {/* text-[13px] → 19.5px; text-[11px] → 16.5px */}
+                <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-28" delay={stagger(i)} />
+                <SkeletonLine lh="h-[16.5px]" h="h-2.5" w={["w-40", "w-24", "w-48", "w-32"][i % 4]} className="mt-0.5" delay={stagger(i, 80, 20)} />
+                <div className="md:hidden mt-1.5"><Skeleton className="h-[20.5px] w-16 rounded-full" delay={stagger(i, 80, 60)} /></div>
+              </div>
+              <div className="hidden md:block"><SkeletonLine lh="h-[19.5px]" h="h-3" w="w-24" delay={stagger(i, 80, 30)} /></div>
+              {isInvoice && (
+                <div className="hidden md:block">
+                  {/* text-[15px] leading-tight → 18px; text-[11px] → 14px */}
+                  <SkeletonLine lh="h-[18px]" h="h-3.5" w="w-28" delay={stagger(i, 80, 40)} />
+                  <SkeletonLine lh="h-[14px]" h="h-2.5" w="w-20" className="mt-0.5" delay={stagger(i, 80, 50)} />
+                </div>
+              )}
+              <div className="hidden md:flex justify-center"><SkeletonLine lh="h-[19.5px]" w="w-5" delay={stagger(i, 80, 40)} /></div>
+              <div className="hidden md:flex items-center"><Skeleton className="h-[20.5px] w-16 rounded-full" delay={stagger(i, 80, 60)} /></div>
+              <div className="flex justify-end self-start md:self-center"><SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-20" delay={stagger(i, 80, 80)} /></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function DocumentDetailSkeleton({
+  kind,
+  showPartner = false,
+  wide = false,
+  lines = 4,
+}: {
+  kind: DocKind;
+  showPartner?: boolean;
+  wide?: boolean;
+  lines?: number;
+}) {
+  const isInvoice = kind === "invoice";
+  const isOrder = kind === "order";
+  const KindIcon = KIND_ICON[kind];
+  const kindLabel = kind.charAt(0).toUpperCase() + kind.slice(1);
+  return (
+    <div className={cn("px-4 md:px-8 py-6 md:py-8 space-y-4 overflow-y-auto h-full", wide ? "" : "max-w-5xl mx-auto")}>
+      <span className="inline-block text-[12px] text-muted-foreground">← Back</span>
+
+      {/* Hero */}
+      <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+        <div className="px-5 py-4 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <KindIcon className="h-3.5 w-3.5 text-teal-500" /> {kindLabel}
+            </div>
+            {/* text-xl md:text-2xl → 28px / 32px line box */}
+            <SkeletonLine lh="h-7 md:h-8" h="h-5 md:h-6" w="w-40" className="mt-1" delay={40} />
+            <div className="mt-2 flex items-center gap-x-3">
+              <SkeletonLine lh="h-[18px]" w="w-32" delay={80} />
+              {isInvoice && <SkeletonLine lh="h-[18px]" w="w-24" delay={100} />}
+            </div>
+          </div>
+          <Skeleton className="h-[20.5px] w-16 rounded-full shrink-0" delay={60} />
+        </div>
+        <div className="px-5 py-3 border-t border-border/60 bg-muted/20 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-[11px] text-muted-foreground">Total</p>
+            {/* text-2xl leading-none → 24px */}
+            <Skeleton className="h-6 w-28 mt-0.5 rounded-md" delay={120} />
+          </div>
+          <Skeleton className="h-[34px] w-[130px] rounded-xl shrink-0" delay={140} />
+        </div>
+      </div>
+
+      {showPartner && (
+        <div className="rounded-2xl border border-border bg-surface px-4 py-3 flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted shrink-0">
+            <Building2 className="h-4 w-4 text-muted-foreground" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Customer</p>
+            <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-48" delay={160} />
+            <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-24" delay={180} />
+          </div>
+        </div>
+      )}
+
+      {/* Addresses (invoices and orders) */}
+      {(isInvoice || isOrder) && (
+        <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center gap-2">
+            <MapPin className="h-3.5 w-3.5 text-teal-500" />
+            <span className="text-[12px] font-semibold text-foreground">Addresses</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-border/60">
+            {["Billing address", "Delivery address"].map((label, i) => (
+              <div key={label} className="px-4 py-3">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+                <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-44" className="mt-0.5" delay={stagger(i, 40, 180)} />
+                <SkeletonLine lh="h-[17px]" h="h-2.5" w="w-36" className="mt-0.5" delay={stagger(i, 40, 200)} />
+                <SkeletonLine lh="h-[17px]" h="h-2.5" w="w-28" delay={stagger(i, 40, 220)} />
+                <SkeletonLine lh="h-[17px]" h="h-2.5" w="w-20" delay={stagger(i, 40, 240)} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Line items */}
+      <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
+          <span className="text-[12px] font-semibold text-foreground">Products</span>
+          <Skeleton className="h-[20.5px] w-7 rounded-full" delay={200} />
+        </div>
+        <div className="flex items-center gap-3 px-4 py-2 text-[10px] uppercase tracking-wide text-muted-foreground border-b border-border/40">
+          <span className="flex-1 min-w-0">Product</span>
+          <span className="hidden sm:block w-16 text-right shrink-0">Qty</span>
+          {isOrder && <span className="hidden sm:block w-16 text-right shrink-0">Shipped</span>}
+          <span className="hidden sm:block w-24 text-right shrink-0">Price</span>
+          <span className="hidden sm:block w-14 text-right shrink-0">Disc</span>
+          <span className="w-24 text-right shrink-0">Total</span>
+        </div>
+        <div className="divide-y divide-border/50">
+          {Array.from({ length: lines }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+              <Skeleton className="h-10 w-10 rounded-lg shrink-0" delay={stagger(i, 60, 220)} />
+              <div className="min-w-0 flex-1">
+                <SkeletonLine lh="h-[19.5px]" h="h-3.5" w={["w-56", "w-40", "w-64", "w-48"][i % 4]} delay={stagger(i, 60, 240)} />
+                <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-20" delay={stagger(i, 60, 260)} />
+                <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-32" className="sm:hidden mt-0.5" delay={stagger(i, 60, 260)} />
+              </div>
+              <div className="hidden sm:flex w-16 justify-end shrink-0"><SkeletonLine lh="h-[18px]" w="w-8" delay={stagger(i, 60, 280)} /></div>
+              {isOrder && (
+                <div className="hidden sm:flex w-16 justify-end shrink-0"><SkeletonLine lh="h-[18px]" w="w-8" delay={stagger(i, 60, 290)} /></div>
+              )}
+              <div className="hidden sm:flex w-24 justify-end shrink-0"><SkeletonLine lh="h-[18px]" w="w-16" delay={stagger(i, 60, 300)} /></div>
+              <div className="hidden sm:flex w-14 justify-end shrink-0"><SkeletonLine lh="h-[18px]" w="w-4" delay={stagger(i, 60, 320)} /></div>
+              <div className="flex w-24 justify-end shrink-0"><SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-16" delay={stagger(i, 60, 340)} /></div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Totals */}
+      <div className="rounded-2xl border border-border bg-surface px-4 py-3">
+        {["Subtotal", "Tax"].map((label, i) => (
+          <div key={label} className="flex items-baseline justify-between gap-4 py-1">
+            <span className="text-[12px] text-muted-foreground">{label}</span>
+            <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-20" delay={stagger(i, 60, 400)} />
+          </div>
+        ))}
+        <div className="border-t border-border/60 mt-1.5 pt-2">
+          <div className="flex items-baseline justify-between gap-4 py-1">
+            <span className="text-[12px] font-semibold text-foreground">Total</span>
+            <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-24" delay={520} />
+          </div>
+        </div>
+      </div>
+
+      {/* Payment (invoices) */}
+      {isInvoice && (
+        <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
+            <span className="text-[12px] font-semibold text-foreground">Payment</span>
+            <Skeleton className="h-[20.5px] w-16 rounded-full" delay={540} />
+          </div>
+          <div className="grid grid-cols-3 divide-x divide-border/50">
+            {["Paid", "Remaining", "Due date"].map((label, i) => (
+              <div key={label} className="px-4 py-3">
+                <p className="text-[11px] text-muted-foreground">{label}</p>
+                <SkeletonLine lh="h-[22.5px]" h="h-4" w="w-20" className="mt-0.5" delay={stagger(i, 60, 560)} />
+              </div>
+            ))}
           </div>
         </div>
       )}

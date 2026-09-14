@@ -26,7 +26,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChangeLogModal } from "@/components/change-log-modal";
-import { AuditHistory } from "@/components/audit-history";
+import { AuditHistory, AuditHistoryCardSkeleton } from "@/components/audit-history";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { useWarrantyAssignees } from "../use-assignees";
 
 // Collapse whitespace and cap long values so the history diff for free-text
@@ -402,10 +403,12 @@ export default function WarrantySettingsPage() {
       </div>
 
       {/* Sticky save bar — same pattern as the original, just nicer states */}
-      {settings && (
+      {(settings || !loadError) && (
         <div className="border-t border-border bg-background/95 backdrop-blur-sm sticky bottom-0 z-10">
           <div className="max-w-3xl mx-auto px-4 md:px-8 py-3 flex items-center gap-3">
-            {saveError ? (
+            {!settings ? (
+              <SkeletonLine lh="h-[18px]" w="w-28" />
+            ) : saveError ? (
               <p className="flex items-center gap-1.5 text-[12px] text-destructive">
                 <AlertCircle className="w-3.5 h-3.5" />
                 {saveError}
@@ -431,7 +434,7 @@ export default function WarrantySettingsPage() {
                   saved && "bg-emerald-600 hover:bg-emerald-600 border-emerald-600",
                 )}
                 onClick={() => setModalOpen(true)}
-                disabled={!dirty || saving || saved}
+                disabled={!settings || !dirty || saving || saved}
               >
                 {saved ? (
                   <span className="flex items-center gap-1.5">
@@ -509,7 +512,7 @@ function SectionCard({
   accent?: Accent;
   title: string;
   description?: string;
-  meta?: string;
+  meta?: React.ReactNode;
   delay?: number;
   children: React.ReactNode;
 }) {
@@ -835,50 +838,129 @@ function Toggle({
 }
 
 // ── Loading skeleton ────────────────────────────────────────────────────────
+// Structural twin of the three SectionCards + history card above: the cards,
+// titles, field labels and token buttons are static chrome and render for
+// real — only the values (inputs, textareas, chips, toggles) shimmer.
+const noop = () => {};
+
+function InputSkeleton({ delay = 0 }: { delay?: number }) {
+  return <Skeleton className="h-9 w-full rounded-md" delay={delay} />;
+}
+
+/** rows=4 → 4×19.5px + 16px padding + 2px border = 96px; rows=3 → 76.5px. */
+function TextareaSkeleton({ rows, delay = 0 }: { rows: 3 | 4; delay?: number }) {
+  return (
+    <Skeleton
+      className={cn("w-full rounded-md", rows === 4 ? "h-[96px]" : "h-[76.5px]")}
+      delay={delay}
+    />
+  );
+}
+
+function ChecklistSkeleton({ count, delay = 0 }: { count: number; delay?: number }) {
+  return (
+    <div className="rounded-lg border border-border/70 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 bg-muted/30 border-b border-border/60">
+        <SkeletonLine lh="h-[16.5px]" w="w-16" delay={delay} />
+        <SkeletonLine lh="h-[16.5px]" w="w-14" delay={delay + 20} />
+      </div>
+      <ul className="grid grid-cols-1 sm:grid-cols-2 gap-px bg-border/40">
+        {Array.from({ length: count }).map((_, i) => (
+          <li key={i} className="bg-background">
+            <div className="flex items-center justify-between gap-3 px-3 py-2">
+              <SkeletonLine lh="h-[18px]" w={["w-24", "w-32", "w-20", "w-28"][i % 4]} delay={delay + i * 20} />
+              <Skeleton className="h-[18px] w-[30px] rounded-full shrink-0" delay={delay + i * 20 + 10} />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function LoadingSkeleton() {
   return (
     <>
-      {[0, 1, 2].map((s) => (
-        <div
-          key={s}
-          className="bg-background border border-border rounded-2xl shadow-sm overflow-hidden"
-        >
-          <div className="px-5 py-4 border-b border-border/60 flex items-start gap-3">
-            <div
-              className="skeleton w-8 h-8 rounded-lg shrink-0"
-              style={{ animationDelay: `${s * 80}ms` }}
-            />
-            <div className="flex-1 space-y-1.5 mt-0.5">
-              <div
-                className="skeleton h-3 w-40 rounded"
-                style={{ animationDelay: `${s * 80 + 20}ms` }}
-              />
-              <div
-                className="skeleton h-2.5 w-60 max-w-full rounded"
-                style={{ animationDelay: `${s * 80 + 40}ms` }}
-              />
-            </div>
-            <div
-              className="skeleton h-4 w-14 rounded-full"
-              style={{ animationDelay: `${s * 80 + 60}ms` }}
-            />
-          </div>
-          <div className="p-5 space-y-4">
-            {[0, 1, 2].map((r) => (
-              <div key={r} className="space-y-1.5">
-                <div
-                  className="skeleton h-2 w-20 rounded"
-                  style={{ animationDelay: `${s * 80 + r * 50}ms` }}
-                />
-                <div
-                  className="skeleton h-8 w-full rounded-md"
-                  style={{ animationDelay: `${s * 80 + r * 50 + 25}ms` }}
-                />
-              </div>
+      <SectionCard
+        icon={Users}
+        accent="blue"
+        title="Admin recipients"
+        description="Every warranty submission BCCs each of these addresses. Recipients don't need an admin login."
+        meta={<Skeleton className="h-5 w-20 rounded-full" />}
+        delay={0}
+      >
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-1.5 min-h-[28px]">
+            {["w-44", "w-36", "w-52"].map((w, i) => (
+              <Skeleton key={w} className={cn("h-7 rounded-full", w)} delay={stagger(i, 60)} />
             ))}
           </div>
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Mail
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/70 pointer-events-none"
+                aria-hidden
+              />
+              <Input disabled placeholder="someone@example.com" className="h-8 pl-8 text-[13px]" readOnly />
+            </div>
+            <Button type="button" variant="outline" size="sm" className="h-8 text-xs gap-1.5" disabled>
+              <Plus className="w-3 h-3" />
+              Add
+            </Button>
+          </div>
         </div>
-      ))}
+      </SectionCard>
+
+      <SectionCard
+        icon={Mail}
+        accent="emerald"
+        title="Customer confirmation email"
+        description="Sent to the customer immediately after they submit the warranty form."
+        meta={<Skeleton className="h-5 w-16 rounded-full" />}
+        delay={60}
+      >
+        <Field label="Subject" tokens={SUBJECT_TOKENS_CUSTOMER} onInsertToken={noop}>
+          <InputSkeleton delay={80} />
+          <SkeletonLine lh="h-[16.5px]" w="w-64" h="h-2.5" delay={100} />
+        </Field>
+        <Field label="Intro text" hint="Free-form paragraphs. Blank line = new paragraph.">
+          <TextareaSkeleton rows={4} delay={120} />
+        </Field>
+        <Field label="Outro text" hint="Shown after the receipt button, before the signoff.">
+          <TextareaSkeleton rows={3} delay={160} />
+        </Field>
+        <Field
+          label="Detail rows shown to the customer"
+          hint="Toggle off to remove a row from the receipt table in the email."
+        >
+          <ChecklistSkeleton count={CUSTOMER_FIELD_KEYS.length} delay={200} />
+        </Field>
+      </SectionCard>
+
+      <SectionCard
+        icon={Megaphone}
+        accent="amber"
+        title="Admin notification email"
+        description="Sent to every recipient above whenever a warranty form is submitted."
+        meta={<Skeleton className="h-5 w-20 rounded-full" />}
+        delay={120}
+      >
+        <Field label="Subject" tokens={SUBJECT_TOKENS_ADMIN} onInsertToken={noop}>
+          <InputSkeleton delay={240} />
+          <SkeletonLine lh="h-[16.5px]" w="w-64" h="h-2.5" delay={260} />
+        </Field>
+        <Field label="Intro text" hint="Appears under the header. Leave blank for no intro paragraph.">
+          <TextareaSkeleton rows={3} delay={280} />
+        </Field>
+        <Field
+          label="Submission fields included"
+          hint='Toggle off to omit a row from the email. "Uploaded files (section)" toggles the entire uploads block.'
+        >
+          <ChecklistSkeleton count={ADMIN_FIELD_KEYS.length} delay={320} />
+        </Field>
+      </SectionCard>
+
+      <AuditHistoryCardSkeleton />
     </>
   );
 }

@@ -10,6 +10,7 @@ import {
   Settings2, Loader2, Check, X, Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 
 interface Role { id: string; name: string; description?: string }
 interface Permission {
@@ -30,6 +31,18 @@ function getRoleKind(name: string): RoleKind {
 }
 
 const permKey = (identifier: string, scope: string) => `${identifier}||${scope}`;
+
+// Twin of the permission chip row (mono `px-1.5 py-0.5` chips ≈ 22px tall).
+const CHIP_WIDTHS = ["w-24", "w-32", "w-20", "w-28", "w-36", "w-24"];
+function PermChipsSkeleton({ count, delay = 0 }: { count: number; delay?: number }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {Array.from({ length: count }).map((_, i) => (
+        <Skeleton key={i} className={cn("h-[22px] rounded-md", CHIP_WIDTHS[i % CHIP_WIDTHS.length])} delay={delay + i * 30} />
+      ))}
+    </div>
+  );
+}
 
 export default function RolesPage() {
   const [roles, setRoles] = useState<Role[]>([]);
@@ -220,7 +233,9 @@ export default function RolesPage() {
         <header className="h-14 border-b border-border flex items-center justify-between px-4 md:px-8 shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
           <div className="flex items-center gap-2">
             <h1 className="font-display text-lg font-medium tracking-tight text-foreground">Access Types</h1>
-            {roles.length > 0 && (
+            {loading ? (
+              <Skeleton className="h-[19px] w-7 rounded-full" />
+            ) : roles.length > 0 && (
               <span className="text-[10px] font-semibold text-muted-foreground bg-muted px-2 py-0.5 rounded-full tabular-nums">
                 {roles.length}
               </span>
@@ -243,9 +258,22 @@ export default function RolesPage() {
           )}
 
           {loading ? (
-            <div className="space-y-2">
-              {[0, 1, 2].map(i => (
-                <div key={i} className="skeleton h-[72px] rounded-2xl" style={{ animationDelay: `${i * 100}ms` }} />
+            <div className="bg-background border border-border rounded-2xl overflow-hidden divide-y divide-border/60">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="flex items-start gap-4 px-5 py-4">
+                  <Skeleton className="w-8 h-8 rounded-xl shrink-0 mt-0.5" delay={stagger(i, 100)} />
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-28" delay={stagger(i, 100, 30)} />
+                      <SkeletonLine lh="h-[19.5px]" w="w-48" delay={stagger(i, 100, 60)} />
+                    </div>
+                    <PermChipsSkeleton count={[5, 3, 6, 2][i]} delay={stagger(i, 100, 90)} />
+                  </div>
+                  <div className="flex items-center gap-0.5 shrink-0 mt-0.5">
+                    <Skeleton className="h-7 w-7 rounded-md" delay={stagger(i, 100, 120)} />
+                    <Skeleton className="h-7 w-7 rounded-md" delay={stagger(i, 100, 150)} />
+                  </div>
+                </div>
               ))}
             </div>
           ) : roles.length === 0 ? (
@@ -313,10 +341,7 @@ export default function RolesPage() {
 
                       {/* Permissions */}
                       {grouped === null ? (
-                        <div className="flex items-center gap-1.5">
-                          <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
-                          <span className="text-[11px] text-muted-foreground">Loading permissions…</span>
-                        </div>
+                        <PermChipsSkeleton count={4} />
                       ) : Object.keys(grouped).length === 0 ? (
                         <p className="text-[11px] text-muted-foreground/50">No permissions assigned</p>
                       ) : (
@@ -459,7 +484,7 @@ export default function RolesPage() {
           </div>
 
           {/* Search */}
-          {!serversLoading && servers.length > 0 && (
+          {(serversLoading || servers.length > 0) && (
             <div className="px-5 py-3 border-b border-border shrink-0">
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
@@ -469,6 +494,7 @@ export default function RolesPage() {
                   onChange={e => setEditSearch(e.target.value)}
                   className="pl-8 h-8 text-xs bg-background"
                   autoFocus={false}
+                  disabled={serversLoading}
                 />
                 {editSearch && (
                   <button
@@ -485,15 +511,21 @@ export default function RolesPage() {
           {/* Body */}
           <div className="flex-1 overflow-y-auto">
             {serversLoading ? (
-              <div className="p-5 space-y-3">
-                {[80, 60, 90, 50, 70, 65].map((w, i) => (
-                  <div key={i} className="flex items-center gap-3 px-1">
-                    <div className="skeleton w-4 h-4 rounded shrink-0" style={{ animationDelay: `${i * 50}ms` }} />
-                    <div className="skeleton h-3 rounded" style={{ width: w * 2, animationDelay: `${i * 50 + 30}ms` }} />
-                    <div className="skeleton h-2.5 rounded flex-1" style={{ animationDelay: `${i * 50 + 60}ms` }} />
-                  </div>
-                ))}
-              </div>
+              <>
+                <div className="flex items-center justify-between px-5 py-2 border-b border-border/60 bg-muted/10 shrink-0">
+                  <SkeletonLine lh="h-[16.5px]" w="w-24" />
+                  <SkeletonLine lh="h-[16.5px]" w="w-14" />
+                </div>
+                <div className="divide-y divide-border/30">
+                  {[80, 60, 90, 50, 70, 65, 55, 85].map((w, i) => (
+                    <div key={i} className="w-full flex items-center gap-3 px-5 py-2.5">
+                      <Skeleton className="w-4 h-4 rounded shrink-0" delay={stagger(i, 50)} />
+                      <SkeletonLine lh="h-[18px]" style={{ width: w * 2 }} w="" delay={stagger(i, 50, 30)} />
+                      <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="flex-1" className="flex-1" delay={stagger(i, 50, 60)} />
+                    </div>
+                  ))}
+                </div>
+              </>
             ) : serversError ? (
               <div className="m-4 flex items-center gap-2 px-4 py-3 rounded-xl bg-destructive/8 border border-destructive/15 text-xs text-destructive">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />

@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonAvatar, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   Search,
   X,
@@ -367,7 +368,9 @@ export function AccessManager({
             <h1 className="font-display text-lg font-medium tracking-tight text-foreground shrink-0">
               {title}
             </h1>
-            {users.length > 0 && (
+            {loading ? (
+              <Skeleton className="h-5 w-10 rounded-full shrink-0" />
+            ) : users.length > 0 && (
               <span
                 className="text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0 tabular-nums"
                 title={`${grantedAll} of ${users.length} have access`}
@@ -415,6 +418,9 @@ export function AccessManager({
                   )}
                 >
                   {t.label}
+                  {loading ? (
+                    <Skeleton className="h-4 w-6 rounded-full" />
+                  ) : (
                   <span
                     className={cn(
                       "tabular-nums text-[10px] font-semibold rounded-full px-1.5 py-px",
@@ -425,6 +431,7 @@ export function AccessManager({
                   >
                     {t.count}
                   </span>
+                  )}
                 </button>
               );
             })}
@@ -451,24 +458,16 @@ export function AccessManager({
             <div className="rounded-2xl border border-border/60 bg-background shadow-sm overflow-hidden divide-y divide-border/50">
               {[...Array(8)].map((_, i) => (
                 <div key={i} className="flex items-center gap-3 px-4 py-3">
-                  <div
-                    className="skeleton w-[34px] h-[34px] rounded-full shrink-0"
-                    style={{ animationDelay: `${i * 60}ms` }}
-                  />
-                  <div className="flex-1 space-y-1.5">
-                    <div
-                      className="skeleton h-3 w-32 rounded"
-                      style={{ animationDelay: `${i * 60 + 20}ms` }}
-                    />
-                    <div
-                      className="skeleton h-2.5 w-48 rounded"
-                      style={{ animationDelay: `${i * 60 + 40}ms` }}
-                    />
+                  <SkeletonAvatar size="w-[34px] h-[34px]" delay={stagger(i, 60)} />
+                  <div className="min-w-0 flex-1">
+                    {/* leading-tight: 13px → 16.25px, 11px → 13.75px */}
+                    <SkeletonLine lh="h-4" w="w-32" delay={stagger(i, 60, 20)} />
+                    <SkeletonLine lh="h-[14px]" h="h-2.5" w="w-48" delay={stagger(i, 60, 40)} />
                   </div>
-                  <div
-                    className="skeleton h-[22px] w-10 rounded-full shrink-0"
-                    style={{ animationDelay: `${i * 60 + 60}ms` }}
-                  />
+                  {i % 3 === 0 && (
+                    <Skeleton className="hidden sm:block h-5 w-24 rounded-full shrink-0" delay={stagger(i, 60, 50)} />
+                  )}
+                  <Skeleton className="h-[22px] w-10 rounded-full shrink-0" delay={stagger(i, 60, 60)} />
                 </div>
               ))}
             </div>

@@ -26,6 +26,7 @@ import {
 import { fmtMoney } from "@/app/preorder/preorder-shared";
 import { computeConfirmedTotals } from "@/types/preorder";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   TabBar,
   TabTierBanner,
@@ -33,6 +34,9 @@ import {
   PreorderGuidedTab,
   OrderSummaryPanel,
   PreorderReviewModal,
+  SheetHeaderSkeleton,
+  PreorderGridSkeleton,
+  OrderSummaryPanelSkeleton,
 } from "@/app/preorder/preorder-shared";
 import {
   LINE_STATUS_LABELS,
@@ -200,9 +204,50 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
 
   if (loading) {
     return (
-      <div className="p-6 md:p-8 space-y-4">
-        <div className="h-6 w-56 rounded skeleton" />
-        <div className="h-96 rounded-xl skeleton" />
+      <div className="flex flex-col h-full">
+        <SheetHeaderSkeleton
+          backHref="/portal/preorders"
+          right={
+            <div className="hidden sm:flex items-center gap-0.5 rounded-lg border border-border p-0.5">
+              <span className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] bg-muted text-foreground font-medium"><Table2 className="w-3.5 h-3.5" /> Grid</span>
+              <span className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-muted-foreground"><LayoutGrid className="w-3.5 h-3.5" /> Store</span>
+            </div>
+          }
+        />
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
+            <div className="min-w-0">
+              <PreorderGridSkeleton />
+              <section className="mt-6 rounded-xl border border-border bg-surface p-4">
+                <h2 className="text-[13px] font-semibold text-foreground mb-3">Your details</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    { label: "Name" }, { label: "Country" },
+                    { label: "Invoice address", wide: true }, { label: "Shipping address", wide: true },
+                    { label: "Phone" }, { label: "Requested delivery" },
+                  ].map(({ label, wide }, i) => (
+                    <div key={label} className={wide ? "sm:col-span-2" : undefined}>
+                      <label className="text-[11px] font-medium text-muted-foreground">{label}</label>
+                      <Skeleton className="mt-1 h-9 w-full rounded-md" delay={stagger(i, 40, 300)} />
+                    </div>
+                  ))}
+                  <div className="sm:col-span-2">
+                    <label className="text-[11px] font-medium text-muted-foreground">Comment</label>
+                    <Skeleton className="mt-1 h-[74px] w-full rounded-md" delay={560} />
+                  </div>
+                </div>
+              </section>
+            </div>
+            <aside className="lg:sticky lg:top-4 space-y-3">
+              <OrderSummaryPanelSkeleton />
+              <div className="rounded-xl border border-border bg-surface p-3 space-y-2">
+                <Button className="w-full" disabled><Eye className="w-4 h-4" /> Preview &amp; submit</Button>
+                <Button variant="outline" className="w-full" disabled><Check className="w-4 h-4" /> Save draft</Button>
+                <p className="text-[11px] text-muted-foreground text-center pt-0.5">Once submitted, your preorder is locked.</p>
+              </div>
+            </aside>
+          </div>
+        </div>
       </div>
     );
   }

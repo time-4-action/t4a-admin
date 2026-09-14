@@ -39,6 +39,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { humanizeCron } from "@/lib/cron";
 import {
   parseRunDetails,
@@ -980,6 +981,103 @@ export function RunHistoryTable({
   );
 }
 
+// ── skeleton twins ──────────────────────────────────────────────────────────
+// Structural copies of SyncCard and RunHistoryTable: static chrome (icon,
+// title, description, stat labels, table headers, buttons) renders for real
+// and only the live values shimmer, so the loaded cards drop in without a shift.
+
+export function SyncCardSkeleton({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: React.ElementType;
+  title: string;
+  description: string;
+}) {
+  const stat = (label: string, w: string, delay: number) => (
+    <Stat label={label} value={<SkeletonLine lh="h-[18px]" w={w} className="justify-end" delay={delay} />} />
+  );
+  return (
+    <div className="bg-surface border border-border rounded-xl p-4 flex flex-col gap-3">
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="w-8 h-8 rounded-lg border bg-sky-500/10 border-sky-500/20 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0">
+              <Icon className="w-4 h-4" />
+            </span>
+            <h2 className="text-[13px] font-medium text-foreground truncate">{title}</h2>
+          </div>
+          <Skeleton className="h-[16.5px] w-14 rounded-full" />
+        </div>
+        <p className="text-[11px] leading-relaxed text-muted-foreground">{description}</p>
+      </div>
+
+      <div className="divide-y divide-border/60">
+        <div className="flex items-center justify-between gap-3 py-1 text-[12px]">
+          <span className="text-muted-foreground">Runs</span>
+          <span className="flex items-center gap-1.5 min-w-0">
+            <SkeletonLine lh="h-[18px]" w="w-28" />
+            <Pencil className="w-3 h-3 text-muted-foreground/40 shrink-0" />
+          </span>
+        </div>
+        {stat("Next run", "w-16", 40)}
+        {stat("Last run", "w-16", 80)}
+        {stat("Took", "w-12", 120)}
+        {stat("Last outcome", "w-24", 160)}
+      </div>
+
+      <div className="flex items-center gap-2 mt-auto pt-1">
+        <Button size="sm" className="h-8 text-xs gap-1.5 flex-1" disabled>
+          <Play className="w-3.5 h-3.5" />
+          Run now
+        </Button>
+        <Skeleton className="h-8 w-[84px] rounded-md" delay={200} />
+      </div>
+    </div>
+  );
+}
+
+export function RunHistoryTableSkeleton({ rows = 5, showType = true }: { rows?: number; showType?: boolean }) {
+  return (
+    <div className="bg-surface border border-border rounded-xl overflow-auto">
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent border-b border-border">
+            <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9 pl-5">When</TableHead>
+            {showType && <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">What</TableHead>}
+            <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">How</TableHead>
+            <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Outcome</TableHead>
+            <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Took</TableHead>
+            <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">Items</TableHead>
+            <TableHead className="h-9 w-[40px] pr-5" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {Array.from({ length: rows }).map((_, i) => (
+            <TableRow key={i} className="border-b border-border/60">
+              <TableCell className="pl-5 py-2.5"><SkeletonLine lh="h-[18px]" w="w-32" delay={stagger(i, 60)} /></TableCell>
+              {showType && <TableCell className="py-2.5"><SkeletonLine lh="h-[18px]" w="w-16" delay={stagger(i, 60, 10)} /></TableCell>}
+              <TableCell className="py-2.5"><Skeleton className="h-[21px] w-[72px] rounded" delay={stagger(i, 60, 20)} /></TableCell>
+              <TableCell className="py-2.5">
+                <div className="inline-flex items-center gap-1.5">
+                  <Skeleton className="w-3.5 h-3.5 rounded-full" delay={stagger(i, 60, 40)} />
+                  <SkeletonLine lh="h-[18px]" w="w-14" delay={stagger(i, 60, 50)} />
+                </div>
+              </TableCell>
+              <TableCell className="py-2.5"><SkeletonLine lh="h-[18px]" w="w-10" delay={stagger(i, 60, 60)} /></TableCell>
+              <TableCell className="py-2.5"><SkeletonLine lh="h-[18px]" w="w-8" delay={stagger(i, 60, 70)} /></TableCell>
+              <TableCell className="pr-5 py-2.5 text-right">
+                <ChevronRight className="w-4 h-4 text-muted-foreground/30 inline" />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 // ── data hook ───────────────────────────────────────────────────────────────
 
 // Fetches the combined automation status (both syncs + their run history), exposes the
@@ -1189,7 +1287,7 @@ export function SingleSyncPage({
             </Link>
             <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
             <h1 className="font-display text-lg font-medium tracking-tight text-foreground shrink-0">{title}</h1>
-            {status && <StatusPill tone={tone} />}
+            {status ? <StatusPill tone={tone} /> : loading && <Skeleton className="h-[16.5px] w-14 rounded-full" />}
           </div>
           <div className="flex items-center gap-2">
             {previewable && (
@@ -1228,12 +1326,12 @@ export function SingleSyncPage({
         )}
 
         {loading && !status ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-surface border border-border rounded-xl p-4 space-y-3">
-              <div className="h-8 w-40 rounded skeleton" />
-              <div className="h-3 w-full rounded skeleton" />
-              <div className="h-3 w-3/4 rounded skeleton" />
-              <div className="h-8 w-full rounded skeleton" />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+            <SyncCardSkeleton icon={Icon} title={title} description={description} />
+            {/* "How it works" is static prose — render it for real. */}
+            <div className="bg-surface border border-border rounded-xl p-4 space-y-2">
+              <h2 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">How it works</h2>
+              <div className="text-[12px] leading-relaxed text-muted-foreground space-y-2">{howItWorks}</div>
             </div>
           </div>
         ) : (
@@ -1260,13 +1358,17 @@ export function SingleSyncPage({
 
         {extra}
 
-        {status && (
+        {(status || loading) && (
           <section className="space-y-2">
             <div className="flex items-center gap-2 px-0.5">
               <Clock className="w-3.5 h-3.5 text-muted-foreground" />
               <h2 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Run history</h2>
             </div>
-            <RunHistoryTable runs={runs} onOpen={setOpenRun} showType={false} />
+            {status ? (
+              <RunHistoryTable runs={runs} onOpen={setOpenRun} showType={false} />
+            ) : (
+              <RunHistoryTableSkeleton showType={false} />
+            )}
           </section>
         )}
       </div>

@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import React from "react";
 import {
   BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -9,6 +8,7 @@ import {
 import { useCurrency } from "@/lib/currency-context";
 import { EUR_USD_RATE } from "@/lib/currency";
 import { DollarSign, Euro, Users, MessageSquare } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // Wired through CSS custom properties so dark mode swaps automatically.
 const CHART_COLORS = [
@@ -41,13 +41,6 @@ function PieTooltip({ active, payload }: any) {
   );
 }
 
-function Skeleton({ className, style }: { className?: string; style?: React.CSSProperties }) {
-  return <div className={cn("skeleton rounded-lg", className)} style={style} />;
-}
-
-function cn(...classes: (string | undefined | false)[]) {
-  return classes.filter(Boolean).join(" ");
-}
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<any>(null);
@@ -86,10 +79,10 @@ export default function DashboardPage() {
                 <div key={i} className="bg-background border border-border rounded-xl px-5 py-4">
                   <div className="flex items-start justify-between">
                     <div className="flex-1 space-y-2.5 mt-0.5">
-                      <Skeleton className="h-2.5 w-20" style={{ animationDelay: `${i * 100}ms` }} />
-                      <Skeleton className="h-7 w-24" style={{ animationDelay: `${i * 100 + 60}ms` }} />
+                      <Skeleton className="h-2.5 w-20 rounded-lg" delay={i * 100} />
+                      <Skeleton className="h-7 w-24 rounded-lg" delay={i * 100 + 60} />
                     </div>
-                    <Skeleton className="w-8 h-8 rounded-lg shrink-0" style={{ animationDelay: `${i * 100 + 30}ms` }} />
+                    <Skeleton className="w-8 h-8 rounded-lg shrink-0" delay={i * 100 + 30} />
                   </div>
                 </div>
               ))
@@ -110,27 +103,28 @@ export default function DashboardPage() {
           {/* Bar chart — Cost by user */}
           {!stats ? (
             <div className="bg-background border border-border rounded-xl p-5">
-              <Skeleton className="h-3 w-20 mb-5" />
+              <Skeleton className="h-3 w-20 mb-5 rounded-lg" />
               <div className="flex gap-3 h-[220px]">
-                <div className="flex flex-col justify-between py-1 shrink-0">
+                <div className="flex flex-col justify-between py-1 shrink-0 w-[60px] items-end pr-1">
                   {[0,1,2,3,4].map(i => (
-                    <Skeleton key={i} className="h-2 w-10 rounded" style={{ animationDelay: `${i * 40}ms` }} />
+                    <Skeleton key={i} className="h-2 w-10 rounded" delay={i * 40} />
                   ))}
                 </div>
                 <div className="flex-1 flex flex-col gap-1">
                   <div className="flex-1 flex items-end gap-2 pb-1">
                     {[55, 85, 40, 100, 65, 75, 30].map((h, i) => (
-                      <div
+                      <Skeleton
                         key={i}
-                        className="flex-1 skeleton rounded-t"
-                        style={{ height: `${h}%`, animationDelay: `${i * 60}ms` }}
+                        className="flex-1 rounded-t"
+                        style={{ height: `${h}%` }}
+                        delay={i * 60}
                       />
                     ))}
                   </div>
                   <div className="flex gap-2 pt-1">
                     {[0,1,2,3,4,5,6].map(i => (
                       <div key={i} className="flex-1 flex justify-center">
-                        <Skeleton className="h-2 w-8 rounded" style={{ animationDelay: `${i * 50}ms` }} />
+                        <Skeleton className="h-2 w-8 rounded" delay={i * 50} />
                       </div>
                     ))}
                   </div>
@@ -163,20 +157,20 @@ export default function DashboardPage() {
           {/* Pie chart — Cost by model */}
           {!stats ? (
             <div className="bg-background border border-border rounded-xl p-5">
-              <Skeleton className="h-3 w-24 mb-5" />
+              <Skeleton className="h-3 w-24 mb-5 rounded-lg" />
               <div className="flex flex-col sm:flex-row items-center gap-6 sm:gap-10">
                 <div className="shrink-0 w-[180px] h-[180px] relative">
-                  <div className="absolute inset-0 rounded-full skeleton" />
+                  <Skeleton className="absolute inset-0 rounded-full" />
                   <div className="absolute inset-[30px] rounded-full bg-background" />
                 </div>
-                <ul className="flex-1 space-y-3 w-full">
+                <ul className="flex-1 space-y-2 w-full">
                   {[80, 60, 100, 45, 70].map((w, i) => (
                     <li key={i} className="flex items-center justify-between gap-4">
                       <div className="flex items-center gap-2.5">
-                        <Skeleton className="w-2 h-2 rounded-full shrink-0" style={{ animationDelay: `${i * 60}ms` }} />
-                        <Skeleton className="h-2.5 rounded" style={{ width: w, animationDelay: `${i * 60 + 30}ms` }} />
+                        <Skeleton className="w-2 h-2 rounded-full shrink-0" delay={i * 60} />
+                        <Skeleton className="h-2.5 rounded" style={{ width: w }} delay={i * 60 + 30} />
                       </div>
-                      <Skeleton className="h-2.5 w-10 rounded shrink-0" style={{ animationDelay: `${i * 60 + 60}ms` }} />
+                      <Skeleton className="h-2.5 w-10 rounded shrink-0" delay={i * 60 + 60} />
                     </li>
                   ))}
                 </ul>

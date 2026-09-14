@@ -5,6 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useCurrency } from "@/lib/currency-context";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { ChevronUp, ChevronDown, ChevronsUpDown, Search, X, ChevronDown as DropdownChevron, Check } from "lucide-react";
 
 type Row = {
@@ -164,25 +165,30 @@ export default function UsagePage() {
         {/* Table */}
         {loading ? (
           <>
-            {/* Summary strip skeleton */}
+            {/* Summary strip skeleton — labels are static, only the values shimmer */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-              {[...Array(5)].map((_, i) => (
-                <div key={i} className="bg-background border border-border rounded-xl px-4 py-3">
-                  <div className="skeleton h-2.5 w-16 rounded mb-2.5" style={{ animationDelay: `${i * 60}ms` }} />
-                  <div className="skeleton h-5 w-14 rounded" style={{ animationDelay: `${i * 60 + 40}ms` }} />
+              {summaryStats.map(({ label }, i) => (
+                <div key={label} className="bg-background border border-border rounded-xl px-4 py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+                  {/* text-[15px] → 22.5px line box */}
+                  <SkeletonLine lh="h-[22.5px]" h="h-4" w="w-14" className="mt-1" delay={stagger(i, 60)} />
                 </div>
               ))}
             </div>
-            {/* Table skeleton */}
-            <div className="bg-background border border-border rounded-xl overflow-hidden">
+            {/* Table skeleton — real header, shimmering cells, totals row */}
+            <div className="bg-background border border-border rounded-xl overflow-hidden overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent border-b border-border">
-                    <TableHead className="h-9 pl-5"><div className="skeleton h-2.5 w-8 rounded" /></TableHead>
-                    <TableHead className="h-9"><div className="skeleton h-2.5 w-10 rounded" /></TableHead>
-                    {[60, 50, 55, 65, 70, 55].map((w, i) => (
-                      <TableHead key={i} className="h-9">
-                        <div className="skeleton h-2.5 rounded ml-auto" style={{ width: w, animationDelay: `${i * 40}ms` }} />
+                    <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9 pl-5">Email</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9">
+                      <span className="flex items-center gap-1">Model<DropdownChevron className="w-3 h-3" /></span>
+                    </TableHead>
+                    {["Convos", "Input", "Output", "Cache read", "Cache create", "Cost"].map((label) => (
+                      <TableHead key={label}>
+                        <span className="flex items-center gap-0.5 ml-auto whitespace-nowrap select-none w-fit">
+                          {label}<ChevronsUpDown className="inline ml-1 w-3 h-3 opacity-25" />
+                        </span>
                       </TableHead>
                     ))}
                   </TableRow>
@@ -191,18 +197,26 @@ export default function UsagePage() {
                   {[...Array(8)].map((_, i) => (
                     <TableRow key={i} className="border-b border-border/60">
                       <TableCell className="pl-5 py-3">
-                        <div className="skeleton h-3 w-44 rounded" style={{ animationDelay: `${i * 60}ms` }} />
+                        <SkeletonLine lh="h-[18px]" w="w-44" delay={stagger(i, 60)} />
                       </TableCell>
                       <TableCell>
-                        <div className="skeleton h-4 w-32 rounded-md" style={{ animationDelay: `${i * 60 + 20}ms` }} />
+                        <Skeleton className="h-[19px] w-32 rounded-md" delay={stagger(i, 60, 20)} />
                       </TableCell>
                       {[32, 40, 40, 40, 48, 40].map((w, j) => (
-                        <TableCell key={j} className="text-right">
-                          <div className="skeleton h-3 rounded ml-auto" style={{ width: w, animationDelay: `${i * 60 + j * 20 + 40}ms` }} />
+                        <TableCell key={j} className={j === 5 ? "pr-5" : undefined}>
+                          <SkeletonLine lh="h-[18px]" w="" className="justify-end" style={{ width: w }} delay={stagger(i, 60, j * 20 + 40)} />
                         </TableCell>
                       ))}
                     </TableRow>
                   ))}
+                  <TableRow className="bg-muted/30 border-t-2 border-border hover:bg-muted/30">
+                    <TableCell className="pl-5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground py-3" colSpan={2}>Totals</TableCell>
+                    {[32, 40, 40, 40, 48, 40].map((w, j) => (
+                      <TableCell key={j} className={j === 5 ? "pr-5" : undefined}>
+                        <SkeletonLine lh="h-[18px]" w="" className="justify-end" style={{ width: w }} delay={stagger(j, 20, 520)} />
+                      </TableCell>
+                    ))}
+                  </TableRow>
                 </TableBody>
               </Table>
             </div>

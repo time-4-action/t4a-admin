@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   TabBar,
   TabTierBanner,
@@ -34,6 +35,9 @@ import {
   PreorderGuidedTab,
   OrderSummaryPanel,
   PreorderReviewModal,
+  SheetHeaderSkeleton,
+  PreorderGridSkeleton,
+  OrderSummaryPanelSkeleton,
 } from "@/app/preorder/preorder-shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -142,9 +146,36 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
 
   if (loading) {
     return (
-      <div className="p-6 md:p-8 space-y-4">
-        <div className="h-6 w-56 rounded skeleton" />
-        <div className="h-96 rounded-xl skeleton" />
+      <div className="flex flex-col h-full">
+        <SheetHeaderSkeleton
+          backHref={`/preorder/${campaignId}`}
+          right={
+            <>
+              <Button size="sm" className="h-8" disabled><UserPlus className="w-3.5 h-3.5" /> Fill for customer</Button>
+              <Button variant="outline" size="sm" className="h-8" disabled><Pencil className="w-3.5 h-3.5" /> Edit sheet</Button>
+              <div className="hidden sm:flex items-center gap-0.5 rounded-lg border border-border p-0.5">
+                <span className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] bg-muted text-foreground font-medium"><Table2 className="w-3.5 h-3.5" /> Grid</span>
+                <span className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-muted-foreground"><LayoutGrid className="w-3.5 h-3.5" /> Store</span>
+              </div>
+            </>
+          }
+        />
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
+            <div className="min-w-0">
+              <PreorderGridSkeleton />
+            </div>
+            <aside className="lg:sticky lg:top-4 space-y-3">
+              <OrderSummaryPanelSkeleton />
+              <div className="rounded-xl border border-border bg-surface p-3 text-center space-y-2">
+                <p className="text-[12px] text-muted-foreground">This is a preview. To place a preorder, choose a customer.</p>
+                <Button size="sm" className="w-full" disabled>
+                  <UserPlus className="w-3.5 h-3.5" /> Fill for customer
+                </Button>
+              </div>
+            </aside>
+          </div>
+        </div>
       </div>
     );
   }
@@ -352,7 +383,7 @@ function PartnerPicker({ onSelect }: { onSelect: (p: MkPartner) => void }) {
         <Input autoFocus placeholder="Search partner…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-8 h-8 text-[12px]" />
       </div>
       <div className="max-h-56 overflow-y-auto mt-2 -mx-1">
-        {loading && <div className="text-[11px] text-muted-foreground px-2 py-2">Searching…</div>}
+        {loading && <PartnerRowsSkeleton />}
         {!loading && results.length === 0 && <div className="text-[11px] text-muted-foreground px-2 py-2">No partners found.</div>}
         {results.map((p) => (
           <button
@@ -371,5 +402,22 @@ function PartnerPicker({ onSelect }: { onSelect: (p: MkPartner) => void }) {
         ))}
       </div>
     </div>
+  );
+}
+
+/** Twin of the partner result rows while a search is in flight. */
+function PartnerRowsSkeleton() {
+  return (
+    <>
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg">
+          <Skeleton className="w-7 h-7 rounded-full shrink-0" delay={stagger(i, 60)} />
+          <div className="min-w-0">
+            <SkeletonLine lh="h-[18px]" w="w-36" delay={stagger(i, 60, 20)} />
+            <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-44" delay={stagger(i, 60, 40)} />
+          </div>
+        </div>
+      ))}
+    </>
   );
 }

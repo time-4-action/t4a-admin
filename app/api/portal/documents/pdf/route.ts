@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSessionPartner } from "@/lib/portal";
+import { getSessionPartner, isPortalDocKind } from "@/lib/portal";
 import { getDocument, getDocumentPdf } from "@/lib/metakocka";
 import { parseDocKind } from "@/types/documents";
 
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const kind = parseDocKind(req.nextUrl.searchParams.get("kind"));
   const mkId = req.nextUrl.searchParams.get("mkId");
-  if (!kind || !mkId) return NextResponse.json({ error: "invalid request" }, { status: 400 });
+  if (!isPortalDocKind(kind) || !mkId) return NextResponse.json({ error: "invalid request" }, { status: 400 });
 
   const partner = await getSessionPartner();
   if (!partner) return NextResponse.json({ error: "no-account" }, { status: 404 });

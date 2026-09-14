@@ -10,9 +10,27 @@ import { Input } from "@/components/ui/input";
 import { Search, Check, UserRound, X, Users, ChevronsUpDown } from "lucide-react";
 import type { WarrantyAdmin } from "@/types/warranty";
 import { cn } from "@/lib/utils";
+import { SkeletonAvatar, SkeletonLine, stagger } from "@/components/ui/skeleton";
 
 const ROW_BASE =
   "flex w-full items-center gap-2.5 px-4 py-2 text-left transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none";
+
+/** Twin of a person row in both pickers: 28px avatar + name / email lines. */
+function AssigneeListSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex items-center gap-2.5 px-4 py-2">
+          <SkeletonAvatar size="h-7 w-7" delay={stagger(i)} />
+          <span className="min-w-0 flex-1">
+            <SkeletonLine lh="h-[19.5px]" w="w-28" delay={stagger(i, 80, 20)} />
+            <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-40" delay={stagger(i, 80, 40)} />
+          </span>
+        </div>
+      ))}
+    </>
+  );
+}
 
 /** Profile picture for a warranty-admin, falling back to an initial / icon. */
 export function AssigneeAvatar({
@@ -167,24 +185,7 @@ export function AssigneePicker({
           </button>
 
           {loading ? (
-            Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-2.5 px-4 py-2">
-                <span
-                  className="skeleton h-7 w-7 rounded-full"
-                  style={{ animationDelay: `${i * 80}ms` }}
-                />
-                <span className="space-y-1.5">
-                  <span
-                    className="skeleton block h-3 w-28 rounded"
-                    style={{ animationDelay: `${i * 80 + 20}ms` }}
-                  />
-                  <span
-                    className="skeleton block h-2.5 w-40 rounded"
-                    style={{ animationDelay: `${i * 80 + 40}ms` }}
-                  />
-                </span>
-              </div>
-            ))
+            <AssigneeListSkeleton />
           ) : filtered.length === 0 ? (
             <p className="px-4 py-8 text-center text-[13px] text-muted-foreground">
               No people match “{q}”.
@@ -360,24 +361,7 @@ export function AssigneeFilterPicker({
             </button>
 
             {loading ? (
-              Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-2.5 px-4 py-2">
-                  <span
-                    className="skeleton h-7 w-7 rounded-full"
-                    style={{ animationDelay: `${i * 80}ms` }}
-                  />
-                  <span className="space-y-1.5">
-                    <span
-                      className="skeleton block h-3 w-28 rounded"
-                      style={{ animationDelay: `${i * 80 + 20}ms` }}
-                    />
-                    <span
-                      className="skeleton block h-2.5 w-40 rounded"
-                      style={{ animationDelay: `${i * 80 + 40}ms` }}
-                    />
-                  </span>
-                </div>
-              ))
+              <AssigneeListSkeleton />
             ) : filtered.length === 0 ? (
               <p className="px-4 py-8 text-center text-[13px] text-muted-foreground">
                 No people match “{q}”.

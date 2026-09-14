@@ -34,6 +34,7 @@ import {
   Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   CAMPAIGN_STATUS_LABELS,
   type PreorderCampaignSummary,
@@ -165,7 +166,9 @@ export default function PreorderCampaignsPage() {
             <h1 className="font-display text-lg font-medium tracking-tight text-foreground shrink-0">
               Preorder Campaigns
             </h1>
-            {!loading && (
+            {loading ? (
+              <Skeleton className="h-5 w-8 rounded-full shrink-0" />
+            ) : (
               <span className="text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0 tabular-nums">
                 {filtered.length}
               </span>
@@ -213,14 +216,21 @@ export default function PreorderCampaignsPage() {
                 Array.from({ length: 6 }).map((_, i) => (
                   <TableRow key={`sk-${i}`} className="border-b border-border/60">
                     <TableCell className="pl-5 py-3">
-                      <div className="h-3.5 w-40 rounded skeleton" style={{ animationDelay: `${i * 80}ms` }} />
+                      {/* leading-tight: 13px → 16.25px, 11px → 13.75px */}
+                      <SkeletonLine lh="h-4" h="h-3.5" w="w-40" delay={stagger(i)} />
+                      <SkeletonLine lh="h-[14px]" h="h-2.5" w="w-20" delay={stagger(i, 80, 20)} />
                     </TableCell>
-                    {Array.from({ length: 4 }).map((__, j) => (
-                      <TableCell key={j}>
-                        <div className="h-3 w-16 rounded skeleton" style={{ animationDelay: `${i * 80 + j * 20}ms` }} />
-                      </TableCell>
-                    ))}
-                    <TableCell />
+                    <TableCell><Skeleton className="h-[20.5px] w-16 rounded-full" delay={stagger(i, 80, 40)} /></TableCell>
+                    <TableCell><SkeletonLine lh="h-[18px]" w="w-20" delay={stagger(i, 80, 60)} /></TableCell>
+                    <TableCell><SkeletonLine lh="h-[18px]" w="w-24" delay={stagger(i, 80, 80)} /></TableCell>
+                    <TableCell><SkeletonLine lh="h-[18px]" w="w-6" delay={stagger(i, 80, 100)} /></TableCell>
+                    <TableCell className="pr-4">
+                      <div className="flex items-center justify-end gap-1">
+                        {[0, 1, 2, 3, 4].map((j) => (
+                          <Skeleton key={j} className="w-[26px] h-[26px] rounded-md" delay={stagger(i, 80, 120 + j * 20)} />
+                        ))}
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))}
 

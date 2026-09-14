@@ -7,6 +7,7 @@ import type {
   WarrantyAdmin,
 } from "@/types/warranty";
 import { AssigneeAvatar, pictureForPerson } from "@/app/warranty/assignee-picker";
+import { Skeleton, SkeletonAvatar, SkeletonLine, stagger } from "@/components/ui/skeleton";
 
 // Entries are fetched client-side (the list is null until mount), so using the
 // local clock here can't cause a hydration mismatch.
@@ -94,26 +95,7 @@ export function AuditHistory({
 
       <div className="p-5">
         {entries == null ? (
-          <div className="space-y-3">
-            {Array.from({ length: 2 }).map((_, i) => (
-              <div key={i} className="flex gap-3">
-                <div
-                  className="skeleton w-7 h-7 rounded-full shrink-0"
-                  style={{ animationDelay: `${i * 80}ms` }}
-                />
-                <div className="flex-1 space-y-1.5">
-                  <div
-                    className="skeleton h-3 w-40 rounded"
-                    style={{ animationDelay: `${i * 80}ms` }}
-                  />
-                  <div
-                    className="skeleton h-3 w-56 rounded"
-                    style={{ animationDelay: `${i * 80 + 40}ms` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
+          <AuditHistoryEntriesSkeleton />
         ) : error ? (
           <p className="text-[12px] text-destructive">{error}</p>
         ) : entries.length === 0 ? (
@@ -175,6 +157,47 @@ export function AuditHistory({
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Twin of the loaded entry list: avatar + "name · time" line + one message
+ * line per entry. Same `space-y-4` / `gap-3` as the real list.
+ */
+export function AuditHistoryEntriesSkeleton({ rows = 2 }: { rows?: number }) {
+  return (
+    <div className="space-y-4">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex gap-3">
+          <SkeletonAvatar size="w-7 h-7" delay={stagger(i)} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline gap-2">
+              <SkeletonLine lh="h-[18px]" w="w-24" delay={stagger(i)} />
+              <SkeletonLine lh="h-[15px]" w="w-12" h="h-2.5" delay={stagger(i, 80, 40)} />
+            </div>
+            <SkeletonLine lh="h-[18px]" w="w-56" className="mt-1" delay={stagger(i, 80, 40)} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The whole history card (header + entries) for route-level `loading.tsx`. */
+export function AuditHistoryCardSkeleton({ title = "Change history", rows = 1 }: { title?: string; rows?: number }) {
+  return (
+    <div className="bg-background rounded-2xl border border-border/60 shadow-sm overflow-hidden">
+      <div className="px-5 py-3 border-b border-border/50 bg-muted/30 flex items-center gap-2.5">
+        <div className="w-5 h-5 rounded-md bg-background border border-border/60 flex items-center justify-center">
+          <History className="w-3 h-3 text-muted-foreground" />
+        </div>
+        <span className="text-[12px] font-semibold text-foreground">{title}</span>
+        <Skeleton className="h-[18px] w-6 rounded-full" />
+      </div>
+      <div className="p-5">
+        <AuditHistoryEntriesSkeleton rows={rows} />
       </div>
     </div>
   );

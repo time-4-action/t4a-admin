@@ -43,6 +43,7 @@ import {
   Copy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
   DndContext,
@@ -369,14 +370,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
     [campaign, activeTabId],
   );
 
-  if (loading) {
-    return (
-      <div className="p-8 space-y-4">
-        <div className="h-6 w-64 rounded skeleton" />
-        <div className="h-40 w-full rounded-xl skeleton" />
-      </div>
-    );
-  }
+  if (loading) return <BuilderSkeleton />;
   if (error && !campaign) {
     return (
       <div className="p-8">
@@ -1237,7 +1231,7 @@ function ProductPickerDialog({
         </div>
         <p className="text-[11px] text-muted-foreground">Adds the product as a group with all its variants.</p>
         <div className="max-h-80 overflow-y-auto -mx-1 mt-1">
-          {loading && <div className="text-[12px] text-muted-foreground px-2 py-3">Searching…</div>}
+          {loading && <ProductRowsSkeleton />}
           {!loading && q.trim().length >= 2 && results.length === 0 && <div className="text-[12px] text-muted-foreground px-2 py-3">No matches.</div>}
           {results.map((c) => (
             <div key={c.code} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/40">
@@ -1357,5 +1351,120 @@ function CsvImportDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── skeleton twins ───────────────────────────────────────────────────────────
+
+/** Twin of the catalogue search results while a lookup is in flight. */
+function ProductRowsSkeleton() {
+  return (
+    <>
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg">
+          <Skeleton className="w-8 h-8 rounded shrink-0" delay={stagger(i, 60)} />
+          <div className="min-w-0 flex-1">
+            <SkeletonLine lh="h-[18px]" w="w-48" delay={stagger(i, 60, 20)} />
+            <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-24" delay={stagger(i, 60, 40)} />
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Structural twin of the loaded builder: two-row sticky header (title input,
+ * status, actions; season / deadline / price-list controls), the tab rail and
+ * the editor column with its name inputs, tier card, add-actions strip and a
+ * couple of collapsed group cards.
+ */
+function BuilderSkeleton() {
+  return (
+    <div className="flex flex-col h-full">
+      <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-20">
+        <div className="flex items-center gap-3 px-4 md:px-6 h-14">
+          <Link href="/preorder" className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back to campaigns">
+            <ArrowLeft className="w-4 h-4" />
+          </Link>
+          <Skeleton className="h-8 w-48 md:w-72 rounded-md" />
+          <Skeleton className="hidden sm:block h-[20.5px] w-12 rounded-full" delay={40} />
+          <div className="flex-1" />
+          <span className="min-w-[70px]" />
+          <span className="hidden md:inline-flex"><Button variant="ghost" size="sm" className="h-8" disabled><Eye className="w-3.5 h-3.5" /> Preview</Button></span>
+          <span className="hidden lg:inline-flex"><Button variant="ghost" size="sm" className="h-8" disabled><LayoutDashboard className="w-3.5 h-3.5" /> Overview</Button></span>
+          <Skeleton className="h-8 w-[92px] rounded-md" delay={80} />
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 md:px-6 pb-2.5 text-[12px]">
+          <label className="flex items-center gap-1.5 text-muted-foreground">
+            Season
+            <Skeleton className="h-7 w-32 rounded-md" delay={100} />
+          </label>
+          <label className="flex items-center gap-1.5 text-muted-foreground">
+            Deadline
+            <Skeleton className="h-7 w-40 rounded-md" delay={120} />
+          </label>
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <Tag className="w-3.5 h-3.5 opacity-60" />
+            <Skeleton className="h-7 w-[150px] rounded-md" delay={140} />
+            <Skeleton className="h-7 w-[150px] rounded-md" delay={160} />
+            <Button variant="ghost" size="xs" className="h-7 text-muted-foreground" disabled>
+              <RefreshCw className="w-3 h-3" /> Re-price
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <div className="flex-1 min-h-0 flex">
+        <aside className="w-44 md:w-52 shrink-0 border-r border-border overflow-y-auto p-2 space-y-1">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center gap-1 rounded-lg pl-1 pr-2 py-1.5">
+              <span className="w-[18px] shrink-0" />
+              <SkeletonLine lh="h-[19.5px]" w={["w-24", "w-20", "w-28"][i]} delay={stagger(i, 60)} />
+            </div>
+          ))}
+          <div className="w-full flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] text-muted-foreground">
+            <Plus className="w-3.5 h-3.5" /> Add tab
+          </div>
+        </aside>
+
+        <main className="flex-1 min-w-0 overflow-y-auto p-4 md:p-6">
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-9 w-full max-w-xs rounded-md" />
+              <Skeleton className="h-9 w-full max-w-xs rounded-md" delay={40} />
+              <div className="flex-1" />
+            </div>
+            <div className="rounded-xl border border-border bg-surface">
+              <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+                <span className="flex items-center gap-1.5 text-[13px] font-medium text-foreground shrink-0">
+                  <ChevronRight className="w-3.5 h-3.5" />
+                  <Percent className="w-3.5 h-3.5 text-lime-600" />
+                  Volume discounts
+                </span>
+                <SkeletonLine lh="h-[19.5px]" w="w-40" delay={60} />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-border bg-muted/20 px-3 py-2.5">
+              <Button size="sm" disabled><Search className="w-3.5 h-3.5" /> Add product</Button>
+              <Button variant="outline" size="sm" disabled><Upload className="w-3.5 h-3.5" /> Import SKUs</Button>
+              <Button variant="ghost" size="sm" disabled className="text-muted-foreground"><Plus className="w-3.5 h-3.5" /> Blank group</Button>
+            </div>
+            <div className="space-y-4">
+              {[0, 1].map((i) => (
+                <div key={i} className="rounded-xl border border-border bg-surface overflow-hidden">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-muted/40">
+                    <GripVertical className="w-3.5 h-3.5 text-muted-foreground/40" />
+                    <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40" />
+                    <Skeleton className="h-7 w-full max-w-[280px] rounded-md" delay={stagger(i, 80, 100)} />
+                    <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-16" delay={stagger(i, 80, 120)} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
   );
 }

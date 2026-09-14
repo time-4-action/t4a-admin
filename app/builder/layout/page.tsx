@@ -54,6 +54,7 @@ import {
   Type,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import type { PresetSummary } from "@/types/builder";
 import {
   LAYOUT_ROW_BG,
@@ -251,11 +252,13 @@ const CHART_TYPES: LayoutBlockType[] = ["radar-chart", "range-bars"];
 function AddBlockMenu({
   onPick,
   presets,
+  presetsLoading = false,
   label,
   compact,
 }: {
   onPick: (type: LayoutBlockType, presetId?: string) => void;
   presets: PresetSummary[];
+  presetsLoading?: boolean;
   label: string;
   compact?: boolean;
 }) {
@@ -333,9 +336,15 @@ function AddBlockMenu({
                 <span className="min-w-0 flex-1">
                   <span className="block text-[12px] text-foreground leading-tight">{l}</span>
                   <span className="block text-[10px] text-muted-foreground leading-tight">
-                    {isChart
-                      ? `${count} saved build${count === 1 ? "" : "s"}`
-                      : hint}
+                    {isChart ? (
+                      presetsLoading ? (
+                        <Skeleton className="inline-block h-2 w-20 align-middle" />
+                      ) : (
+                        `${count} saved build${count === 1 ? "" : "s"}`
+                      )
+                    ) : (
+                      hint
+                    )}
                   </span>
                 </span>
                 {isChart && <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
@@ -362,7 +371,18 @@ function AddBlockMenu({
           </button>
           <div className="border-t border-border/60 my-1" />
           <div className="max-h-64 overflow-auto">
-            {forType.length === 0 && (
+            {presetsLoading &&
+              [0, 1, 2].map((i) => (
+                <div key={i} className="flex items-center gap-2 w-full rounded-lg px-2 py-1.5">
+                  <Bookmark className="w-3 h-3 text-blue-500/40 shrink-0" />
+                  <span className="min-w-0 flex-1">
+                    {/* leading-tight: 12px → 15px, 10px → 12.5px */}
+                    <SkeletonLine lh="h-[15px]" w={["w-32", "w-24", "w-36"][i]} delay={stagger(i, 60)} />
+                    <SkeletonLine lh="h-[12.5px]" h="h-2" w="w-28" delay={stagger(i, 60, 30)} />
+                  </span>
+                </div>
+              ))}
+            {!presetsLoading && forType.length === 0 && (
               <p className="text-[11px] text-muted-foreground px-2 py-2 leading-snug">
                 Nothing saved for this component yet. Build one on the{" "}
                 {BLOCK_META[pickingFor].label} page and save it — it shows up here.
@@ -539,10 +559,12 @@ function RowStrip({
   canMoveUp,
   canMoveDown,
   presets,
+  presetsLoading,
 }: {
   row: LayoutRow;
   index: number;
   presets: PresetSummary[];
+  presetsLoading: boolean;
   selectedRowId: string | null;
   selectedBlockId: string | null;
   onSelectRow: () => void;
@@ -603,7 +625,7 @@ function RowStrip({
               <ChevronDown className="w-3.5 h-3.5" />
             </button>
           </div>
-          <AddBlockMenu compact label="Block" onPick={onAddBlock} presets={presets} />
+          <AddBlockMenu compact label="Block" onPick={onAddBlock} presets={presets} presetsLoading={presetsLoading} />
           <button
             type="button"
             onClick={onRemoveRow}
@@ -674,6 +696,7 @@ export default function LayoutBuilder() {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [presets, setPresets] = useState<PresetSummary[]>([]);
+  const [presetsLoading, setPresetsLoading] = useState(true);
 
   // Unique ids for rows/blocks. Minted only from event handlers, so the
   // timestamp can never differ between server and client render.
@@ -698,7 +721,8 @@ export default function LayoutBuilder() {
         setPresets(list);
         setConfig((c) => syncBlocksToPresets(c, list));
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => alive && setPresetsLoading(false));
     return () => {
       alive = false;
     };
@@ -966,6 +990,7 @@ export default function LayoutBuilder() {
                 setSelectedRowId(row.id);
               }}
               presets={presets}
+              presetsLoading={presetsLoading}
               onAddBlock={(t, presetId) => addBlock(row.id, t, presetId)}
               onDuplicateBlock={duplicateBlock}
               onRemoveBlock={removeBlock}
@@ -1268,7 +1293,7 @@ export default function LayoutBuilder() {
                   }))}
                 />
               </Field>
-              {selectedBlock.source && !sourceExists(selectedBlock) && (
+              {!presetsLoading && selectedBlock.source && !sourceExists(selectedBlock) && (
                 <p className="text-[10.5px] text-amber-600 dark:text-amber-400 leading-relaxed">
                   “{selectedBlock.source.name}” is no longer in Saved Builds — this block still shows
                   the last copy of it. Pick another build to replace it.
@@ -1531,6 +1556,7 @@ export default function LayoutBuilder() {
           <AddBlockMenu
             label="Add a block to the last row"
             presets={presets}
+            presetsLoading={presetsLoading}
             onPick={(t, presetId) => addBlock(rows[rows.length - 1]?.id ?? "", t, presetId)}
           />
         </Group>

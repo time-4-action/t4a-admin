@@ -12,12 +12,21 @@ export type DocKind = "offer" | "order" | "invoice";
 // Payment state derived from sum_paid vs sum_all (invoices only).
 export type PaymentState = "paid" | "partial" | "unpaid" | "overdue" | "na";
 
-// The partner embedded in a document (`partner{…}` in MK).
+// The partner embedded in a document (`partner{…}` / `receiver{…}` in MK). The
+// address fields are the postal address MK printed on the document: `partner`
+// is the billing party, `receiver` (when present) the delivery address.
 export type MkPartnerRef = {
   mkId: string;
   countCode?: string;
   name?: string;
   taxId?: string;
+  street?: string;
+  postNumber?: string;
+  city?: string;
+  country?: string;
+  countryIso?: string; // ISO-2 (country_iso_2)
+  email?: string;
+  phone?: string;
 };
 
 export type MkContact = { email?: string; phone?: string; address?: string };
@@ -100,6 +109,10 @@ export type DocLine = {
   priceWithTax?: string; // gross unit price
   tax?: string;
   discount?: string; // line discount %
+  // Sales orders only: quantity already shipped against this line, summed from
+  // the order's linked warehouse packing lists (MK carries no per-line shipped
+  // figure on the order itself). Undefined on other kinds.
+  shipped?: string;
 };
 
 export type DocLink = {
@@ -129,7 +142,9 @@ export type DocSummary = {
 
 // Full document detail.
 export type DocDetail = DocSummary & {
-  partner?: MkPartnerRef;
+  partner?: MkPartnerRef; // billing party + address
+  receiver?: MkPartnerRef; // delivery address, when it differs from `partner`
+  deliveryType?: string; // MK delivery_type (carrier / method), when set
   notes?: string;
   sumBasic?: string;
   sumDiscount?: string;

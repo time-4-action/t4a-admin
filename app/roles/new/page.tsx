@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { isDevRole } from "@/lib/ai-role";
 import { Loader2, ChevronDown, ChevronRight, Check, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 
 interface Scope { value: string; description: string }
 interface ResourceServer { id: string; name: string; identifier: string; scopes: Scope[] }
@@ -152,10 +153,27 @@ export default function NewAccessTypePage() {
             </div>
 
             {serversLoading ? (
-              <div className="space-y-2">
-                {[0, 1].map(i => (
-                  <div key={i} className="h-12 bg-muted/60 animate-pulse rounded-xl" style={{ opacity: 1 - i * 0.3 }} />
-                ))}
+              <div className="border border-border rounded-2xl overflow-hidden divide-y divide-border/60">
+                {/* One resource server, expanded by default — header row + scope rows */}
+                <div className="flex items-center gap-3 px-4 py-3 bg-muted/20">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <div className="flex items-center gap-2">
+                      <SkeletonLine lh="h-[19.5px]" h="h-3.5" w="w-28" />
+                      <SkeletonLine lh="h-[19.5px]" w="w-44" delay={40} />
+                    </div>
+                  </div>
+                  <SkeletonLine lh="h-[16.5px]" w="w-6" delay={80} />
+                </div>
+                <div className="divide-y divide-border/40">
+                  {[80, 60, 90, 50, 70, 65].map((w, i) => (
+                    <div key={i} className="w-full flex items-center gap-3 px-5 py-2.5">
+                      <Skeleton className="w-4 h-4 rounded shrink-0" delay={stagger(i, 50)} />
+                      <SkeletonLine lh="h-[18px]" w="" style={{ width: w * 2 }} delay={stagger(i, 50, 30)} />
+                      <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-full" className="flex-1" delay={stagger(i, 50, 60)} />
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : serversError ? (
               <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-destructive/8 border border-destructive/15 text-xs text-destructive">

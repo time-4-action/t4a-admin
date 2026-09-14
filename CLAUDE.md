@@ -503,17 +503,24 @@ whose JSON body carries `secret_key` + `company_id`; the `opr_code` envelope
 (`"0"` = OK) is checked. Key functions: `resolvePartnerByEmail` (email→partner,
 exact-contact-match only, short in-process TTL cache), `searchPartners` /
 `getPartnerById` (admin picker), `listDocuments(kind, partnerMkId)` (per-family
-`/search` with `query_advance partner_mk_id`; invoices merge
+`/search` with `query_advance partner_mk_id`, **paged through to the end** — MK
+caps a page at 100, so every page is fetched and merged; invoices merge
 `sales_bill_domestic` + `sales_bill_foreign`), `getDocument(kind, mkId)` (tries
-each doc_type for the kind; bills add payment flags), `getDocumentPdf(kind, mkId)`
+each doc_type for the kind; bills add payment flags; **orders also fetch the
+delivery notes (`warehouse_packing_list`) linked from `doc_link_list` and sum
+their quantities per product code into `line.shipped`** — that is what MK's
+own "Shipped" column shows; the REST API has no per-line figure and no
+line-level link, so a product added to the note before the order is the one
+known mismatch),
+`getDocumentPdf(kind, mkId)`
 (`/report`, needs a report_id). `DocKind` = `offer | order | invoice`. Server-side
 partner resolution for the portal lives in `lib/portal.ts` (`getSessionPartner`).
 
 | Page | Path | Notes |
 |---|---|---|
 | Portal (customer) | `/portal` → `/portal/invoices` | B2B shell; own docs only. |
-| Invoices / Offers / Orders | `/portal/{invoices,offers,orders}` | List (payment status + due date on invoices). |
-| Detail | `/portal/{…}/[mkId]` | Full doc + **Download PDF**. Ownership re-checked. |
+| Invoices / Orders | `/portal/{invoices,orders}` | List as one table card: toolbar (search by number/title + count), proportional grid columns (Issued / Due / Items / Status / Amount); column headings sort (click toggles direction), the **Status heading is the status select**, and clicking a row's status pill filters too; 25-per-page client-side pager. The API returns the complete list, so filtering + paging are purely client-side (`DocumentList` in `documents-shared.tsx`). The invoice **Due** column is the large, urgency-coloured cell (rose + "n days overdue", amber within 7 days). **Offers are never shown to customers** — no page, nav link, API `type`, or PDF; the whole **Related documents** card is admin-only (`showLinks={false}` in the portal) (`PORTAL_DOC_KINDS` / `isPortalDocKind` in `lib/portal.ts`); admins still browse them under `/documents`. |
+| Detail | `/portal/{…}/[mkId]` | Full doc + **Download PDF**. Ownership re-checked. Invoices and orders show a **Billing / Delivery address** card (MK `partner` / `receiver`; no `receiver` = same as billing). Order lines carry a **Shipped** column. |
 | No account | `/portal/no-account` | Email not matched to a partner. |
 | Customer picker (admin) | `/documents` | Search a partner by name/email/tax. |
 | Customer docs (admin) | `/documents/[partnerMkId]` | Offers/Orders/Invoices tabs. |
@@ -526,6 +533,10 @@ partner resolution for the portal lives in `lib/portal.ts` (`getSessionPartner`)
 | `/api/admin/documents` | GET (`?partner=&type=`) |
 | `/api/admin/documents/partners` | GET (`?q=`) |
 | `/api/admin/documents/pdf` | GET (`?kind=&mkId=`) |
+
+**Notes:** a document's "Additional instructions" (MK `notes_header`) is the
+customer-facing text and is what `DocDetail.notes` carries. MK's "Additional
+text on document" (`notes`) is internal and is never mapped.
 
 **Security:** `MK_SECRET_KEY`/`MK_COMPANY_ID` stay server-side; the portal APIs
 derive the partner from the **session email** (never client input) and re-check

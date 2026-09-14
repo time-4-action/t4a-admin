@@ -24,6 +24,7 @@ import {
   Info,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import type { PresetDetail, PresetActor, PresetVersion } from "@/types/builder";
 import { BUILDER_META, generateSnippet, isBuilderId } from "../../generators";
 import { PreviewPanel, CodePanel, relativeTime, fmtDateTime } from "../../builder-ui";
@@ -259,7 +260,12 @@ export default function SavedBuildClient({
             </Link>
             <Icon className="w-4 h-4 text-blue-500 shrink-0" />
             {!preset ? (
-              <div className="skeleton h-5 w-44 rounded" />
+              <>
+                {/* text-lg → 28px line box; badge pill + pencil keep their slots */}
+                <SkeletonLine lh="h-7" h="h-5" w="w-44" />
+                <span className="p-1.5 shrink-0"><Pencil className="w-3.5 h-3.5 text-muted-foreground/30" /></span>
+                <Skeleton className="hidden sm:block h-[20.5px] w-20 rounded-full shrink-0" delay={40} />
+              </>
             ) : editingName ? (
               <input
                 autoFocus
@@ -303,6 +309,12 @@ export default function SavedBuildClient({
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {!preset && (
+              <>
+                <Skeleton className="h-8 w-8 sm:w-[132px] rounded-lg" delay={60} />
+                <Skeleton className="h-8 w-8 rounded-lg" delay={80} />
+              </>
+            )}
             {preset && (
               <>
                 <Link
@@ -351,32 +363,7 @@ export default function SavedBuildClient({
         )}
 
         {!preset ? (
-          /* skeleton mirrors the loaded two-column layout */
-          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,340px)_1fr] gap-4 items-start">
-            <div className="space-y-4">
-              {Array.from({ length: 2 }).map((_, i) => (
-                <div key={i} className="bg-surface border border-border rounded-xl p-4 space-y-3">
-                  <div className="skeleton h-3.5 w-28 rounded" style={{ animationDelay: `${i * 80}ms` }} />
-                  {Array.from({ length: 3 }).map((_, j) => (
-                    <div key={j} className="skeleton h-3 w-full rounded" style={{ animationDelay: `${(i * 3 + j) * 80}ms` }} />
-                  ))}
-                </div>
-              ))}
-            </div>
-            <div className="space-y-4 min-w-0">
-              <div className="bg-surface border border-border rounded-xl overflow-hidden">
-                <div className="px-4 h-11 border-b border-border/60 flex items-center">
-                  <div className="skeleton h-3.5 w-24 rounded" />
-                </div>
-                <div className="skeleton h-64 w-full" />
-              </div>
-              <div className="bg-surface border border-border rounded-xl p-4 space-y-2">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className="skeleton h-3 rounded" style={{ width: `${90 - i * 15}%`, animationDelay: `${i * 80}ms` }} />
-                ))}
-              </div>
-            </div>
-          </div>
+          <SavedBuildSkeleton />
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,340px)_1fr] gap-4 items-start">
             {/* ── sidebar ── */}
@@ -648,6 +635,99 @@ export default function SavedBuildClient({
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── skeleton twin ────────────────────────────────────────────────────────────
+// Same two-column layout as the loaded detail: Details + Version history cards
+// on the left, preview + snippet + notes on the right. Card heads and row
+// labels are static and render for real; only the build's data shimmers.
+const DETAIL_ROWS = ["Builder", "Version", "Created by", "Created", "Last edited by", "Last edited"];
+
+function SavedBuildSkeleton() {
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,340px)_1fr] gap-4 items-start">
+      <div className="space-y-4">
+        <div className="bg-surface border border-border rounded-xl overflow-hidden">
+          <CardHead icon={Info} title="Details" />
+          <dl className="p-4 space-y-2.5 text-[12px]">
+            {DETAIL_ROWS.map((label, i) => (
+              <div key={label} className="flex items-baseline justify-between gap-3">
+                <dt className="text-muted-foreground shrink-0">{label}</dt>
+                <SkeletonLine lh="h-[18px]" w={["w-24", "w-32", "w-28", "w-16", "w-28", "w-16"][i]} delay={stagger(i, 40)} />
+              </div>
+            ))}
+          </dl>
+        </div>
+        <div className="bg-surface border border-border rounded-xl overflow-hidden">
+          <CardHead icon={History} title="Version history" />
+          <div className="p-3 space-y-1">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="rounded-lg px-2.5 py-2">
+                <div className="flex items-center gap-2">
+                  <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", i === 0 ? "bg-emerald-500" : "bg-muted-foreground/40")} />
+                  <SkeletonLine lh="h-[16.5px]" h="h-2.5" w={["w-28", "w-24", "w-32"][i]} delay={stagger(i, 60, 240)} />
+                  <SkeletonLine lh="h-[15px]" h="h-2" w="w-12" className="ml-auto shrink-0" delay={stagger(i, 60, 260)} />
+                </div>
+                <SkeletonLine lh="h-[16px]" h="h-2" w="w-36" className="mt-0.5 pl-3.5" delay={stagger(i, 60, 280)} />
+                {i > 0 && (
+                  <div className="flex items-center gap-1.5 mt-1.5 pl-3.5">
+                    <Skeleton className="h-6 w-16 rounded-md" delay={stagger(i, 60, 300)} />
+                    <Skeleton className="h-6 w-6 rounded-md" delay={stagger(i, 60, 320)} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-4 min-w-0">
+        {/* live preview — black site surface, faint shimmer where the component renders */}
+        <div className="bg-surface border border-border rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-4 h-11 border-b border-border/60">
+            <h2 className="text-[12px] font-semibold text-foreground tracking-tight">Live preview</h2>
+            <span className="text-[10px] text-muted-foreground">on a dark site surface · transparent</span>
+          </div>
+          <div className="p-4 md:p-6" style={{ background: "#000000" }}>
+            <div className="min-h-[120px] mx-auto flex items-center justify-center">
+              <Skeleton className="h-[120px] w-full max-w-md rounded-xl opacity-20 dark:opacity-40" />
+            </div>
+          </div>
+        </div>
+        {/* snippet */}
+        <div className="bg-surface border border-border rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-4 h-11 border-b border-border/60">
+            <h2 className="text-[12px] font-semibold text-foreground tracking-tight">HTML snippet</h2>
+            <span className="text-[10px] text-muted-foreground">paste into your page</span>
+            <Skeleton className="ml-auto h-7 w-[66px] rounded-lg" />
+          </div>
+          <div className="p-4">
+            {/* text-[11.5px] leading-relaxed → ~18.7px per line */}
+            {[95, 80, 88, 60, 72, 40].map((w, i) => (
+              <SkeletonLine key={i} lh="h-[18.7px]" h="h-2.5" w="" style={{ width: `${w}%` }} delay={stagger(i, 40, 100)} />
+            ))}
+          </div>
+        </div>
+        {/* notes */}
+        <div className="bg-surface border border-border rounded-xl overflow-hidden">
+          <CardHead icon={MessageSquare} title="Notes" />
+          <div className="p-4 space-y-4">
+            <div className="flex gap-3">
+              <Skeleton className="w-7 h-7 rounded-full shrink-0" />
+              <div className="flex-1 min-w-0 space-y-2">
+                {/* rows=2 textarea: 2×18.75 + 16 + 2 */}
+                <Skeleton className="h-[55.5px] w-full rounded-lg" delay={40} />
+                <div className="flex items-center justify-between gap-2">
+                  <SkeletonLine lh="h-[15px]" h="h-2.5" w="w-40" delay={80} />
+                  <Skeleton className="h-7 w-[88px] rounded-lg" delay={100} />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

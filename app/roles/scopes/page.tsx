@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { KeyRound, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 
 interface Scope { value: string; description: string }
 interface ResourceServer { id: string; name: string; identifier: string; scopes: Scope[] }
@@ -40,7 +41,9 @@ export default function ScopesPage() {
         <header className="h-14 border-b border-border flex items-center justify-between px-4 md:px-8 shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
           <div className="flex items-center gap-2">
             <h1 className="font-display text-lg font-medium tracking-tight text-foreground">Scopes</h1>
-            {!loading && allScopes.length > 0 && (
+            {loading ? (
+              <Skeleton className="h-[19px] w-7 rounded-full" />
+            ) : allScopes.length > 0 && (
               <span className="text-[10px] font-semibold text-muted-foreground bg-muted px-2 py-0.5 rounded-full tabular-nums">
                 {filtered.length}{filtered.length !== allScopes.length ? `/${allScopes.length}` : ""}
               </span>
@@ -67,11 +70,15 @@ export default function ScopesPage() {
 
         <div className="flex-1 overflow-y-auto">
           {loading ? (
-            <div className="p-4 md:p-8 space-y-2">
-              {Array.from({ length: 12 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 px-1" style={{ animationDelay: `${i * 60}ms` }}>
-                  <div className="skeleton h-3.5 rounded w-40" style={{ animationDelay: `${i * 60}ms` }} />
-                  <div className="skeleton h-3 rounded flex-1" style={{ animationDelay: `${i * 60 + 40}ms` }} />
+            <div className="divide-y divide-border/40">
+              {[36, 44, 32, 48, 40, 28, 52, 36, 44, 32, 40, 48].map((w, i) => (
+                <div
+                  key={i}
+                  className="w-full flex items-center gap-4 px-4 md:px-8 py-3 border-l-2 border-l-transparent"
+                >
+                  {/* text-[12px] mono value → 18px line; description leading-relaxed → 19.5px */}
+                  <SkeletonLine lh="h-[19.5px]" w="" className="shrink-0" style={{ width: w * 4 }} delay={stagger(i, 60)} />
+                  <SkeletonLine lh="h-[19.5px]" w="w-full max-w-md" className="flex-1" delay={stagger(i, 60, 40)} />
                 </div>
               ))}
             </div>

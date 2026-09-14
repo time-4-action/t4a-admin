@@ -1,5 +1,5 @@
 import { redirect, notFound } from "next/navigation";
-import { getSessionPartner } from "@/lib/portal";
+import { getSessionPartner, isPortalDocKind } from "@/lib/portal";
 import { getDocument, pdfSupported } from "@/lib/metakocka";
 import { DocumentList, DocumentDetail } from "@/app/documents/documents-shared";
 import { CustomerInfoStrip } from "@/app/documents/customer-header";
@@ -11,10 +11,11 @@ import { DOC_KIND_LABELS, type DocKind } from "@/types/documents";
 // full-width content, same list/detail components).
 
 function slugFor(kind: DocKind): string {
-  return DOC_KIND_LABELS[kind].plural.toLowerCase(); // invoices | offers | orders
+  return DOC_KIND_LABELS[kind].plural.toLowerCase(); // invoices | orders
 }
 
 export async function PortalListPage({ kind }: { kind: DocKind }) {
+  if (!isPortalDocKind(kind)) notFound();
   const partner = await getSessionPartner();
   if (!partner) redirect("/portal/no-account");
 
@@ -38,6 +39,7 @@ export async function PortalListPage({ kind }: { kind: DocKind }) {
 }
 
 export async function PortalDetailPage({ kind, mkId }: { kind: DocKind; mkId: string }) {
+  if (!isPortalDocKind(kind)) notFound();
   const partner = await getSessionPartner();
   if (!partner) redirect("/portal/no-account");
 
@@ -49,9 +51,10 @@ export async function PortalDetailPage({ kind, mkId }: { kind: DocKind; mkId: st
     ? `/api/portal/documents/pdf?kind=${kind}&mkId=${encodeURIComponent(mkId)}`
     : undefined;
 
+  // Related documents are internal (offers, delivery notes, …) — hidden from customers.
   return (
     <div className="h-full">
-      <DocumentDetail detail={detail} pdfHref={pdfHref} backHref={`/portal/${slugFor(kind)}`} wide />
+      <DocumentDetail detail={detail} pdfHref={pdfHref} backHref={`/portal/${slugFor(kind)}`} showLinks={false} wide />
     </div>
   );
 }
