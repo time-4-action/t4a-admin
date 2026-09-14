@@ -42,3 +42,9 @@ export function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Pro
 export function invalidateAuth0Cache(): void {
   store.clear();
 }
+
+// Drop one entry (e.g. after a mutation that only affects that key). The store is
+// shared by every cached() consumer, not only Auth0.
+export function invalidateCached(key: string): void {
+  store.delete(key);
+}

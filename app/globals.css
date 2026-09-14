@@ -176,6 +176,21 @@
   .skeleton { animation: none; }
 }
 
+/* Right-anchored side panel (components/ui/drawer.tsx). Radix stamps data-state. */
+@keyframes drawer-in {
+  from { transform: translateX(100%); opacity: 0.6; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes drawer-out {
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(100%); opacity: 0.6; }
+}
+[data-slot="drawer-content"][data-state="open"]   { animation: drawer-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+[data-slot="drawer-content"][data-state="closed"] { animation: drawer-out 0.18s ease-in forwards; }
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="drawer-content"] { animation: none !important; }
+}
+
 /* Hide the native number-input spinners app-wide (we use our own +/- steppers). */
 .no-spinner::-webkit-outer-spin-button,
 .no-spinner::-webkit-inner-spin-button,

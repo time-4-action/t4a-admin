@@ -70,10 +70,11 @@ export type MkResult = MkOk | MkErr;
 export async function callMetakocka(
   endpoint: string,
   body: Record<string, unknown>,
+  opts: { timeoutMs?: number } = {},
 ): Promise<MkResult> {
   const url = `${getBase()}/rest/eshop/v1/${endpoint}`;
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const t = setTimeout(() => controller.abort(), opts.timeoutMs ?? TIMEOUT_MS);
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -196,6 +197,15 @@ function sanitizeNotes(raw: string | undefined): string | undefined {
 // ── partner resolution ───────────────────────────────────────────────────────
 
 function mapPartner(raw: Record<string, unknown>): MkPartner {
+  return mapPartnerRawImpl(raw);
+}
+
+// Exported for the customer directory sync (lib/mk-customers.ts).
+export function mapPartnerRaw(raw: Record<string, unknown>): MkPartner {
+  return mapPartnerRawImpl(raw);
+}
+
+function mapPartnerRawImpl(raw: Record<string, unknown>): MkPartner {
   const contacts = Array.isArray(raw.partner_contact_list)
     ? (raw.partner_contact_list as Record<string, unknown>[])
     : [];
@@ -230,6 +240,9 @@ function mapPartner(raw: Record<string, unknown>): MkPartner {
     currency: str(billing?.currency),
     language: str(billing?.language),
     businessEntity: raw.business_entity === "true" || raw.business_entity === true,
+    taxpayer: raw.taxpayer === undefined ? undefined : raw.taxpayer === "true" || raw.taxpayer === true,
+    foreignCountry:
+      raw.foreign_county === undefined ? undefined : raw.foreign_county === "true" || raw.foreign_county === true,
     contacts: contacts
       .map((c) => ({ email: str(c.email), phone: str(c.gsm), address: str(c.contact_address) }))
       .filter((c) => c.email || c.phone || c.address),
@@ -413,6 +426,12 @@ function mapSummary(raw: Record<string, unknown>): DocSummary {
     payment: bill ? derivePayment(raw.sum_all, raw.sum_paid, dueDate) : undefined,
     sumPaid: bill ? str(raw.sum_paid) : undefined,
     itemCount: products,
+    buyerOrder: str(raw.buyer_order),
+    extraColumns: Array.isArray(raw.extra_column)
+      ? (raw.extra_column as Record<string, unknown>[])
+          .map((c) => ({ name: str(c.name) ?? "", value: str(c.value) ?? "" }))
+          .filter((c) => c.name)
+      : undefined,
   };
 }
 
@@ -817,11 +836,19 @@ export function productTaxCode(entries: MkProductPrice[] | undefined): string {
 
 // ── sales order creation ───────────────────────────────────────────────────────
 
+const PUT_DOCUMENT_TIMEOUT_MS = 60_000;
+
 export type SalesOrderInput = {
   partner: MkPartner;
   title: string; // becomes the MK sales order title (the campaign season)
   currencyCode: string;
   notes?: string;
+  // Idempotency / link marker: MK's `buyer_order` (char 30). MK can look a sales order
+  // up by it (get_document, update_document, change_document_status).
+  buyerOrder?: string;
+  extraColumns?: { name: string; value: string }[];
+  changeLogNote?: string; // document_change_log_notes (≤ 50 chars)
+  deliveryDeadline?: string; // yyyy-mm-dd
   // Each line references an existing product by code with an EXPLICIT GROSS unit price
   // (priceWithTax = discount + VAT included, retrieved from the partner price list and
   // locked at order time — we don't put a price list on the document) and a tax code
@@ -846,6 +873,8 @@ export async function createSalesOrder(
     status_code: "created",
     partner: {
       business_entity: partner.businessEntity ? "true" : "false",
+      ...(partner.foreignCountry !== undefined ? { foreign_county: partner.foreignCountry ? "true" : "false" } : {}),
+      ...(partner.taxpayer !== undefined ? { taxpayer: partner.taxpayer ? "true" : "false" } : {}),
       tax_id_number: partner.taxId ?? "",
       customer: partner.name,
       street: addr.street ?? "",
@@ -863,8 +892,14 @@ export async function createSalesOrder(
     })),
   };
   if (notes) body.notes = notes;
+  if (input.buyerOrder) body.buyer_order = input.buyerOrder.slice(0, 30);
+  if (input.extraColumns?.length) body.extra_column = input.extraColumns;
+  if (input.changeLogNote) body.document_change_log_notes = input.changeLogNote.slice(0, 50);
+  if (input.deliveryDeadline) body.delivery_deadline = input.deliveryDeadline;
 
-  const res = await callMetakocka("put_document", body);
+  // MK's own examples show put_document taking ~48 s. Aborting early while MK still
+  // commits is exactly how orphan orders are born, so this call gets a long budget.
+  const res = await callMetakocka("put_document", body, { timeoutMs: PUT_DOCUMENT_TIMEOUT_MS });
   if (!res.ok) return { ok: false, error: res.error, status: res.status };
   const mkId = str(res.data.mk_id);
   if (!mkId) return { ok: false, error: "metakocka: no document id returned", status: 502 };
@@ -876,6 +911,48 @@ export async function createSalesOrder(
       totalPrice: str(res.data.total_price),
     },
   };
+}
+
+// Look a sales order up by its `buyer_order` (our idempotency key). Three outcomes,
+// deliberately distinct: found, definitely absent (MK answered with an error
+// envelope), or INCONCLUSIVE (transport failure / timeout) — callers must never
+// create a new order on an inconclusive answer.
+export type SalesOrderLookup =
+  | { status: "ok"; order: DocDetail }
+  | { status: "not-found" }
+  | { status: "error"; error: string };
+
+export async function getSalesOrderByBuyerOrder(buyerOrder: string): Promise<SalesOrderLookup> {
+  const res = await callMetakocka("get_document", { doc_type: "sales_order", buyer_order: buyerOrder });
+  if (res.ok) {
+    if (res.data.mk_id) return { status: "ok", order: mapDetail(res.data) };
+    return { status: "not-found" };
+  }
+  // 422 = MK's envelope said "no such document"; anything else is transport-level.
+  if (res.status === 422) return { status: "not-found" };
+  return { status: "error", error: res.error };
+}
+
+// A sales order by mk_id with the same three-way outcome (found / gone / MK down),
+// shipped quantities included like getDocument("order", …).
+export async function getSalesOrder(mkId: string): Promise<SalesOrderLookup> {
+  const res = await callMetakocka("get_document", { doc_type: "sales_order", doc_id: mkId });
+  if (res.ok) {
+    if (!res.data.mk_id) return { status: "not-found" };
+    const detail = mapDetail(res.data);
+    detail.lines = await withShippedAmounts(detail);
+    return { status: "ok", order: detail };
+  }
+  if (res.status === 422) return { status: "not-found" };
+  return { status: "error", error: res.error };
+}
+
+// Delete a sales order (admin-confirmed only — used when detaching a superseded
+// preorder order that staff no longer want in MK).
+export async function deleteSalesOrder(mkId: string): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+  const res = await callMetakocka("delete_document", { doc_type: "sales_order", mk_id: mkId });
+  if (!res.ok) return { ok: false, error: res.error, status: res.status };
+  return { ok: true };
 }
 
 // Render a document PDF via /report. Returns the raw PDF bytes, or an error.

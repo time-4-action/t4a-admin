@@ -1,6 +1,7 @@
 import { redirect, notFound } from "next/navigation";
 import { getSessionPartner, isPortalDocKind } from "@/lib/portal";
 import { getDocument, pdfSupported } from "@/lib/metakocka";
+import { customerMayViewDocument } from "@/lib/preorder-visibility";
 import { DocumentList, DocumentDetail } from "@/app/documents/documents-shared";
 import { CustomerInfoStrip } from "@/app/documents/customer-header";
 import { DOC_KIND_LABELS, type DocKind } from "@/types/documents";
@@ -44,8 +45,9 @@ export async function PortalDetailPage({ kind, mkId }: { kind: DocKind; mkId: st
   if (!partner) redirect("/portal/no-account");
 
   const detail = await getDocument(kind, mkId);
-  // Ownership check: the document must belong to this customer's partner.
-  if (!detail || detail.partner?.mkId !== partner.mkId) notFound();
+  // Ownership check (the document must belong to this customer's partner) plus preorder
+  // visibility: a sales order of an unpublished preorder is not shown yet.
+  if (!detail || !(await customerMayViewDocument(partner, detail))) notFound();
 
   const pdfHref = pdfSupported(kind)
     ? `/api/portal/documents/pdf?kind=${kind}&mkId=${encodeURIComponent(mkId)}`

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { listDocuments } from "@/lib/metakocka";
+import { annotatePreorderOrders } from "@/lib/preorder-visibility";
 import { parseDocKind } from "@/types/documents";
 
 export const runtime = "nodejs";
@@ -15,5 +16,7 @@ export async function GET(req: NextRequest) {
   if (!partner) return NextResponse.json({ error: "missing partner" }, { status: 400 });
 
   const { items, total } = await listDocuments(kind, partner);
-  return NextResponse.json({ items, total });
+  // Admins see everything; preorder orders are annotated so the table can badge them.
+  const preorder = kind === "order" ? await annotatePreorderOrders(items) : {};
+  return NextResponse.json({ items, total, preorder });
 }

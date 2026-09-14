@@ -56,6 +56,10 @@ export type MkPartner = {
   currency?: string;
   language?: string;
   businessEntity?: boolean;
+  taxpayer?: boolean;
+  // MK's foreign_county flag: false ⇒ a domestic partner (used as the home-country
+  // fallback when the address carries no country — see lib/countries.ts).
+  foreignCountry?: boolean;
   contacts?: MkContact[];
   addresses?: MkAddress[];
 };
@@ -138,6 +142,10 @@ export type DocSummary = {
   dueDate?: string | null;
   payment?: PaymentState;
   sumPaid?: string; // amount paid so far (bills)
+  // sales orders: MK `buyer_order` (the customer's order number — for preorders, our
+  // idempotency marker) and the free-form extra columns.
+  buyerOrder?: string;
+  extraColumns?: { name: string; value: string }[];
 };
 
 // Full document detail.
