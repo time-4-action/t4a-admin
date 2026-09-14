@@ -4,7 +4,7 @@ import {
   PreorderCampaign,
   PreorderSubmission,
   PreorderAccess,
-  toCampaignView,
+  toCampaignAdminView,
   toObjectId,
   sanitizeTiers,
 } from "@/lib/preorder";
@@ -22,7 +22,7 @@ export async function GET(_req: Request, { params }: RouteParams) {
   await connectDB();
   const doc = await PreorderCampaign.findById(id).exec();
   if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
-  return NextResponse.json({ campaign: toCampaignView(doc) });
+  return NextResponse.json({ campaign: toCampaignAdminView(doc) });
 }
 
 // PATCH /api/admin/preorder/campaigns/[id] — the builder's save. Accepts any subset
@@ -65,7 +65,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     })) as unknown as typeof doc.tabs;
   }
   await doc.save();
-  return NextResponse.json({ campaign: toCampaignView(doc) });
+  return NextResponse.json({ campaign: toCampaignAdminView(doc) });
 }
 
 // DELETE /api/admin/preorder/campaigns/[id] — remove a campaign and its submissions.
