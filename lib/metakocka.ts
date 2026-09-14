@@ -341,11 +341,22 @@ function mapPartnerRef(raw: unknown): MkPartnerRef | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const p = raw as Record<string, unknown>;
   if (!p.mk_id) return undefined;
+  const contact =
+    p.partner_contact && typeof p.partner_contact === "object"
+      ? (p.partner_contact as Record<string, unknown>)
+      : undefined;
   return {
     mkId: String(p.mk_id),
     countCode: str(p.count_code),
     name: str(p.customer),
     taxId: str(p.tax_id_number),
+    street: str(p.street),
+    postNumber: str(p.post_number),
+    city: str(p.place),
+    country: str(p.country),
+    countryIso: str(p.country_iso_2),
+    email: str(contact?.email),
+    phone: str(contact?.gsm) ?? str(contact?.phone),
   };
 }
 
@@ -409,7 +420,12 @@ function mapDetail(raw: Record<string, unknown>): DocDetail {
   return {
     ...mapSummary(raw),
     partner: mapPartnerRef(raw.partner),
-    notes: sanitizeNotes(str(raw.notes) ?? str(raw.notes_header)),
+    receiver: mapPartnerRef(raw.receiver),
+    deliveryType: str(raw.delivery_type),
+    // MK has two free-text fields: `notes_header` is "Additional instructions"
+    // (customer-facing, printed on the document) and `notes` is "Additional
+    // text on document" — used internally, so it is never surfaced here.
+    notes: sanitizeNotes(str(raw.notes_header)),
     sumBasic: str(raw.sum_basic),
     sumDiscount: str(raw.sum_discount),
     sumTax: [raw.sum_tax_ex1, raw.sum_tax_ex2, raw.sum_tax_ex3, raw.sum_tax_ex4, raw.sum_tax_085, raw.sum_tax_200]
@@ -427,16 +443,19 @@ function mapDetail(raw: Record<string, unknown>): DocDetail {
 
 // ── document listing / detail ────────────────────────────────────────────────
 
-async function searchDocType(
+// MK's /search pages at most this many documents per call.
+const SEARCH_PAGE_SIZE = 100;
+
+async function searchDocTypePage(
   docType: string,
   partnerMkId: string,
-  opts: { limit?: number; offset?: number } = {},
+  offset: number,
 ): Promise<{ items: DocSummary[]; total: number }> {
   const body: Record<string, unknown> = {
     doc_type: docType,
     result_type: "doc",
-    limit: opts.limit ?? 100,
-    offset: opts.offset ?? 0,
+    limit: SEARCH_PAGE_SIZE,
+    offset,
     query_advance: [{ type: "partner_mk_id", value: partnerMkId }],
   };
   // Ask for payment figures so invoice lists can show paid/unpaid.
@@ -455,17 +474,30 @@ async function searchDocType(
   };
 }
 
-// List a partner's documents for one family. Invoices merge domestic + foreign
-// (each capped at `limit`; sorted newest-first). Returns items + an approximate
-// total across the underlying doc_types.
+// Every document of one doc_type for a partner. The first page tells us the
+// total; the remaining pages are fetched in parallel so a customer with a few
+// hundred orders still loads in one round trip after the first.
+async function searchDocType(
+  docType: string,
+  partnerMkId: string,
+): Promise<{ items: DocSummary[]; total: number }> {
+  const first = await searchDocTypePage(docType, partnerMkId, 0);
+  const offsets: number[] = [];
+  for (let off = SEARCH_PAGE_SIZE; off < first.total; off += SEARCH_PAGE_SIZE) offsets.push(off);
+  if (offsets.length === 0) return first;
+  const rest = await Promise.all(offsets.map((off) => searchDocTypePage(docType, partnerMkId, off)));
+  return { items: [...first.items, ...rest.flatMap((r) => r.items)], total: first.total };
+}
+
+// List ALL of a partner's documents for one family — no cap, every page is
+// fetched. Invoices merge domestic + foreign; sorted newest-first.
 export async function listDocuments(
   kind: DocKind,
   partnerMkId: string,
-  opts: { limit?: number; offset?: number } = {},
 ): Promise<{ items: DocSummary[]; total: number }> {
   const docTypes = DOC_TYPES[kind];
   const results = await Promise.all(
-    docTypes.map((dt) => searchDocType(dt, partnerMkId, opts)),
+    docTypes.map((dt) => searchDocType(dt, partnerMkId)),
   );
   const items = results
     .flatMap((r) => r.items)
@@ -489,10 +521,63 @@ export async function getDocument(
     }
     const res = await callMetakocka("get_document", body);
     if (res.ok && res.data.mk_id) {
-      return mapDetail(res.data);
+      const detail = mapDetail(res.data);
+      if (kind === "order") detail.lines = await withShippedAmounts(detail);
+      return detail;
     }
   }
   return null;
+}
+
+// Per-line shipped quantity for a sales order. MK carries no such figure on
+// the order itself: its "Shipped" column is the quantity on the order's
+// delivery notes ("dobavnice" — doc_type `warehouse_packing_list`; the
+// `warehouse_delivery_note` is the picking/shipping *order*, which alone ships
+// nothing). Each delivery note is linked from the order's doc_link_list with
+// its own product_list. Sum those per product code and hand the totals out to
+// the order lines in order (an order can repeat a code, e.g. two SHIPPING
+// lines). Verified against MK's own screen on invoiced, part-shipped and
+// picking-only orders. Known gap: MK links lines by id, so a product added to
+// the delivery note before it was on the order counts here but not in MK —
+// the REST API exposes no line-level link. Notes are fetched in parallel; one
+// that fails simply contributes nothing.
+async function withShippedAmounts(detail: DocDetail): Promise<DocLine[]> {
+  // MK's own status is authoritative when it is unambiguous: "shipped" and
+  // "invoiced" both mean every line has left the warehouse.
+  const status = (detail.statusDesc ?? "").toLowerCase();
+  if (status === "shipped" || status === "invoiced") {
+    return detail.lines.map((l) => (l.isText ? l : { ...l, shipped: l.amount ?? "0" }));
+  }
+  const notes = detail.links.filter((l) => l.docType === "warehouse_packing_list");
+  if (notes.length === 0) return detail.lines.map((l) => (l.isText ? l : { ...l, shipped: "0" }));
+
+  const results = await Promise.all(
+    notes.map((n) => callMetakocka("get_document", { doc_type: n.docType, doc_id: n.mkId })),
+  );
+  const shippedByCode = new Map<string, number>();
+  for (const res of results) {
+    if (!res.ok) continue;
+    for (const line of mapLines(res.data.product_list)) {
+      if (line.isText || !line.code) continue;
+      const qty = num(line.amount) ?? 0;
+      shippedByCode.set(line.code, (shippedByCode.get(line.code) ?? 0) + qty);
+    }
+  }
+
+  return detail.lines.map((l) => {
+    if (l.isText || !l.code) return l;
+    const ordered = num(l.amount) ?? 0;
+    const remaining = shippedByCode.get(l.code) ?? 0;
+    const take = Math.min(ordered, remaining);
+    shippedByCode.set(l.code, remaining - take);
+    return { ...l, shipped: formatQty(take) };
+  });
+}
+
+// Quantities come back from MK as strings like "3" or "1.5" — keep the same
+// shape when we compute one ourselves (no trailing ".0").
+function formatQty(n: number): string {
+  return Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000);
 }
 
 // ── PDF (report) ─────────────────────────────────────────────────────────────

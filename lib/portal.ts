@@ -7,7 +7,16 @@ import "server-only";
 
 import { auth0 } from "@/lib/auth";
 import { resolvePartnerByEmail } from "@/lib/metakocka";
-import type { MkPartner } from "@/types/documents";
+import type { DocKind, MkPartner } from "@/types/documents";
+
+// The document families a customer may see in the portal. Offers are internal
+// (admins still browse them under /documents) and are never exposed here — not
+// as a page, a nav link, an API `type`, or a PDF.
+export const PORTAL_DOC_KINDS: readonly DocKind[] = ["invoice", "order"];
+
+export function isPortalDocKind(kind: DocKind | null | undefined): kind is DocKind {
+  return !!kind && PORTAL_DOC_KINDS.includes(kind);
+}
 
 export async function getSessionPartner(): Promise<MkPartner | null> {
   const session = await auth0.getSession();
