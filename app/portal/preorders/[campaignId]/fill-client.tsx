@@ -47,7 +47,7 @@ import {
   LINE_STATUS_LABELS,
   type AllocationResult,
   type AllocationView,
-  type EffectiveCampaign,
+  type PortalCampaign,
   type PreorderCampaign,
   type PortalSubmission,
   type PreorderTerms,
@@ -70,7 +70,7 @@ function fmtDate(v?: string | null): string {
 }
 
 type LoadData = {
-  campaign: EffectiveCampaign;
+  campaign: PortalCampaign;
   submission: PortalSubmission;
   frozen: PreorderCampaign | null;
   allocation?: AllocationResult;
@@ -79,7 +79,7 @@ type LoadData = {
 };
 
 export default function FillClient({ campaignId }: { campaignId: string }) {
-  const [campaign, setCampaign] = useState<EffectiveCampaign | null>(null);
+  const [campaign, setCampaign] = useState<PortalCampaign | null>(null);
   const [frozen, setFrozen] = useState<PreorderCampaign | null>(null);
   const [allocation, setAllocation] = useState<AllocationResult | null>(null);
   const [orderMkId, setOrderMkId] = useState<string | null>(null);

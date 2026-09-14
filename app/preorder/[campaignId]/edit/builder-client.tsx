@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { CampaignNav } from "@/app/preorder/[campaignId]/campaign-nav";
 import {
   Dialog,
   DialogContent,
@@ -341,7 +342,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
         }),
       });
       const data = await res.json();
-      const prices: Record<string, { rrp: number | null; partnerPrice: number | null }> =
+      const prices: Record<string, { rrp: number | null; partnerPrice: number | null; taxCode?: string | null }> =
         data.prices ?? {};
       mutate((c) => ({
         ...c,
@@ -352,18 +353,20 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
             rows: g.rows.map((row) => {
               if (row.source !== "catalogue") return row;
               const p = prices[row.code];
-              return p ? { ...row, rrp: p.rrp, partnerPrice: p.partnerPrice } : row;
+              return p ? { ...row, rrp: p.rrp, partnerPrice: p.partnerPrice, taxCode: p.taxCode ?? row.taxCode ?? null } : row;
             }),
           })),
         })),
       }));
+      // Markets / customer rules may point at other price lists: refresh their books too.
+      await fetch(`/api/admin/preorder/campaigns/${campaignId}/price-books/refresh`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => undefined);
       setRepricedAt(Date.now());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Re-pricing failed");
     } finally {
       setRepricing(false);
     }
-  }, [campaign, mutate]);
+  }, [campaign, mutate, campaignId]);
 
   const activeTab = useMemo(
     () => campaign?.tabs.find((t) => t.id === activeTabId) ?? null,
@@ -430,6 +433,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 md:px-6 pb-2.5 text-[12px]">
+          <CampaignNav campaignId={campaignId} active="sheet" compact className="mr-2" />
           <label className="flex items-center gap-1.5 text-muted-foreground">
             Season
             <Input value={campaign.season ?? ""} onChange={(e) => mutate((c) => ({ ...c, season: e.target.value }))} className="h-7 w-32 text-xs bg-background" placeholder="—" />
@@ -702,6 +706,15 @@ const RowEditor = memo(function RowEditor({
             title="Drag to reorder"
           >
             <GripVertical className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange({ restricted: !row.restricted })}
+            className={cn("p-0.5", row.restricted ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground/50 hover:text-foreground")}
+            aria-label={row.restricted ? "Restricted — shown only where a market or customer exposes it" : "In the default assortment"}
+            title={row.restricted ? "Restricted: not in the default assortment (only markets / customers that expose it see it)" : "In the default assortment — click to restrict"}
+          >
+            {row.restricted ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
           </button>
           <button onClick={onDelete} className="p-0.5 text-muted-foreground hover:text-destructive" aria-label="Delete variant"><Trash2 className="w-3 h-3" /></button>
         </div>

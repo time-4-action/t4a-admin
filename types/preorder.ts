@@ -215,6 +215,12 @@ export type EffectiveMeta = {
 // pricing engine below and every fill component work on it unchanged.
 export type EffectiveCampaign = PreorderCampaign & { effective: EffectiveMeta };
 
+// The customer's view of their effective campaign: the resolved sheet plus only the
+// customer-facing settings (no price-list names, sources or warnings).
+export type PortalCampaign = Omit<PreorderCampaign, "partnerPricelist" | "rrpPricelist" | "createdBy"> & {
+  effective: { note: string | null; minOrderAmount: number | null };
+};
+
 // The Terms-tab partner details captured on a submission (prefilled from Metakocka).
 export type PreorderTerms = {
   invoiceAddress?: string;

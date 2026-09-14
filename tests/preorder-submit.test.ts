@@ -6,7 +6,7 @@ import { PreorderCampaign, type IPreorderCampaign } from "@/models/preorder-camp
 import { PreorderSubmission } from "@/models/preorder-submission";
 import { saveOrSubmitPreorder } from "@/lib/preorder-submit";
 import { detachSalesOrder, publishResult, readSubmissionOrder, registerSalesOrder } from "@/lib/preorder-mk";
-import { toPortalSubmissionView, toSubmissionView } from "@/lib/preorder";
+import { loadEffectiveCampaignForPartner, toPortalCampaignView, toPortalSubmissionView, toSubmissionView } from "@/lib/preorder";
 import { buyerOrderKey } from "@/types/preorder";
 import { invalidateAuth0Cache } from "@/lib/auth0-cache";
 
@@ -233,6 +233,29 @@ describe("submission → Metakocka order", () => {
     expect(view.snapshot?.partnerPricelist).toBe("VIP 2027");
     expect(view.snapshot?.sources.pricelist).toBe("market");
     expect(view.snapshot?.countryIso).toBe("SI");
+  });
+});
+
+describe("portal wire views never leak admin configuration", () => {
+  it("strips markets, rules, price books, list names and provenance", async () => {
+    const campaign = await makeCampaign({
+      markets: [{ id: "m", name: "Secret market", color: "sky", countries: ["SI"], config: { partnerPricelist: "VIP 2027" } }],
+      customerRules: [{ partnerMkId: "p1", partnerName: "P", config: { note: "hello" } }],
+      priceBooks: [{ pricelist: "VIP 2027", currency: "EUR", entries: [{ code: "SKU-s1", gross: 80 }], missing: 0 }],
+    });
+    const effective = loadEffectiveCampaignForPartner(campaign, { mkId: "p1", countryIso: "SI", countrySource: "mk" });
+    const portal = toPortalCampaignView(effective) as unknown as Record<string, unknown>;
+    const json = JSON.stringify(portal);
+    expect(portal.markets).toBeUndefined();
+    expect(portal.customerRules).toBeUndefined();
+    expect(portal.priceBooks).toBeUndefined();
+    expect(portal.partnerPricelist).toBeUndefined();
+    expect(json).not.toContain("VIP 2027");
+    expect(json).not.toContain("Secret market");
+    expect(portal.effective).toEqual({ note: "hello", minOrderAmount: null });
+    // …but the resolved prices did reach the sheet.
+    const rows = (portal.tabs as { groups: { rows: { code: string; partnerPrice: number }[] }[] }[]).flatMap((t) => t.groups.flatMap((g) => g.rows));
+    expect(rows.find((r) => r.code === "SKU-s1")?.partnerPrice).toBe(80);
   });
 });
 

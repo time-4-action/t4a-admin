@@ -36,6 +36,7 @@ import {
   type CustomerRule,
   type EffectiveCampaign,
   type PortalSubmission,
+  type PortalCampaign,
   type PreorderCampaign as CampaignView,
   type PreorderCampaignAdmin,
   type PreorderCampaignSummary,
@@ -294,11 +295,15 @@ export function toCampaignAdminView(doc: IPreorderCampaign): PreorderCampaignAdm
   };
 }
 
-// What a customer receives: the effective campaign minus authorship.
-export function toPortalCampaignView(effective: EffectiveCampaign): EffectiveCampaign {
-  const { createdBy: _createdBy, ...rest } = effective;
+// What a customer receives: the effective sheet (rows/prices/tiers already resolved)
+// plus ONLY the customer-facing bits of the provenance — never price-list names,
+// market sources, warnings or authorship.
+export function toPortalCampaignView(effective: EffectiveCampaign): PortalCampaign {
+  const { createdBy: _createdBy, effective: meta, partnerPricelist: _pl, rrpPricelist: _rrp, ...rest } = effective;
   void _createdBy;
-  return rest;
+  void _pl;
+  void _rrp;
+  return { ...rest, effective: { note: meta.note, minOrderAmount: meta.minOrderAmount } };
 }
 
 export function toCampaignSummary(

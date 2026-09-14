@@ -262,6 +262,12 @@ export default function PreorderCampaignsPage() {
                       <TableCell className="text-[12px] text-foreground whitespace-nowrap tabular-nums">
                         {c.tabCount} tab{c.tabCount === 1 ? "" : "s"}
                         <span className="text-muted-foreground"> · {c.rowCount} rows</span>
+                        {(c.marketCount ?? 0) > 0 && (
+                          <span className="text-muted-foreground"> · {c.marketCount} market{c.marketCount === 1 ? "" : "s"}</span>
+                        )}
+                        {(c.customerRuleCount ?? 0) > 0 && (
+                          <span className="text-muted-foreground"> · {c.customerRuleCount} override{c.customerRuleCount === 1 ? "" : "s"}</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-[12px] text-foreground tabular-nums">
                         {c.submissionCount}

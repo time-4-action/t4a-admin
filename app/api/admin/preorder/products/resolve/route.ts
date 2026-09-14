@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getProduct } from "@/lib/product-api";
-import { getMkProductPrices, pickMkListGrossPrice } from "@/lib/metakocka";
+import { getMkProductPrices, pickMkListGrossPrice, productTaxCode } from "@/lib/metakocka";
 import type { CatalogueProduct } from "@/types/product";
 import type { PreorderRow } from "@/types/preorder";
 
@@ -66,6 +66,7 @@ function nodeToRow(
     partnerPrice: pickPrice(list, sel.partnerPricelist, /partner/i),
     discountedPrice: null,
     image: node.images?.[0] ?? parent.images?.[0] ?? null,
+    taxCode: null,
   };
 }
 
@@ -103,7 +104,6 @@ function expand(
 // prices remain as the fallback when no list is selected or a product isn't priced in
 // the chosen list. Mutates rows in place.
 async function applyMkPrices(groups: ProductGroupDraft[], sel: PriceListSelection): Promise<void> {
-  if (!sel.rrpPricelist && !sel.partnerPricelist) return;
   const codes = groups
     .flatMap((g) => g.rows)
     .filter((r) => r.source === "catalogue" && r.code)
@@ -115,6 +115,8 @@ async function applyMkPrices(groups: ProductGroupDraft[], sel: PriceListSelectio
       if (r.source !== "catalogue") continue;
       const entries = mk[r.code];
       if (!entries) continue;
+      // Always capture the MK tax code (needed to push a submission without re-reading).
+      r.taxCode = productTaxCode(entries);
       if (sel.rrpPricelist) {
         const p = pickMkListGrossPrice(entries, sel.rrpPricelist, { untaxedIsNet: false });
         if (p != null) r.rrp = p;
