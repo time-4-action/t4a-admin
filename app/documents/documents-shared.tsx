@@ -45,8 +45,10 @@ import {
 
 // ── formatting ───────────────────────────────────────────────────────────────
 
+// A missing / empty amount is zero (Metakocka leaves sum fields out on a 0 document),
+// never a dash — a total is always a number.
 export function fmtMoney(amount?: string, currency?: string): string {
-  if (amount === undefined) return "—";
+  if (amount === undefined || amount.trim() === "") amount = "0";
   const n = parseFloat(amount.replace(",", "."));
   if (!Number.isFinite(n)) return amount;
   if (currency) {
@@ -1031,6 +1033,8 @@ export function DocumentDetail({
           {pdfHref && (
             <a
               href={pdfHref}
+              target="_blank"
+              rel="noopener"
               className="inline-flex items-center gap-1.5 rounded-xl bg-teal-500 text-white px-3.5 py-2 text-[12px] font-semibold hover:bg-teal-600 transition-colors shrink-0"
             >
               <Download className="h-3.5 w-3.5" /> Download PDF

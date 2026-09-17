@@ -9,7 +9,7 @@ import {
   toObjectId,
 } from "@/lib/preorder";
 import type { IPreorderCampaign } from "@/models/preorder-campaign";
-import { submissionStage, type SubmissionStage, type SubmissionStatus } from "@/types/preorder";
+import { submissionStage, totalsNet, type SubmissionStage, type SubmissionStatus } from "@/types/preorder";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +31,17 @@ export async function GET() {
   ]);
   const statusByCampaign = new Map<string, SubmissionStatus>(
     subs.map((s) => [String(s.campaignId), s.status]),
+  );
+  const figuresByCampaign = new Map(
+    subs.map((s) => [
+      String(s.campaignId),
+      {
+        myItems: s.totals?.qty ?? 0,
+        myTotal: totalsNet({ qty: s.totals?.qty ?? 0, amount: s.totals?.amount ?? 0, discount: s.totals?.discount ?? 0 }),
+        mySubmittedAt: s.submittedAt ? new Date(s.submittedAt).toISOString() : null,
+        myUpdatedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : null,
+      },
+    ]),
   );
   // Customer-facing stage: never leaks MK identifiers, only whether the order was
   // registered / shown to them.
@@ -66,6 +77,7 @@ export async function GET() {
       ...toCampaignSummary(d, 0),
       mySubmissionStatus: statusByCampaign.get(String(d._id)) ?? null,
       myStage: stageByCampaign.get(String(d._id)) ?? null,
+      ...(figuresByCampaign.get(String(d._id)) ?? { myItems: 0, myTotal: 0, mySubmittedAt: null, myUpdatedAt: null }),
     }));
   return NextResponse.json({ campaigns });
 }
