@@ -396,7 +396,7 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
         )}
 
         {view === "countries" && (
-          <CountriesTable stats={stats} markets={markets} countryNames={countryNames} onAssign={assignCountries} onOpenCountry={openCountry} />
+          <CountriesTable campaignId={campaignId} stats={stats} markets={markets} countryNames={countryNames} onAssign={assignCountries} onOpenCountry={openCountry} onOpenCustomer={openCustomer} />
         )}
       </div>
 

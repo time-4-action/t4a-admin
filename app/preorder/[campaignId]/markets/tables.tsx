@@ -4,14 +4,14 @@
 // panel, and the Countries table (assign countries to markets — the list-based
 // replacement for the old map).
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { HeaderFilter } from "@/components/ui/header-filter";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
-import { Search, ChevronLeft, ChevronRight, Plus, Globe2, Pencil, RefreshCw, Loader2, AlertTriangle, Building2, User, X, Layers, Users, GripVertical } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, ChevronDown, Plus, Globe2, Pencil, RefreshCw, Loader2, AlertTriangle, Building2, User, X, Layers, Users, GripVertical } from "lucide-react";
 import { DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, arrayMove, verticalListSortingStrategy, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -20,7 +20,7 @@ import { MARKET_COLORS, MarketChip, SourceBadge, SubmissionStageBadge } from "@/
 import { Flag } from "@/components/flag";
 import type { CountryGeo, CustomerRow } from "@/lib/preorder-customers";
 import type { CustomerKind } from "@/lib/mk-customers";
-import { COMMERCIAL_CONFIG_KEYS, type PreorderMarket, type SubmissionStage } from "@/types/preorder";
+import { COMMERCIAL_CONFIG_KEYS, marketMatches, type PreorderMarket, type SubmissionStage } from "@/types/preorder";
 
 const th = "text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9";
 const num = new Intl.NumberFormat("en-GB");
@@ -66,6 +66,29 @@ export function CustomerKindBadge({ kind, taxId, compact }: { kind: CustomerKind
 // One row per market in priority order (index 0 wins). Drag the handle to
 // reorder; the parent persists the new order.
 
+// The market a country lands in: the FIRST (highest-priority) market listing it.
+export function firstMarketByCountry(markets: PreorderMarket[]): Map<string, PreorderMarket> {
+  const m = new Map<string, PreorderMarket>();
+  for (const mk of markets) for (const iso of mk.countries) if (!m.has(iso)) m.set(iso, mk);
+  return m;
+}
+
+// How many directory customers each market actually catches, honouring
+// priority and kinds: every (country, kind) bucket goes to the first market
+// that matches it. Pinned customers are not included (they are counted apart).
+export function marketCustomerCounts(markets: PreorderMarket[], stats: Record<string, CountryGeo>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [iso, s] of Object.entries(stats)) {
+    for (const kind of ["business", "person"] as const) {
+      const n = s[kind] ?? 0;
+      if (!n) continue;
+      const hit = markets.find((m) => marketMatches(m, iso, kind));
+      if (hit) out[hit.id] = (out[hit.id] ?? 0) + n;
+    }
+  }
+  return out;
+}
+
 export function MarketsPanel({
   markets,
   stats,
@@ -88,6 +111,7 @@ export function MarketsPanel({
   const assigned = new Set(markets.flatMap((m) => m.countries));
   const unassigned = Object.entries(stats).filter(([iso, s]) => !assigned.has(iso) && s.customers > 0);
   const unassignedCustomers = unassigned.reduce((n, [, s]) => n + s.customers, 0);
+  const counts = useMemo(() => marketCustomerCounts(markets, stats), [markets, stats]);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 
   return (
@@ -137,7 +161,7 @@ export function MarketsPanel({
                 key={m.id}
                 market={m}
                 index={i}
-                customers={m.countries.reduce((n, iso) => n + (stats[iso]?.customers ?? 0), 0)}
+                customers={counts[m.id] ?? 0}
                 pinned={pinned?.[m.id] ?? 0}
                 onEdit={() => onEdit(m.id)}
                 onShowCustomers={() => onShowCustomers(m.id)}
@@ -257,27 +281,34 @@ function MarketRow({
 type CountryFilter = "all" | "unassigned" | string; // string = market id
 
 export function CountriesTable({
+  campaignId,
   stats,
   markets,
   countryNames,
   onAssign,
   onOpenCountry,
+  onOpenCustomer,
 }: {
+  campaignId: string;
   stats: Record<string, CountryGeo>;
   markets: PreorderMarket[];
   countryNames: Record<string, string>;
   onAssign: (marketId: string | null, isos: string[]) => Promise<void>;
   onOpenCountry: (iso: string) => void;
+  onOpenCustomer: (partnerMkId: string) => void;
 }) {
   const [q, setQ] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set()); // countries showing their customers
   const [filter, setFilter] = useState<CountryFilter>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null); // iso being assigned, or "bulk"
   const [bulkTarget, setBulkTarget] = useState<string>("");
 
-  const marketOf = useMemo(() => {
-    const m = new Map<string, PreorderMarket>();
-    for (const mk of markets) for (const iso of mk.countries) m.set(iso, mk);
+  const marketOf = useMemo(() => firstMarketByCountry(markets), [markets]);
+  // Countries listed by more than one market — the priority note on the row.
+  const alsoIn = useMemo(() => {
+    const m = new Map<string, PreorderMarket[]>();
+    for (const mk of markets) for (const iso of mk.countries) m.set(iso, [...(m.get(iso) ?? []), mk]);
     return m;
   }, [markets]);
 
@@ -387,7 +418,8 @@ export function CountriesTable({
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent border-b border-border">
-            <TableHead className="h-9 w-10 pl-4">
+            <TableHead className="h-9 w-8" />
+            <TableHead className="h-9 w-10 pl-2">
               <input type="checkbox" checked={allVisibleSelected} onChange={toggleAll} aria-label="Select all" className="accent-lime-600" />
             </TableHead>
             <TableHead className={th}>Country</TableHead>
@@ -399,9 +431,25 @@ export function CountriesTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((r) => (
-            <TableRow key={r.iso} className={cn("border-b border-border/60", selected.has(r.iso) && "bg-lime-50/40 dark:bg-lime-950/10")}>
-              <TableCell className="pl-4">
+          {rows.map((r) => {
+            const isOpen = expanded.has(r.iso);
+            const others = (alsoIn.get(r.iso) ?? []).filter((m) => m.id !== r.market?.id);
+            return (
+            <Fragment key={r.iso}>
+            <TableRow className={cn("border-b border-border/60", selected.has(r.iso) && "bg-lime-50/40 dark:bg-lime-950/10", isOpen && "bg-muted/20")}>
+              <TableCell className="pl-3 pr-0">
+                <button
+                  type="button"
+                  onClick={() => setExpanded((prev) => { const n = new Set(prev); if (n.has(r.iso)) n.delete(r.iso); else n.add(r.iso); return n; })}
+                  className="flex h-7 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted"
+                  aria-label={isOpen ? "Hide customers" : "Show customers"}
+                  aria-expanded={isOpen}
+                  title={isOpen ? "Hide customers" : `Show the ${r.s.customers} customer${r.s.customers === 1 ? "" : "s"} in ${r.name}`}
+                >
+                  {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                </button>
+              </TableCell>
+              <TableCell className="pl-2">
                 <input type="checkbox" checked={selected.has(r.iso)} onChange={() => toggle(r.iso)} aria-label={`Select ${r.name}`} className="accent-lime-600" />
               </TableCell>
               <TableCell className="py-2">
@@ -410,6 +458,11 @@ export function CountriesTable({
                   {r.name}
                   <span className="font-mono text-[10px] text-muted-foreground">{r.iso}</span>
                 </button>
+                {others.length > 0 && (
+                  <div className="text-[10px] text-muted-foreground mt-0.5" title="Listed by more than one market — the one with higher priority wins.">
+                    also in {others.map((m) => m.name).join(", ")} · priority decides
+                  </div>
+                )}
               </TableCell>
               <TableCell className="py-2">
                 <div className="flex items-center gap-2.5">
@@ -441,16 +494,80 @@ export function CountriesTable({
                 </div>
               </TableCell>
             </TableRow>
-          ))}
+            {isOpen && (
+              <TableRow className="border-b border-border/60 hover:bg-transparent">
+                <TableCell colSpan={8} className="p-0">
+                  <CountryCustomers campaignId={campaignId} iso={r.iso} total={r.s.customers} onOpen={onOpenCustomer} />
+                </TableCell>
+              </TableRow>
+            )}
+            </Fragment>
+            );
+          })}
           {rows.length === 0 && (
             <TableRow>
-              <TableCell colSpan={7} className="text-center text-[13px] text-muted-foreground py-14">
+              <TableCell colSpan={8} className="text-center text-[13px] text-muted-foreground py-14">
                 {counts.all === 0 ? "No countries yet — sync the customer directory from Metakocka first." : "No countries match."}
               </TableCell>
             </TableRow>
           )}
         </TableBody>
       </Table>
+    </div>
+  );
+}
+
+// The customers of one country, shown inline under its row (first 50).
+function CountryCustomers({ campaignId, iso, total, onOpen }: { campaignId: string; iso: string; total: number; onOpen: (partnerMkId: string) => void }) {
+  const [rows, setRows] = useState<CustomerRow[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/admin/preorder/campaigns/${campaignId}/customers?country=${encodeURIComponent(iso)}&pageSize=50`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => alive && setRows(j.items ?? []))
+      .catch(() => alive && setRows([]));
+    return () => {
+      alive = false;
+    };
+  }, [campaignId, iso]);
+  return (
+    <div className="bg-muted/20 border-l-2 border-l-lime-500/50 ml-6 my-1.5 mr-4 rounded-r-lg overflow-hidden">
+      {rows === null ? (
+        <div className="px-4 py-3 space-y-2">
+          {[0, 1, 2].map((i) => <SkeletonLine key={i} lh="h-[18px]" h="h-3" w={["w-56", "w-44", "w-64"][i]} delay={stagger(i, 60)} />)}
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="px-4 py-3 text-[12px] text-muted-foreground">No customers in this country.</div>
+      ) : (
+        <div className="divide-y divide-border/40">
+          {rows.map((c) => (
+            <button
+              key={c.partnerMkId}
+              type="button"
+              onClick={() => onOpen(c.partnerMkId)}
+              className="w-full grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_110px_120px] items-center gap-3 px-4 py-1.5 text-left hover:bg-muted/40"
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                <span className={cn("size-6 rounded-md flex items-center justify-center shrink-0", c.kind === "business" ? "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300" : "bg-muted text-muted-foreground")}>
+                  {c.kind === "business" ? <Building2 className="w-3 h-3" /> : <User className="w-3 h-3" />}
+                </span>
+                <span className="text-[12.5px] font-medium text-foreground truncate">{c.name}</span>
+              </span>
+              <span className="text-[11px] text-muted-foreground truncate">{[c.city, c.email].filter(Boolean).join(" · ")}</span>
+              <span className="min-w-0">
+                {c.market ? (
+                  <span className="inline-flex items-center gap-1.5"><MarketChip name={c.market.name} color={c.market.color} />{c.market.source === "manual" && <span className="text-[10px] text-muted-foreground">pinned</span>}</span>
+                ) : (
+                  <span className="text-[11px] text-muted-foreground">no market</span>
+                )}
+              </span>
+              <span className="text-[11px]">{c.access ? <span className="text-lime-700 dark:text-lime-400 font-medium">Unlocked</span> : <span className="text-muted-foreground">Not unlocked</span>}</span>
+              <span className="text-[11px]">{c.stage ? <SubmissionStageBadge stage={c.stage} /> : <span className="text-muted-foreground">—</span>}</span>
+            </button>
+          ))}
+          {total > rows.length && <div className="px-4 py-1.5 text-[11px] text-muted-foreground">Showing {rows.length} of {total} — the Customers view has the rest.</div>}
+        </div>
+      )}
     </div>
   );
 }

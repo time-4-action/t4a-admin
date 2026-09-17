@@ -39,9 +39,10 @@ export function CountryPicker({
   const [active, setActive] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
 
+  // First (highest-priority) market listing each country.
   const marketOf = useMemo(() => {
     const m = new Map<string, PreorderMarket>();
-    for (const mk of markets) for (const iso of mk.countries) m.set(iso, mk);
+    for (const mk of markets) for (const iso of mk.countries) if (!m.has(iso)) m.set(iso, mk);
     return m;
   }, [markets]);
 
