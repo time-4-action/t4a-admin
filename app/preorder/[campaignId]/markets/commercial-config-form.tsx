@@ -506,13 +506,14 @@ function AssortmentEditor({ value, onChange, inherited, campaign }: Pick<ConfigF
         const open = !collapsed.has(tab.id);
         return (
           <div key={tab.id} className="rounded-xl border border-border bg-surface overflow-hidden">
-            <div className="flex flex-wrap items-center gap-3 px-4 py-3 bg-muted/30 border-b border-border">
+            <div className="flex flex-wrap items-center gap-3 px-4 py-3 bg-muted/50 border-b border-border">
               <button type="button" onClick={() => toggle(tab.id)} className="inline-flex items-center gap-2 text-left min-w-0" aria-label={open ? "Collapse" : "Expand"}>
                 {open ? <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />}
-                <span className="text-[14px] font-semibold text-foreground truncate">{tab.name}</span>
+                <span className="rounded-md bg-foreground/85 text-background px-1.5 py-px text-[10px] font-semibold">Tab</span>
+                <span className="text-[15px] font-semibold text-foreground truncate">{tab.name}</span>
               </button>
               <span className="text-[12px] text-muted-foreground tabular-nums">
-                {tabVisible} of {tabRows.length} orderable{tabChanged > 0 ? ` · ${tabChanged} changed` : ""}
+                {tab.groups.length} product{tab.groups.length === 1 ? "" : "s"} · {tabVisible} of {tabRows.length} variants orderable{tabChanged > 0 ? ` · ${tabChanged} changed` : ""}
               </span>
               <div className="flex-1" />
               <BulkButtons
@@ -531,9 +532,10 @@ function AssortmentEditor({ value, onChange, inherited, campaign }: Pick<ConfigF
                   const gChanged = groupRows.filter(changed).length;
                   return (
                     <div key={group.id}>
-                      <div className="flex flex-wrap items-center gap-3 px-4 py-2 bg-muted/10">
-                        <span className="text-[12px] font-semibold text-foreground">{group.name}</span>
-                        <span className="text-[11px] text-muted-foreground tabular-nums">{gVisible}/{groupRows.length}</span>
+                      <div className="flex flex-wrap items-center gap-2.5 pl-8 pr-4 py-2 bg-muted/15 border-l-2 border-l-border ml-4">
+                        <span className="rounded-md border border-border bg-background px-1.5 py-px text-[10px] font-medium text-muted-foreground">Product</span>
+                        <span className="text-[13px] font-semibold text-foreground">{group.name}</span>
+                        <span className="text-[11px] text-muted-foreground tabular-nums">{gVisible} of {groupRows.length} variants</span>
                         <div className="flex-1" />
                         <BulkButtons
                           small
@@ -548,7 +550,7 @@ function AssortmentEditor({ value, onChange, inherited, campaign }: Pick<ConfigF
                           const isChanged = changed(r);
                           const price = rowUnitPrice(r.row);
                           return (
-                            <div key={r.row.id} className={cn("flex items-center gap-3 px-4 py-2", isChanged && "bg-lime-50/50 dark:bg-lime-950/15", !on && "opacity-80")}>
+                            <div key={r.row.id} className={cn("flex items-center gap-3 pl-8 pr-4 py-2 ml-4 border-l-2 border-l-border", isChanged && "bg-lime-50/50 dark:bg-lime-950/15", !on && "opacity-80")}>
                               {r.row.image ? (
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img src={r.row.image} alt="" className={cn("w-9 h-9 rounded-md object-cover ring-1 ring-border shrink-0", !on && "grayscale")} />
