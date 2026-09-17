@@ -33,6 +33,8 @@ import {
 import { cn } from "@/lib/utils";
 import {
   fmtMoney,
+  PricingBanner,
+  TabTierBanner,
   TabBar,
   PreorderGridTab,
   OrderSummaryPanel,
@@ -44,6 +46,7 @@ import { MkOrderStateBadge, SourceBadge, SubmissionStageBadge, VisibilityBadge, 
 import {
   LINE_STATUS_LABELS,
   CUSTOMER_KIND_LABELS,
+  CONFIG_SOURCE_LABELS,
   VAT_SOURCE_LABELS,
   computeConfirmedTotals,
   submissionStage,
@@ -54,6 +57,7 @@ import {
   type PreorderSubmission,
 } from "@/types/preorder";
 import { fmtVatRate } from "@/lib/pricing";
+import { Flag } from "@/components/flag";
 import { ViewAsCustomerButton } from "@/components/view-as-customer-button";
 
 type LoadData = {
@@ -348,7 +352,7 @@ export default function SubmissionClient({
             )}
           </MoreMenu>
         </div>
-        <div className="px-4 md:px-6 pb-2">
+        <div className="px-4 md:px-6 flex items-stretch">
           <TabBar tabs={filledTabs} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
         </div>
       </header>
@@ -392,40 +396,36 @@ export default function SubmissionClient({
                 </span>
               </div>
               {snap && (
-                <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[11px]">
-                  {snap.market ? (
-                    <MarketChip name={snap.market.name} color="sky" />
-                  ) : (
-                    <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">No market</span>
-                  )}
-                  {snap.countryIso && <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">{snap.countryIso}</span>}
-                  <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
-                    Price list <span className="font-medium text-foreground">{snap.partnerPricelist ?? "sheet"}</span>
-                    <SourceBadge source={snap.sources.pricelist} className="ml-0.5" />
-                  </span>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
-                    {snap.currency} <SourceBadge source={snap.sources.currency} className="ml-0.5" />
-                  </span>
+                <p
+                  className="mb-3 text-[12px] text-muted-foreground flex flex-wrap items-center gap-x-1.5"
+                  title={`Price list: ${CONFIG_SOURCE_LABELS[snap.sources.pricelist]} · Currency: ${CONFIG_SOURCE_LABELS[snap.sources.currency]}`}
+                >
+                  {snap.market ? <MarketChip name={snap.market.name} color="sky" /> : <span>No market</span>}
+                  {snap.countryIso && <><span className="text-border">·</span><span className="inline-flex items-center gap-1"><Flag iso={snap.countryIso} /> {snap.countryIso}</span></>}
+                  <span className="text-border">·</span>
+                  <span>{snap.partnerPricelist ?? "sheet prices"}</span>
+                  <span className="text-border">·</span>
+                  <span>{snap.currency}</span>
                   {snap.pricing ? (
                     <>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+                      <span className="text-border">·</span>
+                      <span className="inline-flex items-center gap-1 text-foreground">
                         {snap.pricing.kind === "business" ? <Building2 className="w-3 h-3" /> : <UserRound className="w-3 h-3" />}
-                        <span className="font-medium text-foreground">{CUSTOMER_KIND_LABELS[snap.pricing.kind]}</span>
-                        · {snap.pricing.basis === "rrp" ? "RRP incl. VAT" : "partner price excl. VAT"}
+                        {CUSTOMER_KIND_LABELS[snap.pricing.kind]}
                       </span>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
-                        VAT <span className="font-medium text-foreground">{fmtVatRate(snap.pricing.vatRate)}</span>
-                        <span className="text-[10px]">· {VAT_SOURCE_LABELS[snap.pricing.vatSource].toLowerCase()}</span>
-                      </span>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground tabular-nums">
-                        Net <span className="font-medium text-foreground">{fmtMoney(snap.pricing.totals.net, snap.currency)}</span>
-                        · VAT <span className="font-medium text-foreground">{fmtMoney(snap.pricing.totals.vat, snap.currency)}</span>
-                        · Gross <span className="font-medium text-foreground">{fmtMoney(snap.pricing.totals.gross, snap.currency)}</span>
-                      </span>
+                      <span>{snap.pricing.basis === "rrp" ? "at RRP incl." : "at partner price, "} {fmtVatRate(snap.pricing.vatRate)} VAT</span>
+                      <span className="text-[11px]">({VAT_SOURCE_LABELS[snap.pricing.vatSource].toLowerCase()})</span>
                     </>
                   ) : (
-                    <span className="rounded-full bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 text-amber-700 dark:text-amber-300">No VAT snapshot (submitted before VAT support)</span>
+                    <span className="text-amber-700 dark:text-amber-300">· no VAT snapshot — re-priced on register</span>
                   )}
+                </p>
+              )}
+              {/* What the customer saw while filling: how they are priced and the discount they reached. */}
+              {sheet.pricing && activeTab && (
+                <div className="mb-3 rounded-xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
+                  <PricingBanner pricing={sheet.pricing} bare />
+                  <TabTierBanner tab={activeTab} quantities={quantities} currency={currency} pricing={sheet.pricing} bare />
                 </div>
               )}
               {isLegacy && (

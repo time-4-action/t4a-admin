@@ -301,7 +301,7 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
         <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
           <div className="min-w-0">
             {campaign.tabs.length > 0 && (
-              <div className="mb-4">
+              <div className="mb-4 border-b border-border flex items-stretch">
                 <TabBar tabs={campaign.tabs} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
               </div>
             )}

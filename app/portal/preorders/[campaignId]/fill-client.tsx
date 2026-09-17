@@ -481,11 +481,8 @@ export default function FillClient({ campaignId, customerStrip }: { campaignId: 
           )}
         </div>
         {tabsForBar.length > 0 && (
-          <div className="px-4 md:px-6 pb-2.5 flex items-center gap-3">
-            <span className="text-[11px] font-medium text-muted-foreground shrink-0">{tabsForBar.length > 1 ? "Sections" : "Section"}</span>
-            <div className="flex-1 min-w-0">
-              <TabBar tabs={tabsForBar} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
-            </div>
+          <div className="px-4 md:px-6 flex items-stretch gap-3">
+            <TabBar tabs={tabsForBar} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
           </div>
         )}
       </header>

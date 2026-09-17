@@ -19,6 +19,7 @@ import {
   Loader2,
   Percent,
   ArrowLeft,
+  Layers,
   Building2,
   User,
   AlertTriangle,
@@ -80,7 +81,7 @@ export function TabBar({
   quantities: QtyMap;
 }) {
   return (
-    <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+    <nav className="flex items-stretch gap-0.5 overflow-x-auto scrollbar-none -mb-px h-9" aria-label="Sections">
       {tabs.map((t) => {
         const active = t.id === activeId;
         const count = t.groups.reduce(
@@ -93,27 +94,22 @@ export function TabBar({
             onClick={() => onSelect(t.id)}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "shrink-0 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-all",
-              active
-                ? "bg-foreground text-background shadow-sm"
-                : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground",
+              "group relative isolate inline-flex items-center gap-1.5 whitespace-nowrap px-2.5 text-[12.5px] font-medium transition-colors border-b-2",
+              active ? "border-lime-600 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
+            <Layers className={cn("w-3.5 h-3.5 shrink-0 transition-colors", active ? "text-lime-600" : "text-muted-foreground/70 group-hover:text-foreground/70")} />
             {t.name || "Tab"}
             {count > 0 && (
-              <span
-                className={cn(
-                  "text-[10px] tabular-nums rounded-full px-1.5 py-0.5 leading-none font-semibold",
-                  active ? "bg-white/25 text-white" : "bg-lime-600 text-white",
-                )}
-              >
+              <span className={cn("text-[10px] tabular-nums rounded-full px-1.5 py-px leading-none font-semibold", active ? "bg-foreground text-background" : "bg-muted text-foreground")}>
                 {count}
               </span>
             )}
+            <span className="pointer-events-none absolute inset-x-0.5 top-1 bottom-1.5 rounded-md transition-colors group-hover:bg-muted/60 -z-10" aria-hidden />
           </button>
         );
       })}
-    </div>
+    </nav>
   );
 }
 
