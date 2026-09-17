@@ -170,8 +170,8 @@ export function MarketModal({
                         onClick={() => setDraft({ ...draft, color: c })}
                         className={cn("size-7 rounded-full border-2 transition-transform", draft.color === c ? "border-foreground scale-110" : "border-transparent hover:scale-105")}
                         style={{ background: MARKET_COLORS[c].hex }}
-                        aria-label={c}
-                        title={c}
+                        aria-label={MARKET_COLORS[c].label}
+                        title={MARKET_COLORS[c].label}
                       />
                     ))}
                   </div>

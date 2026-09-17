@@ -111,17 +111,27 @@ export function SourceBadge({
   return <span className={cn(PILL, SOURCE_STYLE[source], className)}>{label ?? CONFIG_SOURCE_LABELS[source]}</span>;
 }
 
-// Market colours: the hex is what the SVG map paints with; the classes drive chips.
-export const MARKET_COLORS: Record<MarketColor, { hex: string; chip: string; dot: string; ring: string }> = {
-  sky: { hex: "#0ea5e9", chip: "bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300", dot: "bg-sky-500", ring: "ring-sky-500" },
-  violet: { hex: "#8b5cf6", chip: "bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300", dot: "bg-violet-500", ring: "ring-violet-500" },
-  amber: { hex: "#f59e0b", chip: "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300", dot: "bg-amber-500", ring: "ring-amber-500" },
-  rose: { hex: "#f43f5e", chip: "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300", dot: "bg-rose-500", ring: "ring-rose-500" },
-  emerald: { hex: "#10b981", chip: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300", dot: "bg-emerald-500", ring: "ring-emerald-500" },
-  indigo: { hex: "#6366f1", chip: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300", dot: "bg-indigo-500", ring: "ring-indigo-500" },
-  fuchsia: { hex: "#d946ef", chip: "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/50 dark:text-fuchsia-300", dot: "bg-fuchsia-500", ring: "ring-fuchsia-500" },
-  teal: { hex: "#14b8a6", chip: "bg-teal-100 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300", dot: "bg-teal-500", ring: "ring-teal-500" },
+// Market colours = the Patrik International brand palette (patrikinternational.com
+// stylesheet): brand blue, cyan, navy, steel, magenta, pink, orange, red. The
+// keys are what is stored on a market — they predate the palette, so a key like
+// "emerald" is just a slot; `label` is what people see. Chips are painted
+// inline from the hex so light and dark mode both use the real brand colour.
+export const MARKET_COLORS: Record<MarketColor, { hex: string; label: string }> = {
+  sky: { hex: "#2786b4", label: "Patrik blue" },
+  teal: { hex: "#01a0be", label: "Cyan" },
+  indigo: { hex: "#083080", label: "Navy" },
+  violet: { hex: "#43609c", label: "Steel" },
+  rose: { hex: "#b3004b", label: "Magenta" },
+  fuchsia: { hex: "#ff1a7b", label: "Pink" },
+  amber: { hex: "#ff8a3c", label: "Orange" },
+  emerald: { hex: "#e91b23", label: "Red" },
 };
+
+// Chip styling from a brand hex: tinted background, coloured text and dot.
+export function marketChipStyle(color: MarketColor): React.CSSProperties {
+  const hex = MARKET_COLORS[color].hex;
+  return { background: `${hex}1f`, color: hex };
+}
 
 export function MarketChip({
   name,
@@ -134,8 +144,8 @@ export function MarketChip({
 }) {
   const c = MARKET_COLORS[color];
   return (
-    <span className={cn(PILL, c.chip, className)}>
-      <span className={cn("size-1.5 rounded-full", c.dot)} />
+    <span className={cn(PILL, "dark:brightness-125", className)} style={marketChipStyle(color)}>
+      <span className="size-1.5 rounded-full" style={{ background: c.hex }} />
       {name}
     </span>
   );
