@@ -75,28 +75,30 @@ export function CountryPicker({
 
   const europeMissing = EUROPE_ISO.filter((iso) => !value.includes(iso) && (stats[iso]?.customers ?? 0) > 0 && (!marketOf.get(iso) || marketOf.get(iso)!.id === currentMarketId));
 
+  const inputRef = useRef<HTMLInputElement>(null);
+
   return (
-    <div ref={rootRef} className="space-y-2">
-      <div className="flex flex-wrap gap-1.5 min-h-[34px] rounded-lg border border-border bg-surface p-2">
-        {value.length === 0 && <span className="text-[12px] text-muted-foreground px-1 py-0.5">No countries yet — search below to add some.</span>}
+    <div ref={rootRef} className="relative">
+      {/* One field: the picked countries as chips, then the search caret right after them. */}
+      <div
+        onClick={() => inputRef.current?.focus()}
+        className="flex flex-wrap items-center gap-1.5 min-h-[40px] rounded-lg border border-input bg-background px-2 py-1.5 cursor-text focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50"
+      >
         {value.map((iso) => {
           const other = marketOf.get(iso);
           const moved = other && other.id !== currentMarketId;
           return (
-            <span key={iso} className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium", moved ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200" : "bg-muted text-foreground")} title={moved ? `Also in ${other.name} — the market with higher priority wins` : undefined}>
+            <span key={iso} className={cn("inline-flex items-center gap-1 rounded-full px-2 h-6 text-[11px] font-medium", moved ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200" : "bg-muted text-foreground")} title={moved ? `Also in ${other.name} — the market with higher priority wins` : undefined}>
               <Flag iso={iso} /> {countryNames[iso] ?? iso}
               <span className="text-[10px] font-normal opacity-70 tabular-nums">{stats[iso]?.customers ?? 0}</span>
-              <button type="button" onClick={() => remove(iso)} className="opacity-60 hover:opacity-100" aria-label={`Remove ${iso}`}>
+              <button type="button" onClick={(e) => { e.stopPropagation(); remove(iso); }} className="opacity-60 hover:opacity-100" aria-label={`Remove ${iso}`}>
                 <X className="w-3 h-3" />
               </button>
             </span>
           );
         })}
-      </div>
-
-      <div className="relative">
-        <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
         <input
+          ref={inputRef}
           value={q}
           onChange={(e) => {
             setQ(e.target.value);
@@ -110,14 +112,21 @@ export function CountryPicker({
             } else if (e.key === "ArrowUp") {
               e.preventDefault();
               setActive((a) => Math.max(0, a - 1));
-            } else if (e.key === "Enter" && options[active]) {
+            } else if (e.key === "Enter" && q.trim() && options[active]) {
               e.preventDefault();
               add(options[active].iso);
+            } else if (e.key === "Backspace" && q === "" && value.length > 0) {
+              // Nothing typed: Backspace takes the last chip, like any tag field.
+              e.preventDefault();
+              remove(value[value.length - 1]);
             } else if (e.key === "Escape") setOpen(false);
           }}
-          placeholder="Add a country — type a name or ISO code…"
-          className="h-8 w-full rounded-md border border-input bg-background pl-8 pr-2 text-[12px] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          placeholder={value.length === 0 ? "Type a country name or ISO code…" : "Add another…"}
+          className="h-6 min-w-[160px] flex-1 bg-transparent px-1 text-[12.5px] outline-none placeholder:text-muted-foreground/60"
         />
+      </div>
+
+      <div className="relative">
         {open && options.length > 0 && (
           <div className="absolute left-0 right-0 top-full mt-1 z-20 rounded-lg border border-border bg-background shadow-lg overflow-hidden">
             {options.map((o, i) => (

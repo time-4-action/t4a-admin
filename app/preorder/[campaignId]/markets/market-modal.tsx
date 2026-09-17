@@ -6,7 +6,7 @@
 // from the campaign defaults. One draft, one Save.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Trash2, Check, Globe2, Wallet, Percent, Boxes, Search, X, Building2, User } from "lucide-react";
+import { Loader2, Trash2, Check, Globe2, Wallet, Percent, Boxes, X, Building2, User } from "lucide-react";
 import { Flag } from "@/components/flag";
 import type { MkCustomerView } from "@/lib/mk-customers";
 import { Button } from "@/components/ui/button";
@@ -392,22 +392,24 @@ function CustomerPicker({
   };
   const remove = (id: string) => onChange(value.filter((c) => c.partnerMkId !== id));
 
+  const inputRef = useRef<HTMLInputElement>(null);
+
   return (
-    <div ref={rootRef} className="space-y-2">
-      <div className="flex flex-wrap gap-1.5 min-h-[34px] rounded-lg border border-border bg-surface p-2">
-        {value.length === 0 && <span className="text-[12px] text-muted-foreground px-1 py-0.5">No hand-picked customers — search below to add one.</span>}
+    <div ref={rootRef} className="relative">
+      <div
+        onClick={() => inputRef.current?.focus()}
+        className="flex flex-wrap items-center gap-1.5 min-h-[40px] rounded-lg border border-input bg-background px-2 py-1.5 cursor-text focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50"
+      >
         {value.map((c) => (
-          <span key={c.partnerMkId} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-foreground">
+          <span key={c.partnerMkId} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 h-6 text-[11px] font-medium text-foreground">
             {c.partnerName || c.partnerMkId}
-            <button type="button" onClick={() => remove(c.partnerMkId)} className="opacity-60 hover:opacity-100" aria-label={`Remove ${c.partnerName}`}>
+            <button type="button" onClick={(e) => { e.stopPropagation(); remove(c.partnerMkId); }} className="opacity-60 hover:opacity-100" aria-label={`Remove ${c.partnerName}`}>
               <X className="w-3 h-3" />
             </button>
           </span>
         ))}
-      </div>
-      <div className="relative">
-        <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
         <input
+          ref={inputRef}
           value={q}
           onChange={(e) => {
             setQ(e.target.value);
@@ -424,11 +426,16 @@ function CustomerPicker({
             } else if (e.key === "Enter" && q.trim() && options[active]) {
               e.preventDefault();
               add(options[active]);
+            } else if (e.key === "Backspace" && q === "" && value.length > 0) {
+              e.preventDefault();
+              remove(value[value.length - 1].partnerMkId);
             } else if (e.key === "Escape") setOpen(false);
           }}
-          placeholder="Add a customer — type a name, email or VAT id…"
-          className="h-9 w-full rounded-md border border-input bg-background pl-8 pr-2 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          placeholder={value.length === 0 ? "Type a name, email or VAT id…" : "Add another…"}
+          className="h-6 min-w-[200px] flex-1 bg-transparent px-1 text-[12.5px] outline-none placeholder:text-muted-foreground/60"
         />
+      </div>
+      <div className="relative">
         {open && q.trim().length >= 2 && (
           <div className="absolute left-0 right-0 top-full mt-1 z-20 rounded-lg border border-border bg-background shadow-lg overflow-hidden">
             {loading && <div className="px-3 py-2 text-[12px] text-muted-foreground">Searching…</div>}
