@@ -535,21 +535,25 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
               {/* The tab reads like a document: an editable title, a subtitle partners
                   see, then the discount ladder as one line. No card around it. */}
               <div className="flex flex-wrap items-start gap-x-4 gap-y-2 px-1">
-                <div className="min-w-0 flex-1">
-                  <input
-                    value={activeTab.name}
-                    onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, name: e.target.value }))}
-                    className="h-10 w-full max-w-[560px] -ml-2 rounded-md border border-transparent bg-transparent px-2 font-display text-[22px] font-semibold tracking-tight text-foreground hover:border-border focus:border-ring focus:bg-background focus:outline-none placeholder:text-muted-foreground/50"
-                    placeholder="Tab name"
-                    aria-label="Tab name"
-                  />
-                  <input
-                    value={activeTab.discountNote ?? ""}
-                    onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, discountNote: e.target.value }))}
-                    className="mt-0.5 h-8 w-full max-w-[640px] -ml-2 rounded-md border border-transparent bg-transparent px-2 text-[13px] text-muted-foreground hover:border-border focus:border-ring focus:bg-background focus:text-foreground focus:outline-none placeholder:text-muted-foreground/50"
-                    placeholder="Add a note partners see under this tab — e.g. free shipping over €5,000"
-                    aria-label="Note to partners"
-                  />
+                <div className="min-w-0 flex-1 flex flex-col">
+                  <div className="-ml-2 max-w-[560px]">
+                    <input
+                      value={activeTab.name}
+                      onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, name: e.target.value }))}
+                      className="block h-10 w-full rounded-md border border-transparent bg-transparent px-2 font-display text-[22px] font-semibold tracking-tight text-foreground hover:border-border focus:border-ring focus:bg-background focus:outline-none placeholder:text-muted-foreground/50"
+                      placeholder="Tab name"
+                      aria-label="Tab name"
+                    />
+                  </div>
+                  <div className="-ml-2 mt-0.5 max-w-[640px]">
+                    <input
+                      value={activeTab.discountNote ?? ""}
+                      onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, discountNote: e.target.value }))}
+                      className="block h-8 w-full rounded-md border border-transparent bg-transparent px-2 text-[13px] text-muted-foreground hover:border-border focus:border-ring focus:bg-background focus:text-foreground focus:outline-none placeholder:text-muted-foreground/50"
+                      placeholder="Note partners see under this tab — e.g. free shipping over €5,000"
+                      aria-label="Note to partners"
+                    />
+                  </div>
                 </div>
                 {activeTab.groups.length > 0 && (() => {
                   const allCollapsed = activeTab.groups.every((g) => collapsed.has(g.id));
@@ -1211,23 +1215,17 @@ function TierEditor({
       </div>
 
       {open && (
-        <div className="mt-2 rounded-xl border border-border bg-surface px-4 py-4 space-y-3">
-          <p className="rounded-lg bg-muted/40 px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
-            Reach a spend inside <span className="font-medium text-foreground">{tab.name || "this tab"}</span> and every
-            line in it drops by that tier&rsquo;s percentage. Tiers don&rsquo;t stack — only the highest one reached
-            applies, and every tab is counted on its own. Thresholds are the totals the partner sees (incl. VAT).
-          </p>
-
+        <div className="mt-2 rounded-xl border border-border bg-surface px-4 py-4 space-y-3 max-w-[760px]">
           {tiers.length === 0 ? (
-            <button
-              type="button"
-              onClick={addTier}
-              className="w-full rounded-lg border border-dashed border-border py-6 flex flex-col items-center gap-1.5 text-muted-foreground hover:text-foreground hover:border-foreground/30 hover:bg-muted/30 transition-colors"
-            >
-              <Percent className="w-5 h-5 opacity-50" />
-              <span className="text-[12px] font-medium">Add the first tier</span>
-              <span className="text-[11px]">e.g. −5% once the partner spends {fmtMoney(10000, currency)} in this tab</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-border px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-[12.5px] font-medium text-foreground">No tiers yet</div>
+                <div className="text-[11.5px] text-muted-foreground">A first tier usually looks like −5% once the partner spends {fmtMoney(10000, currency)} in this tab.</div>
+              </div>
+              <Button size="sm" variant="outline" className="h-8 bg-background" onClick={addTier}>
+                <Plus className="w-3.5 h-3.5" /> Add tier
+              </Button>
+            </div>
           ) : (
             <div className="space-y-1.5">
               <div className="hidden sm:grid grid-cols-[minmax(0,320px)_150px_110px_32px] gap-2 text-[11px] font-medium text-muted-foreground px-1">
@@ -1300,6 +1298,11 @@ function TierEditor({
               ))}
             </ul>
           )}
+
+          <p className="text-[11px] leading-relaxed text-muted-foreground max-w-prose">
+            Spend enough inside <span className="font-medium text-foreground">{tab.name || "this tab"}</span> and every line in it drops by that tier&rsquo;s percentage.
+            Only the highest tier reached applies; each tab counts on its own. Thresholds are the totals the partner sees, incl. VAT.
+          </p>
 
           {otherTabCount > 0 && tiers.length > 0 && (
             <div className="flex items-center justify-end pt-1">
