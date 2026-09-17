@@ -300,7 +300,10 @@ export async function registerSalesOrder(
 
 // ── reading the live order ────────────────────────────────────────────────────
 
-const ORDER_CACHE_MS = 30_000;
+// Only a burst guard (one MK read per order per few seconds while a page polls) —
+// a reload after an edit in Metakocka must show the edit, so this is NOT a cache
+// in the "stale for a while" sense.
+const ORDER_CACHE_MS = 2_000;
 const LAST_SEEN_THROTTLE_MS = 60_000;
 
 export function invalidateOrderCache(mkId: string): void {

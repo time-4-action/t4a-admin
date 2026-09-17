@@ -102,7 +102,8 @@ export async function GET(_req: Request, { params }: RouteParams) {
       mkSalesOrder: subDoc.mkSalesOrder?.mkId ? { mkId: subDoc.mkSalesOrder.mkId, countCode: subDoc.mkSalesOrder.countCode } : null,
       resultPublishedToCustomer: subDoc.resultPublishedToCustomer,
     });
-    if (visible) allocation = await readSubmissionOrder(subDoc);
+    // Always the live Metakocka order — a reload after an edit there must show it.
+    if (visible) allocation = await readSubmissionOrder(subDoc, { fresh: true });
   }
 
   return NextResponse.json({

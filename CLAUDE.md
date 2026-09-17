@@ -815,8 +815,9 @@ Publication: `POST …/submissions/[id]/publish { published }` re-reads the live
 order (a deleted order cannot be published), sets `resultPublishedToCustomer` /
 `At` / `By` and remembers `publishedHash` so later MK edits show as "changed
 since publish" to admins. **After publication the customer sees the live MK
-order** (`readSubmissionOrder`, 30 s single-flight cache per order via
-`cached()` in `lib/auth0-cache.ts`; `allocationFromDocument` in
+order** (`readSubmissionOrder`, a 2 s burst guard per order via `cached()` in
+`lib/auth0-cache.ts`, and the portal page reads it `fresh` — a reload shows an
+edit made in MK; `allocationFromDocument` in
 `lib/preorder-snapshot.ts` joins request vs order by product code). Unlocking a
 submission with an order requires `detachOrder` in the PATCH: the order moves to
 `mkSalesOrderHistory` (optionally `delete_document`) and the next submit uses a
