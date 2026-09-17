@@ -1001,36 +1001,40 @@ function RelatedDocuments({ detail, scope, hrefBase }: { detail: DocDetail; scop
     groups.set(key, g);
   }
   if (groups.size === 0) return null;
+  const rows = Array.from(groups.values()).flatMap((g) => g.items.map((l) => ({ ...l, kind: g.kind, label: g.kind ? DOC_KIND_LABELS[g.kind].singular : g.label, Icon: g.Icon })));
   return (
-    <div className="px-4 py-3">
-      <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">Related documents</p>
-      <div className="space-y-2">
-        {Array.from(groups.values()).map((g) => (
-          <div key={g.label} className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-            <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground w-32 shrink-0">
-              <g.Icon className="h-3.5 w-3.5" /> {g.items.length === 1 && g.kind ? DOC_KIND_LABELS[g.kind].singular : g.label}
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {g.items.map((l) =>
-                g.kind ? (
-                  <Link
-                    key={l.mkId}
-                    href={`${hrefBase}/${DOC_KIND_SLUGS[g.kind]}/${encodeURIComponent(l.mkId)}`}
-                    className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 font-mono text-[12px] text-foreground hover:border-foreground/40 hover:bg-muted/40 transition-colors"
-                  >
-                    {l.countCode || l.mkId}
-                    <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                  </Link>
-                ) : (
-                  <span key={l.mkId} className="inline-flex items-center rounded-md border border-border/60 bg-muted/30 px-2 py-1 font-mono text-[12px] text-muted-foreground">
-                    {l.countCode || l.mkId}
-                  </span>
-                ),
-              )}
-            </div>
-          </div>
-        ))}
+    <div>
+      <div className="px-4 py-2.5 flex items-center gap-2 bg-muted/20 border-b border-border/60">
+        <span className="text-[12px] font-semibold text-foreground">Related documents</span>
+        <span className="text-[11px] text-muted-foreground tabular-nums">{rows.length}</span>
       </div>
+      <ul className="divide-y divide-border/50">
+        {rows.map((r) => {
+          const inner = (
+            <>
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted shrink-0">
+                <r.Icon className="h-4 w-4 text-muted-foreground" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[11px] text-muted-foreground leading-tight">{r.label}</span>
+                <span className="block text-[13px] font-semibold text-foreground leading-tight truncate">{r.countCode || r.mkId}</span>
+              </span>
+              {r.kind && <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-foreground group-hover:translate-x-0.5 transition-all shrink-0" />}
+            </>
+          );
+          return (
+            <li key={r.mkId}>
+              {r.kind ? (
+                <Link href={`${hrefBase}/${DOC_KIND_SLUGS[r.kind]}/${encodeURIComponent(r.mkId)}`} className="group flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors">
+                  {inner}
+                </Link>
+              ) : (
+                <div className="flex items-center gap-3 px-4 py-2.5 opacity-80">{inner}</div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
