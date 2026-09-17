@@ -57,6 +57,7 @@ import {
 } from "@/types/preorder";
 import { fmtVatRate } from "@/lib/pricing";
 import { Flag } from "@/components/flag";
+import { CampaignHeader } from "@/app/preorder/[campaignId]/campaign-nav";
 import { ViewAsCustomerButton } from "@/components/view-as-customer-button";
 
 type LoadData = {
@@ -320,41 +321,42 @@ export default function SubmissionClient({
 
   return (
     <div className="flex flex-col h-full">
-      <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-20">
-        <div className="flex items-center gap-3 px-4 md:px-6 h-14">
-          <Link href={`/preorder/${campaignId}/submissions`} className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back">
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
-          <div className="min-w-0">
-            <h1 className="text-[15px] font-semibold text-foreground truncate leading-tight">{submission.partnerName}</h1>
-            <div className="text-[11px] text-muted-foreground truncate flex items-center gap-1.5">
-              <span className="truncate">{campaign.title}</span>
-              {isLocked && (
-                <span className="inline-flex items-center gap-1 shrink-0">
-                  <span className="text-muted-foreground/40">·</span>
-                  <Lock className="w-3 h-3" /> Locked to customer
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="flex-1" />
-          <ViewAsCustomerButton partnerMkId={submission.partnerMkId} to={`/portal/preorders/${campaignId}`} className="hidden sm:inline-flex" />
-          <SubmissionStageBadge stage={stage} />
-          <MoreMenu>
-            {(close) => (
-              <>
-                {isLocked && (
-                  <MenuItem icon={LockOpen} label="Unlock for customer" onClick={() => { close(); setDeleteInMk(false); setUnlockDialog(true); }} />
-                )}
-                <MenuItem icon={Trash2} label="Delete submission" destructive onClick={() => { close(); setDeleteDialogOpen(true); }} />
-              </>
+      {/* The campaign header with its tab strip, like every other campaign page; the
+          preorder's own sections (AEON · FOIL) sit at the right end of the tab row. */}
+      <CampaignHeader
+        campaignId={campaignId}
+        active="preorders"
+        backHref={`/preorder/${campaignId}/submissions`}
+        title={submission.partnerName}
+        meta={
+          <>
+            <span className="truncate">{campaign.title}</span>
+            {isLocked && (
+              <span className="inline-flex items-center gap-1 shrink-0">
+                <span className="text-muted-foreground/40">·</span>
+                <Lock className="w-3 h-3" /> Locked to customer
+              </span>
             )}
-          </MoreMenu>
-        </div>
-        <div className="px-4 md:px-6 flex items-stretch">
-          <TabBar tabs={filledTabs} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
-        </div>
-      </header>
+          </>
+        }
+        actions={
+          <>
+            <ViewAsCustomerButton partnerMkId={submission.partnerMkId} to={`/portal/preorders/${campaignId}`} className="hidden sm:inline-flex" />
+            <SubmissionStageBadge stage={stage} />
+            <MoreMenu>
+              {(close) => (
+                <>
+                  {isLocked && (
+                    <MenuItem icon={LockOpen} label="Unlock for customer" onClick={() => { close(); setDeleteInMk(false); setUnlockDialog(true); }} />
+                  )}
+                  <MenuItem icon={Trash2} label="Delete submission" destructive onClick={() => { close(); setDeleteDialogOpen(true); }} />
+                </>
+              )}
+            </MoreMenu>
+          </>
+        }
+        navExtra={filledTabs.length > 0 ? <TabBar tabs={filledTabs} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} /> : undefined}
+      />
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
