@@ -16,8 +16,8 @@ type PortalUser = { name?: string | null; email?: string | null; picture?: strin
 const links = [
   { href: "/portal/preorders", label: "Preorders", icon: ShoppingCart },
   { href: "/portal/invoices", label: "Invoices", icon: ReceiptText },
+  { href: "/portal/orders", label: "Sales orders", icon: ClipboardList },
   { href: "/portal/credit-notes", label: "Credit notes", icon: FileMinus },
-  { href: "/portal/orders", label: "Orders", icon: ClipboardList },
   { href: "/portal/account", label: "My Account", icon: Building2 },
 ];
 

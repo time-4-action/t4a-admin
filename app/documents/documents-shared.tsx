@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
@@ -632,34 +632,79 @@ function DocumentFilterBar({
   // Search + count only; the status filter sits in the table header.
   const f = filters.value;
   const noun = DOC_KIND_LABELS[kind].plural.toLowerCase();
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const field = "h-8 text-xs bg-background";
+  // "/" focuses the search from anywhere on the page; Esc clears it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+      if (e.key === "/" && !typing) {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const searching = f.q.trim().length > 0;
 
   return (
     <div className="px-3 py-2.5 border-b border-border/60 flex flex-wrap items-center gap-2">
-      <div className="relative w-full sm:w-56">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" aria-hidden />
+      <div className="relative w-full sm:w-96">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden />
         <Input
-          placeholder={`Search ${noun}…`}
+          ref={inputRef}
+          placeholder={`Search ${noun} by number, product or reference…`}
           value={f.q}
           onChange={(e) => filters.set("q", e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              filters.set("q", "");
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
           aria-label={`Search ${noun}`}
-          className={cn(field, "pl-8 w-full")}
+          className="h-9 w-full rounded-lg bg-background pl-9 pr-16 text-[13px] shadow-none focus-visible:ring-2"
         />
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+          {searching ? (
+            <button
+              type="button"
+              onClick={() => {
+                filters.set("q", "");
+                inputRef.current?.focus();
+              }}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label="Clear search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <kbd className="hidden sm:inline-flex h-5 items-center rounded border border-border bg-muted/60 px-1.5 font-mono text-[10px] text-muted-foreground" title="Press / to search">
+              /
+            </kbd>
+          )}
+        </div>
       </div>
 
-      {filters.active && (
+      {filters.active && !searching && (
         <button
           type="button"
           onClick={filters.reset}
           className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-[12px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <X className="h-3.5 w-3.5" /> Clear
+          <X className="h-3.5 w-3.5" /> Clear filters
         </button>
       )}
 
       <p className="ml-auto text-[12px] text-muted-foreground tabular-nums">
-        {filters.active ? (
+        {searching ? (
+          <>
+            <span className="font-semibold text-foreground">{shown}</span> {shown === 1 ? "result" : "results"} for <span className="text-foreground">&ldquo;{f.q.trim()}&rdquo;</span>
+          </>
+        ) : filters.active ? (
           <>
             <span className="font-semibold text-foreground">{shown}</span> of {items.length} {noun}
           </>
