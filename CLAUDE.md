@@ -633,6 +633,13 @@ the customer. Gated by the `preorder` section
 (`SECTION_ROLES.preorder = ["admin", "preorder-admin"]`, role name via
 `NEXT_PUBLIC_PREORDER_ADMIN_ROLE_NAME` in `lib/preorder-role.ts`).
 
+**Invite links point at the portal domain.** `GET …/campaigns/[id]/invite`
+returns `url` built with `portalUrl()` (`lib/portal-url.ts`, `PORTAL_BASE_URL`,
+default `https://b2b.time-4-action.com`) — every "Copy link" uses it, never
+`window.location.origin`, so a link copied from any admin host reads
+`https://b2b.time-4-action.com/portal/preorders/join/<token>`. Set
+`PORTAL_BASE_URL=http://localhost:3000` locally to test the join flow.
+
 **Access is invite-only, always.** A customer sees a campaign only with a
 `PreorderAccess` grant (created by opening the invite link while logged in as a
 matched Metakocka partner, `POST /api/portal/preorder/join`) or an existing
@@ -949,6 +956,7 @@ NEXT_PUBLIC_BUILDER_ADMIN_ROLE_NAME  # Role that grants the Builder section (def
 NEXT_PUBLIC_DOCUMENTS_ADMIN_ROLE_NAME # Role that grants the Documents browse section (default: "documents-admin")
 NEXT_PUBLIC_PREORDER_ADMIN_ROLE_NAME  # Role that grants the Preorder section (default: "preorder-admin")
 NEXT_PUBLIC_CUSTOMERS_ADMIN_ROLE_NAME # Role that grants the Customers section on its own (default: "customers-admin"; preorder-admins have it implicitly)
+PORTAL_BASE_URL              # Public origin of the B2B portal used in customer invite links (default: https://b2b.time-4-action.com)
 MK_HOME_COUNTRY              # ISO-2 home country for domestic MK partners without an address country (default: SI)
 MK_PARTNER_SYNC_MODE         # Customer directory sync strategy: all (default) | sharded
 AUTH0_BASE_URL               # Production base URL (set by docker-compose)

@@ -50,7 +50,7 @@ export function CopyInviteButton({ campaignId, className }: { campaignId: string
     fetch(`/api/admin/preorder/campaigns/${campaignId}/invite`)
       .then((r) => r.json())
       .then((d) => {
-        if (alive && d?.path) setInviteUrl(`${window.location.origin}${d.path}`);
+        if (alive && d?.url) setInviteUrl(d.url);
       })
       .catch(() => {});
     return () => {

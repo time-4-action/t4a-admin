@@ -86,7 +86,7 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
         setCampaign(c);
         setGeo(g);
         setPricelists(pl?.pricelists ?? []);
-        if (inv?.path) setInviteUrl(`${window.location.origin}${inv.path}`);
+        if (inv?.url) setInviteUrl(inv.url);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Error"))
       .finally(() => setLoading(false));
