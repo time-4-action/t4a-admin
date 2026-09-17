@@ -255,6 +255,7 @@ export function PreorderGridTab({
   renderQty,
   pricing,
   bare = false,
+  searchable = false,
 }: {
   tab: PreorderTab;
   quantities: QtyMap;
@@ -268,16 +269,46 @@ export function PreorderGridTab({
   renderQty?: (rowId: string, qty: number) => ReactNode; // custom read-only qty cell
   pricing?: PricingContext | null; // the customer's price basis (campaign.pricing); partner when absent
   bare?: boolean; // no border / radius — the caller frames it
+  searchable?: boolean; // a search box above the table (name / SKU / group)
 }) {
   const th = "text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-2";
   const basis: PriceBasis = pricing?.basis ?? "partner";
-  const groups = onlyFilled
-    ? tab.groups
-        .map((g) => ({ ...g, rows: g.rows.filter((r) => (quantities[r.id] || 0) > 0) }))
-        .filter((g) => g.rows.length > 0)
-    : tab.groups;
+  const [search, setSearch] = useState("");
+  const needle = searchable ? search.trim().toLowerCase() : "";
+  const groups = tab.groups
+    .map((g) => ({
+      ...g,
+      rows: g.rows.filter(
+        (r) =>
+          (!onlyFilled || (quantities[r.id] || 0) > 0) &&
+          (!needle || g.name.toLowerCase().includes(needle) || r.name.toLowerCase().includes(needle) || r.code.toLowerCase().includes(needle) || (r.variantLabel ?? "").toLowerCase().includes(needle)),
+      ),
+    }))
+    .filter((g) => g.rows.length > 0 || (!onlyFilled && !needle));
+  const filled = tab.groups.reduce((n, g) => n + g.rows.filter((r) => (quantities[r.id] || 0) > 0).length, 0);
   return (
     <div className={cn("overflow-x-auto", !bare && "rounded-xl border border-border bg-surface")}>
+      {searchable && (
+        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border/60">
+          <div className="relative max-w-sm flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search products, SKU…"
+              className="h-8 w-full rounded-lg border border-border bg-background pl-8 pr-8 text-[12px] focus:border-ring focus:outline-none"
+            />
+            {search && (
+              <button type="button" onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Clear search">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <span className="text-[11px] text-muted-foreground tabular-nums ml-auto">
+            {needle ? `${groups.reduce((n, g) => n + g.rows.length, 0)} match${groups.reduce((n, g) => n + g.rows.length, 0) === 1 ? "" : "es"}` : filled > 0 ? `${filled} line${filled === 1 ? "" : "s"} filled` : ""}
+          </span>
+        </div>
+      )}
       <table className="w-full text-[12px] border-collapse">
         <thead className="sticky top-0 z-10 bg-surface">
           <tr className="border-b border-border bg-muted/20">
@@ -309,7 +340,7 @@ export function PreorderGridTab({
           {groups.every((g) => g.rows.length === 0) && (
             <tr>
               <td colSpan={7} className="text-center text-[13px] text-muted-foreground py-12">
-                {onlyFilled ? "No items ordered in this tab." : "No products in this tab."}
+                {needle ? "No product matches your search." : onlyFilled ? "No items ordered in this tab." : "No products in this tab."}
               </td>
             </tr>
           )}
@@ -881,6 +912,127 @@ export function TabTierBanner({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ── Sheet context bar ────────────────────────────────────────────────────────
+// One dense row above the products: who is ordering and how they are priced (left),
+// the tab's volume-discount ladder as a stepped track with the current position
+// (middle), and what the reached tier saves (right). Replaces the stacked
+// pricing sentence + discount banner on the customer's and the admin's order views.
+export function SheetContextBar({
+  pricing,
+  tab,
+  quantities,
+  currency,
+  className,
+}: {
+  pricing: PricingContext | null | undefined;
+  tab: PreorderTab | null;
+  quantities: QtyMap;
+  currency: string;
+  className?: string;
+}) {
+  const ladder = tab ? activeTiers(tab.tiers) : [];
+  const totals = useMemo(() => (tab ? computeTabTotals({ tabs: [tab], pricing: pricing ?? null }, quantities)[0] : null), [tab, quantities, pricing]);
+  if (!pricing && ladder.length === 0) return null;
+  const missing = vatIsMissing(pricing);
+  const company = pricing?.kind === "business";
+  const reached = totals?.tier ?? null;
+  const next = totals?.nextTier ?? null;
+  const amount = totals?.amount ?? 0;
+  // Tiers sit at EQUAL spacing along the track (thresholds can be wildly apart —
+  // €10k then €4bn — so a proportional track would pile every marker at the left).
+  // The current position is interpolated inside the segment it is in.
+  const n = ladder.length;
+  const tierX = (i: number) => ((i + 1) / n) * 100; // i-th tier (0-based) → % along the track
+  const reachedCount = ladder.filter((t) => amount + 1e-9 >= t.minAmount).length;
+  const lower = reachedCount === 0 ? 0 : ladder[reachedCount - 1].minAmount;
+  const upper = reachedCount < n ? ladder[reachedCount].minAmount : null;
+  const frac = upper == null ? 1 : Math.min(1, Math.max(0, (amount - lower) / Math.max(1e-9, upper - lower)));
+  const pos = n === 0 ? 0 : upper == null ? 100 : ((reachedCount + frac) / n) * 100;
+
+  return (
+    <div className={cn("grid grid-cols-1 lg:grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-6 gap-y-3 px-4 py-3", className)}>
+      {/* who / how priced */}
+      {pricing && (
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", missing ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" : "bg-muted text-foreground")}>
+            {missing ? <AlertTriangle className="w-4 h-4" /> : company ? <Building2 className="w-4 h-4" /> : <User className="w-4 h-4" />}
+          </span>
+          <div className="min-w-0 leading-tight">
+            <div className="text-[13px] font-semibold text-foreground">{company ? "Company" : "Individual"}</div>
+            <div className={cn("text-[11px]", missing ? "text-amber-700 dark:text-amber-300 font-medium" : "text-muted-foreground")}>
+              {missing
+                ? `VAT rate not configured${pricing.countryIso ? ` for ${pricing.countryIso}` : ""} — cannot submit`
+                : company
+                  ? `Partner prices · ${(pricing.vat.rate ?? 0) > 0 ? `+${fmtVatRate(pricing.vat.rate)} VAT` : `${fmtVatRate(pricing.vat.rate)} VAT, ${pricing.vat.source === "exempt" ? "exempt" : "zero-rated"}`}`
+                  : `RRP · incl. ${fmtVatRate(pricing.vat.rate)} VAT${pricing.countryIso ? ` (${pricing.countryIso})` : ""}`}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ladder */}
+      {ladder.length > 0 && totals ? (
+        <div className="min-w-0">
+          <div className="relative h-7">
+            {/* track */}
+            <div className="absolute left-0 right-0 top-[9px] h-1.5 rounded-full bg-muted" />
+            <div className="absolute left-0 top-[9px] h-1.5 rounded-full bg-lime-600 transition-[width] duration-300" style={{ width: `${pos}%` }} />
+            {/* tier markers */}
+            {ladder.map((t, i) => {
+              const x = tierX(i);
+              const hit = amount + 1e-9 >= t.minAmount;
+              const last = i === n - 1;
+              return (
+                <div key={t.id} className={cn("absolute top-0 flex flex-col", last ? "-translate-x-full items-end" : "-translate-x-1/2 items-center")} style={{ left: `${x}%` }}>
+                  <span className={cn("mt-[6px] size-3 rounded-full border-2 bg-background", hit ? "border-lime-600" : "border-border", last && "translate-x-1/2")} />
+                  <span className={cn("mt-1 whitespace-nowrap text-[10px] leading-none", hit ? "text-foreground font-semibold" : "text-muted-foreground")}>
+                    {t.name || "Tier"} −{t.discountPct}% <span className="font-normal text-muted-foreground/80">from {fmtMoney(t.minAmount, currency)}</span>
+                  </span>
+                </div>
+              );
+            })}
+            {/* current position */}
+            <div className="absolute top-0 -translate-x-1/2 flex flex-col items-center" style={{ left: `${pos}%` }}>
+              <span className="mt-[3px] size-[18px] rounded-full bg-foreground ring-2 ring-background shadow-sm" />
+            </div>
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-3 text-[11px]">
+            <span className="text-muted-foreground tabular-nums">
+              {fmtMoney(amount, currency)} in {tab?.name || "this section"}
+            </span>
+            <span className="text-muted-foreground tabular-nums truncate">
+              {next
+                ? <>{fmtMoney(totals.toNextTier, currency)} more → <span className="text-foreground font-medium">{next.name || "next tier"} −{next.discountPct}%</span></>
+                : reached
+                  ? "Top tier reached"
+                  : null}
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div />
+      )}
+
+      {/* savings */}
+      {ladder.length > 0 && totals && (
+        <div className="text-right leading-tight lg:min-w-[120px]">
+          {reached ? (
+            <>
+              <div className="text-[15px] font-bold tabular-nums text-lime-700 dark:text-lime-400">−{fmtMoney(totals.discount, currency)}</div>
+              <div className="text-[11px] text-muted-foreground">{reached.name || "Volume discount"} −{reached.discountPct}% applied</div>
+            </>
+          ) : (
+            <>
+              <div className="text-[13px] font-semibold text-foreground">Volume discount</div>
+              <div className="text-[11px] text-muted-foreground">not reached yet</div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

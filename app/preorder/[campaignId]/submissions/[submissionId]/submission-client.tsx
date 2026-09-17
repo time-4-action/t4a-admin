@@ -33,8 +33,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   fmtMoney,
-  PricingBanner,
-  TabTierBanner,
+  SheetContextBar,
   TabBar,
   PreorderGridTab,
   OrderSummaryPanel,
@@ -423,9 +422,8 @@ export default function SubmissionClient({
               )}
               {/* What the customer saw while filling: how they are priced and the discount they reached. */}
               {sheet.pricing && activeTab && (
-                <div className="mb-3 rounded-xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
-                  <PricingBanner pricing={sheet.pricing} bare />
-                  <TabTierBanner tab={activeTab} quantities={quantities} currency={currency} pricing={sheet.pricing} bare />
+                <div className="mb-3 rounded-xl border border-border bg-surface overflow-hidden">
+                  <SheetContextBar pricing={sheet.pricing} tab={activeTab} quantities={quantities} currency={currency} />
                 </div>
               )}
               {isLegacy && (

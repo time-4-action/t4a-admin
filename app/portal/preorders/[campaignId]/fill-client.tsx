@@ -36,8 +36,7 @@ import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   TabBar,
-  TabTierBanner,
-  PricingBanner,
+  SheetContextBar,
   PreorderGridTab,
   PreorderGuidedTab,
   OrderSummaryPanel,
@@ -272,6 +271,51 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
     [campaign, campaignId, quantities, terms, load, applyLoad],
   );
 
+  // Autosave the draft: every change after the first load is saved 1.2 s after the
+  // customer stops typing (never while another save / submit is in flight, never once
+  // the preorder is locked). Manual "Save draft" is gone — nothing to remember.
+  const dirtyRef = useRef(false);
+  const loadedRef = useRef(false);
+  const [autoState, setAutoState] = useState<"idle" | "pending" | "saving" | "saved" | "error">("idle");
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+  useEffect(() => {
+    if (!loadedRef.current) return;
+    if (locked) return;
+    dirtyRef.current = true;
+    setAutoState("pending");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quantities, terms]);
+  useEffect(() => {
+    if (!loading && campaign) loadedRef.current = true;
+  }, [loading, campaign]);
+  useEffect(() => {
+    if (autoState !== "pending" || locked) return;
+    const t = setTimeout(async () => {
+      if (busy !== null) return; // try again on the next change
+      dirtyRef.current = false;
+      setAutoState("saving");
+      try {
+        const r = await fetch(`/api/portal/preorder/submissions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ campaignId, quantities, terms, action: "save" }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data?.message ?? data?.error ?? "Autosave failed");
+        if (data.submission) {
+          setSubmission(data.submission);
+          setStatus(data.submission.status);
+        }
+        setSavedAt(new Date());
+        setAutoState(dirtyRef.current ? "pending" : "saved");
+      } catch {
+        setAutoState("error");
+      }
+    }, 1200);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoState, quantities, terms, locked, busy, campaignId]);
+
   const retryRegistration = useCallback(async () => {
     if (!submission?.id) return;
     setBusy("retry");
@@ -351,8 +395,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
               <OrderSummaryPanelSkeleton />
               <div className="rounded-xl border border-border bg-surface p-3 space-y-2">
                 <Button className="w-full" disabled><Eye className="w-4 h-4" /> Preview &amp; submit</Button>
-                <Button variant="outline" className="w-full" disabled><Check className="w-4 h-4" /> Save draft</Button>
-                <p className="text-[11px] text-muted-foreground text-center pt-0.5">Once submitted, your preorder is locked.</p>
+                <p className="text-[11px] text-muted-foreground text-center pt-0.5">Changes save automatically. Once submitted, your preorder is locked.</p>
               </div>
             </aside>
           </div>
@@ -524,7 +567,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
               )}
               {(sheet.pricing || orphanLines.length > 0 || unpricedFilled.length > 0 || (activeTab && (activeTab.tiers?.length ?? 0) > 0)) && (
               <div className="divide-y divide-border/60 bg-muted/10">
-                <PricingBanner pricing={sheet.pricing} bare />
+                <SheetContextBar pricing={sheet.pricing} tab={activeTab} quantities={quantities} currency={currency} />
                 {orphanLines.length > 0 && (
                   <div className="px-4 py-2.5 text-[12px] text-amber-800 dark:text-amber-300 flex items-start gap-2.5 bg-amber-50/70 dark:bg-amber-950/30">
                     <AlertTriangle className="w-4 h-4 shrink-0 mt-px text-amber-600" />
@@ -551,7 +594,6 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
                     </div>
                   </div>
                 )}
-                {activeTab && <TabTierBanner tab={activeTab} quantities={quantities} currency={currency} pricing={sheet.pricing} bare />}
               </div>
               )}
             {!activeTab ? (
@@ -577,7 +619,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
                 <PreorderGridTab tab={activeTab} quantities={quantities} currency={currency} readOnly onlyFilled pricing={sheet.pricing} bare />
               )
             ) : mode === "grid" ? (
-              <PreorderGridTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={sheet.pricing} bare />
+              <PreorderGridTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={sheet.pricing} bare searchable />
             ) : (
               <div className="p-4">
                 <PreorderGuidedTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={sheet.pricing} />
@@ -664,11 +706,19 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
                     Submitting is disabled until the VAT rate for your country is configured.
                   </p>
                 )}
-                <Button variant="outline" className="w-full" onClick={() => save("save")} disabled={busy !== null}>
-                  {busy === "save" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                  Save draft
-                </Button>
-                <p className="text-[11px] text-muted-foreground text-center pt-0.5">Once submitted, your preorder is locked.</p>
+                <p className="text-[11px] text-muted-foreground text-center pt-0.5 inline-flex w-full items-center justify-center gap-1.5">
+                  {autoState === "saving" ? (
+                    <><Loader2 className="w-3 h-3 animate-spin" /> Saving draft…</>
+                  ) : autoState === "pending" ? (
+                    <><span className="size-1.5 rounded-full bg-amber-500" /> Unsaved changes</>
+                  ) : autoState === "error" ? (
+                    <span className="text-destructive inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Autosave failed — <button type="button" className="underline" onClick={() => save("save")}>retry</button></span>
+                  ) : savedAt || status === "draft" ? (
+                    <><Check className="w-3 h-3 text-lime-600" /> Draft saved{savedAt ? ` ${savedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""} · saves automatically</>
+                  ) : (
+                    "Changes save automatically. Once submitted, your preorder is locked."
+                  )}
+                </p>
                 {flash && <p className="text-[12px] text-lime-600 dark:text-lime-400 text-center pt-1">{flash}</p>}
                 {error && error !== "no-account" && error !== "not-found" && (
                   <p className="text-[12px] text-destructive text-center pt-1">{error}</p>
