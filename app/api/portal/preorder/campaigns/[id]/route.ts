@@ -5,20 +5,34 @@ import {
   PreorderCampaign,
   PreorderSubmission,
   PreorderAccess,
-  toCampaignView,
-  toSubmissionView,
+  loadEffectiveCampaignForPartner,
+  toPortalCampaignView,
+  toPortalSubmissionView,
   toObjectId,
+  snapshotView,
 } from "@/lib/preorder";
+import { readSubmissionOrder } from "@/lib/preorder-mk";
+import { upsertMkCustomer } from "@/lib/mk-customers";
 import { defaultTermsFromPartner } from "@/lib/preorder-terms";
-import type { PreorderTerms } from "@/types/preorder";
+import {
+  campaignFromSnapshot,
+  isOrderCustomerVisible,
+  type AllocationResult,
+  type PortalSubmission,
+  type PreorderCampaign as CampaignView,
+} from "@/types/preorder";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
-// GET /api/portal/preorder/campaigns/[id] — the OPEN campaign sheet plus this partner's
-// own draft/submission (or a prefilled blank when none exists yet). Partner from session.
+// GET /api/portal/preorder/campaigns/[id] — the partner's EFFECTIVE view of an open
+// campaign (their market / country / customer rules applied server-side) plus their
+// own draft/submission. Once submitted, `frozen` carries the agreed lines and prices
+// (the snapshot) so later sheet changes never repaint their record. `allocation` (the
+// live Metakocka order) is included ONLY after an admin published it. Partner from
+// session — never from the client.
 export async function GET(_req: Request, { params }: RouteParams) {
   const { id } = await params;
   const partner = await getSessionPartner();
@@ -35,7 +49,8 @@ export async function GET(_req: Request, { params }: RouteParams) {
   }).exec();
 
   // Invite boundary: the partner must have UNLOCKED this campaign (access grant) or
-  // already have a submission on it. Otherwise it's invisible to them.
+  // already have a submission on it. Otherwise it's invisible to them — no market,
+  // country or customer rule ever changes that.
   const hasAccess =
     !!subDoc ||
     !!(await PreorderAccess.exists({ campaignId: campaignDoc._id, partnerMkId: partner.mkId }));
@@ -49,25 +64,52 @@ export async function GET(_req: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  const submission = subDoc
-    ? toSubmissionView(subDoc)
+  // Keep the customer directory warm (cheap, throttled inside).
+  void upsertMkCustomer(partner, { throttleMs: 24 * 60 * 60 * 1000 }).catch(() => undefined);
+
+  const effective = loadEffectiveCampaignForPartner(campaignDoc, { mkId: partner.mkId, mk: partner });
+
+  const submission: PortalSubmission = subDoc
+    ? toPortalSubmissionView(subDoc)
     : {
         id: "",
         campaignId: String(campaignDoc._id),
         partnerMkId: partner.mkId,
         partnerName: partner.name,
         partnerEmail: partner.emails?.[0],
-        status: "draft" as const,
-        terms: defaultTermsFromPartner(partner) as PreorderTerms,
+        status: "draft",
+        terms: defaultTermsFromPartner(partner),
         lines: [],
         totals: { qty: 0, amount: 0 },
         submittedAt: null,
         updatedAt: null,
+        registration: { state: "none", canRetry: false },
+        published: false,
       };
 
+  let frozen: CampaignView | null = null;
+  let allocation: AllocationResult | undefined;
+  if (subDoc && subDoc.status !== "draft") {
+    const snap = snapshotView(subDoc.snapshot);
+    if (snap) {
+      frozen = campaignFromSnapshot(
+        { id: String(campaignDoc._id), title: campaignDoc.title, season: campaignDoc.season, status: campaignDoc.status },
+        snap,
+      );
+    }
+    const visible = isOrderCustomerVisible({
+      mkOrder: subDoc.mkOrder?.state ? { state: subDoc.mkOrder.state, buyerOrder: "", attempts: 0 } : null,
+      mkSalesOrder: subDoc.mkSalesOrder?.mkId ? { mkId: subDoc.mkSalesOrder.mkId, countCode: subDoc.mkSalesOrder.countCode } : null,
+      resultPublishedToCustomer: subDoc.resultPublishedToCustomer,
+    });
+    if (visible) allocation = await readSubmissionOrder(subDoc);
+  }
+
   return NextResponse.json({
-    campaign: toCampaignView(campaignDoc),
+    campaign: toPortalCampaignView(effective),
     submission,
+    frozen,
+    ...(allocation ? { allocation, orderMkId: subDoc?.mkSalesOrder?.mkId ?? null } : {}),
     partner: {
       mkId: partner.mkId,
       name: partner.name,

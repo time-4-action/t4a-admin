@@ -1,18 +1,35 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ShoppingCart, Clock, ChevronRight, CheckCircle2, PencilLine } from "lucide-react";
+import { ShoppingCart, Clock, ChevronRight, CheckCircle2, PencilLine, PackageCheck, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   type PreorderCampaignSummary,
   type SubmissionStatus,
+  type SubmissionStage,
   SUBMISSION_STATUS_LABELS,
 } from "@/types/preorder";
 
 type MyCampaign = PreorderCampaignSummary & {
   mySubmissionStatus: SubmissionStatus | null;
+  myStage: SubmissionStage | null;
 };
+
+// Customer-facing wording for the stage — never Metakocka terminology.
+function stagePill(stage: SubmissionStage | null, status: SubmissionStatus | null): { label: string; cls: string; icon: React.ReactNode } | null {
+  if (!status) return null;
+  if (stage === "published") {
+    return { label: "Order confirmed", cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300", icon: <PackageCheck className="w-3 h-3" /> };
+  }
+  if (stage === "registration-failed") {
+    return { label: "Submitted · action needed", cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300", icon: <AlertTriangle className="w-3 h-3" /> };
+  }
+  if (status === "submitted" || status === "confirmed") {
+    return { label: SUBMISSION_STATUS_LABELS[status], cls: "bg-lime-100 text-lime-700 dark:bg-lime-900/50 dark:text-lime-300", icon: <CheckCircle2 className="w-3 h-3" /> };
+  }
+  return { label: SUBMISSION_STATUS_LABELS[status], cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300", icon: <PencilLine className="w-3 h-3" /> };
+}
 
 function fmtDate(v?: string | null): string {
   if (!v) return "";
@@ -94,8 +111,7 @@ export default function PortalPreordersPage() {
           {!loading && !noAccount && campaigns.length > 0 && (
             <div className="space-y-3">
               {campaigns.map((c) => {
-                const submitted = c.mySubmissionStatus === "submitted" || c.mySubmissionStatus === "confirmed";
-                const draft = c.mySubmissionStatus === "draft";
+                const pill = stagePill(c.myStage, c.mySubmissionStatus);
                 return (
                   <Link
                     key={c.id}
@@ -116,17 +132,10 @@ export default function PortalPreordersPage() {
                         )}
                       </div>
                     </div>
-                    {c.mySubmissionStatus && (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium shrink-0",
-                          submitted
-                            ? "bg-lime-100 text-lime-700 dark:bg-lime-900/50 dark:text-lime-300"
-                            : "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300",
-                        )}
-                      >
-                        {submitted ? <CheckCircle2 className="w-3 h-3" /> : <PencilLine className="w-3 h-3" />}
-                        {SUBMISSION_STATUS_LABELS[c.mySubmissionStatus]}
+                    {pill && (
+                      <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium shrink-0", pill.cls)}>
+                        {pill.icon}
+                        {pill.label}
                       </span>
                     )}
                     <ChevronRight className="w-4 h-4 text-muted-foreground/50 group-hover:text-foreground group-hover:translate-x-0.5 transition-all shrink-0" />

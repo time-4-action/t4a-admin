@@ -1,15 +1,10 @@
 import { NextResponse } from "next/server";
-import {
-  connectDB,
-  PreorderCampaign,
-  PreorderSubmission,
-  toCampaignView,
-  toSubmissionView,
-  toObjectId,
-} from "@/lib/preorder";
-import { computeTotals, flattenRows } from "@/types/preorder";
+import { auth0 } from "@/lib/auth";
+import { connectDB, PreorderCampaign, PreorderSubmission, toSubmissionView, toObjectId } from "@/lib/preorder";
+import { saveOrSubmitPreorder } from "@/lib/preorder-submit";
+import { getPartnerById } from "@/lib/metakocka";
+import { getMkCustomer, upsertMkCustomer } from "@/lib/mk-customers";
 import type { PreorderTerms } from "@/types/preorder";
-import type { ISubmissionLine } from "@/models/preorder-submission";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,9 +23,10 @@ export async function GET(request: Request) {
 }
 
 // POST /api/admin/preorder/submissions — an admin creates/updates a preorder ON BEHALF of
-// a partner (same as the portal flow, but the partner is chosen by the admin, not the
-// session). Body: { campaignId, partnerMkId, partnerName, partnerEmail?, quantities, terms,
-// action: "save" | "submit" }.
+// a partner (same service as the portal flow, but the partner is chosen by the admin, not
+// the session). The partner's effective campaign is applied and, on submit, the
+// Metakocka sales order is registered immediately. Body: { campaignId, partnerMkId,
+// partnerName, partnerEmail?, quantities, terms, action: "save" | "submit" }.
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as {
     campaignId?: string;
@@ -50,69 +46,32 @@ export async function POST(request: Request) {
   const campaignDoc = await PreorderCampaign.findById(campaignId).exec();
   if (!campaignDoc) return NextResponse.json({ error: "campaign not found" }, { status: 404 });
 
-  const view = toCampaignView(campaignDoc);
-  const quantities = body.quantities ?? {};
-  const validRowIds = new Set(flattenRows(view).map(({ row }) => row.id));
-  const codeByRow = new Map(flattenRows(view).map(({ row }) => [row.id, row.code]));
-  const cleanQty: Record<string, number> = {};
-  for (const [rowId, q] of Object.entries(quantities)) {
-    const n = Math.max(0, Math.floor(Number(q) || 0));
-    if (n > 0 && validRowIds.has(rowId)) cleanQty[rowId] = n;
-  }
+  // Resolve the partner in MK (needed for the country and the order's partner block);
+  // fall back to the directory record when MK is unreachable.
+  const mk = await getPartnerById(partnerMkId);
+  if (mk) void upsertMkCustomer(mk).catch(() => undefined);
+  const cached = mk ? null : await getMkCustomer(partnerMkId);
+  const name = body.partnerName?.trim() || mk?.name || cached?.name || partnerMkId;
+  const email = body.partnerEmail ?? mk?.emails?.[0] ?? cached?.emails?.[0] ?? undefined;
 
-  const existing = await PreorderSubmission.findOne({
-    campaignId: campaignDoc._id,
-    partnerMkId,
-  }).exec();
-  const prevByRow = new Map((existing?.lines ?? []).map((l) => [l.rowId, l]));
-
-  const lines: ISubmissionLine[] = Object.entries(cleanQty).map(([rowId, qty]) => {
-    const prev = prevByRow.get(rowId);
-    return {
-      rowId,
-      code: codeByRow.get(rowId) ?? "",
-      qty,
-      confirmedQty: prev?.confirmedQty ?? null,
-      lineStatus: prev?.lineStatus ?? "pending",
-    };
+  const session = await auth0.getSession();
+  const result = await saveOrSubmitPreorder({
+    campaignDoc,
+    partner: {
+      mkId: partnerMkId,
+      name,
+      email,
+      mk,
+      countryIso: cached ? (cached.countryIsoManual ?? cached.countryIso ?? null) : null,
+      countrySource: cached?.countrySource ?? null,
+    },
+    quantities: body.quantities ?? {},
+    terms: body.terms,
+    action: body.action === "submit" ? "submit" : "save",
+    actor: { source: "admin", email: session?.user?.email ?? null },
   });
-
-  const totals = computeTotals(view, cleanQty);
-  const submit = body.action === "submit";
-  const terms: PreorderTerms = {
-    invoiceAddress: body.terms?.invoiceAddress,
-    shippingAddress: body.terms?.shippingAddress,
-    country: body.terms?.country,
-    phone: body.terms?.phone,
-    deliveryDate: body.terms?.deliveryDate ?? null,
-    comment: body.terms?.comment,
-  };
-
-  const doc =
-    existing ??
-    new PreorderSubmission({
-      campaignId: campaignDoc._id,
-      partnerMkId,
-      partnerName: body.partnerName || partnerMkId,
-      partnerEmail: body.partnerEmail,
-    });
-
-  doc.lines = lines;
-  doc.totals = totals;
-  doc.terms = {
-    ...doc.terms,
-    ...terms,
-    deliveryDate: terms.deliveryDate ? new Date(terms.deliveryDate) : null,
-  };
-  if (body.partnerName) doc.partnerName = body.partnerName;
-  if (body.partnerEmail !== undefined) doc.partnerEmail = body.partnerEmail;
-  if (submit) {
-    doc.status = "submitted";
-    doc.submittedAt = doc.submittedAt ?? new Date();
-  } else if (doc.status !== "submitted" && doc.status !== "confirmed") {
-    doc.status = "draft";
+  if (!result.ok) {
+    return NextResponse.json({ error: result.message, code: result.error }, { status: result.status });
   }
-  await doc.save();
-
-  return NextResponse.json({ submission: toSubmissionView(doc) });
+  return NextResponse.json({ submission: toSubmissionView(result.doc), dropped: result.dropped, register: result.register });
 }

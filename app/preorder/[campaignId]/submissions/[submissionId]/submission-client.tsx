@@ -3,49 +3,57 @@ import { useEffect, useMemo, useState, useCallback, useRef, type ReactNode } fro
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { ArrowLeft, Loader2, Check, CheckCheck, Mail, Phone, MapPin, Truck, MessageSquare, Lock, LockOpen, Minus, Plus, RotateCcw, ShoppingCart, ExternalLink, Trash2, MoreVertical } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
+  ArrowLeft,
+  Lock,
+  LockOpen,
+  Loader2,
+  Mail,
+  Phone,
+  MapPin,
+  Truck,
+  MessageSquare,
+  ShoppingCart,
+  ExternalLink,
+  Trash2,
+  MoreVertical,
+  RefreshCw,
+  Eye,
+  EyeOff,
+  AlertTriangle,
+  CheckCircle2,
+  History,
+  Info,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  fmtMoney,
   TabBar,
   PreorderGridTab,
   OrderSummaryPanel,
-  fmtMoney,
   SheetHeaderSkeleton,
   PreorderGridSkeleton,
   OrderSummaryPanelSkeleton,
 } from "@/app/preorder/preorder-shared";
+import { MkOrderStateBadge, SourceBadge, SubmissionStageBadge, VisibilityBadge, MarketChip } from "@/app/preorder/preorder-badges";
 import {
-  SUBMISSION_STATUS_LABELS,
   LINE_STATUS_LABELS,
   computeConfirmedTotals,
-  computeConfirmedTabTotals,
+  submissionStage,
+  type AllocationResult,
+  type AllocationView,
+  type LineStatus,
   type PreorderCampaign,
   type PreorderSubmission,
-  type SubmissionStatus,
-  type LineStatus,
 } from "@/types/preorder";
 
-type Fulfil = { confirmedQty: number | null; lineStatus: LineStatus };
-
-const LINE_STATUS_DOT: Record<LineStatus, string> = {
-  pending: "bg-slate-400",
-  confirmed: "bg-lime-500",
-  backorder: "bg-amber-500",
-  cancelled: "bg-rose-500",
+type LoadData = {
+  submission: PreorderSubmission;
+  frozen: PreorderCampaign | null;
+  allocation: AllocationResult;
+  campaign: PreorderCampaign | null;
 };
 
 const LINE_STATUS_PILL: Record<LineStatus, string> = {
@@ -55,19 +63,11 @@ const LINE_STATUS_PILL: Record<LineStatus, string> = {
   cancelled: "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300",
 };
 
-const SUB_STATUS_DOT: Record<SubmissionStatus, string> = {
-  draft: "bg-amber-500",
-  submitted: "bg-lime-500",
-  confirmed: "bg-emerald-500",
-  closed: "bg-slate-400",
-};
-
-const SUB_STATUS_STYLE: Record<SubmissionStatus, string> = {
-  draft: "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300",
-  submitted: "bg-lime-100 text-lime-700 dark:bg-lime-900/50 dark:text-lime-300",
-  confirmed: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300",
-  closed: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
-};
+function fmtDateTime(v?: string | null): string {
+  if (!v) return "";
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? "" : new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(d);
+}
 
 export default function SubmissionClient({
   campaignId,
@@ -76,48 +76,63 @@ export default function SubmissionClient({
   campaignId: string;
   submissionId: string;
 }) {
-  const [campaign, setCampaign] = useState<PreorderCampaign | null>(null);
-  const [submission, setSubmission] = useState<PreorderSubmission | null>(null);
+  const router = useRouter();
+  const [data, setData] = useState<LoadData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [busy, setBusy] = useState<null | "refresh" | "register" | "publish" | "unlock" | "dismiss" | "delete">(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const [fulfil, setFulfil] = useState<Record<string, Fulfil>>({});
-  const [status, setStatus] = useState<SubmissionStatus>("submitted");
-  const [saving, setSaving] = useState(false);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
-
-  const [soDialogOpen, setSoDialogOpen] = useState(false);
-  const [creatingSO, setCreatingSO] = useState(false);
-  const [soError, setSoError] = useState<string | null>(null);
-
+  const [publishDialog, setPublishDialog] = useState<null | "show" | "hide">(null);
+  const [unlockDialog, setUnlockDialog] = useState(false);
+  const [deleteInMk, setDeleteInMk] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const router = useRouter();
+  const mounted = useRef(true);
+
+  const load = useCallback(
+    async (refresh = false) => {
+      const r = await fetch(`/api/admin/preorder/submissions/${submissionId}${refresh ? "?refresh=1" : ""}`, { cache: "no-store" });
+      const j = await r.json();
+      if (!r.ok || !j?.submission) throw new Error(j?.error ?? "Submission not found");
+      return j as LoadData;
+    },
+    [submissionId],
+  );
 
   useEffect(() => {
-    Promise.all([
-      fetch(`/api/admin/preorder/campaigns/${campaignId}`).then((r) => r.json()),
-      fetch(`/api/admin/preorder/submissions/${submissionId}`).then((r) => r.json()),
-    ])
-      .then(([c, s]) => {
-        if (c?.campaign) setCampaign(c.campaign);
-        if (s?.submission) {
-          setSubmission(s.submission);
-          setStatus(s.submission.status);
-          const f: Record<string, Fulfil> = {};
-          for (const l of s.submission.lines) {
-            f[l.rowId] = { confirmedQty: l.confirmedQty ?? null, lineStatus: l.lineStatus ?? "pending" };
-          }
-          setFulfil(f);
-        } else {
-          setError(s?.error ?? "Submission not found");
-        }
-        if (c?.campaign) setActiveTabId(c.campaign.tabs[0]?.id ?? null);
+    mounted.current = true;
+    load()
+      .then((d) => {
+        if (!mounted.current) return;
+        setData(d);
+        setActiveTabId((d.frozen ?? d.campaign)?.tabs[0]?.id ?? null);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Error"))
       .finally(() => setLoading(false));
-  }, [campaignId, submissionId]);
+    return () => {
+      mounted.current = false;
+    };
+  }, [load]);
+
+  // Poll while a registration is in flight.
+  const registering = data?.submission.mkOrder?.state === "pending";
+  useEffect(() => {
+    if (!registering) return;
+    const id = setInterval(() => {
+      load()
+        .then((d) => mounted.current && setData(d))
+        .catch(() => undefined);
+    }, 4000);
+    return () => clearInterval(id);
+  }, [registering, load]);
+
+  const submission = data?.submission ?? null;
+  const campaign = data?.campaign ?? null;
+  // The frozen snapshot is what the customer agreed to; legacy submissions (no snapshot)
+  // fall back to the live campaign like the old review page did.
+  const sheet = data?.frozen ?? campaign;
+  const currency = sheet?.currency ?? campaign?.currency ?? "EUR";
 
   const quantities = useMemo(() => {
     const q: Record<string, number> = {};
@@ -125,252 +140,133 @@ export default function SubmissionClient({
     return q;
   }, [submission]);
 
-  const currency = campaign?.currency ?? "EUR";
-
-  // Live confirmed totals from the current (unsaved) fulfilment edits.
-  const confirmedTotals = useMemo(
-    () => (campaign ? computeConfirmedTotals(campaign, quantities, fulfil) : { qty: 0, amount: 0 }),
-    [campaign, quantities, fulfil],
-  );
-
-  // The SAVED confirmed lines — what a Metakocka sales order would actually contain
-  // (the server reads from the DB, not the unsaved edits).
-  const savedConfirmed = useMemo(() => {
-    let qty = 0;
-    let lines = 0;
-    for (const l of submission?.lines ?? []) {
-      if (l.lineStatus !== "confirmed") continue;
-      const c = l.confirmedQty ?? l.qty;
-      if (c > 0) {
-        qty += c;
-        lines += 1;
-      }
-    }
-    return { qty, lines };
-  }, [submission]);
-
-  // The volume discounts the SAVED confirmed lines earn, per tab — this is exactly what
-  // the sales order will price at, so the admin sees it before pushing.
-  const savedConfirmedTabs = useMemo(() => {
-    if (!campaign) return [];
-    const q: Record<string, number> = {};
-    const conf: Record<string, Fulfil> = {};
-    for (const l of submission?.lines ?? []) {
-      q[l.rowId] = l.qty;
-      conf[l.rowId] = { confirmedQty: l.confirmedQty ?? null, lineStatus: l.lineStatus ?? "pending" };
-    }
-    return computeConfirmedTabTotals(campaign, q, conf).filter((t) => t.qty > 0);
-  }, [campaign, submission]);
-
-  const savedConfirmedDiscount = useMemo(
-    () => savedConfirmedTabs.reduce((n, t) => n + t.discount, 0),
-    [savedConfirmedTabs],
-  );
-
-  // Unsaved edits (fulfilment or submission status) vs the saved submission — drives
-  // autosave, and the sales order uses saved data so we gate on it too.
-  const dirty = useMemo(() => {
-    if (submission && status !== submission.status) return true;
-    for (const l of submission?.lines ?? []) {
-      const f = fulfil[l.rowId];
-      if (!f) continue;
-      if (f.lineStatus !== (l.lineStatus ?? "pending")) return true;
-      if ((f.confirmedQty ?? null) !== (l.confirmedQty ?? null)) return true;
-    }
-    return false;
-  }, [submission, fulfil, status]);
-
-  // Only tabs that actually contain ordered items — the rest are noise on review.
   const filledTabs = useMemo(
-    () =>
-      (campaign?.tabs ?? []).filter((t) =>
-        t.groups.some((g) => g.rows.some((r) => (quantities[r.id] || 0) > 0)),
-      ),
-    [campaign, quantities],
+    () => (sheet?.tabs ?? []).filter((t) => t.groups.some((g) => g.rows.some((r) => (quantities[r.id] || 0) > 0))),
+    [sheet, quantities],
   );
-
-  // Keep the active tab on one that has items.
   useEffect(() => {
     if (filledTabs.length === 0) return;
-    if (!activeTabId || !filledTabs.some((t) => t.id === activeTabId)) {
-      setActiveTabId(filledTabs[0].id);
-    }
+    if (!activeTabId || !filledTabs.some((t) => t.id === activeTabId)) setActiveTabId(filledTabs[0].id);
   }, [filledTabs, activeTabId]);
+  const activeTab = useMemo(() => sheet?.tabs.find((t) => t.id === activeTabId) ?? null, [sheet, activeTabId]);
 
-  const activeTab = useMemo(() => campaign?.tabs.find((t) => t.id === activeTabId) ?? null, [campaign, activeTabId]);
-
-  const save = useCallback(
-    async (
-      statusOverride?: SubmissionStatus,
-      linesOverride?: { rowId: string; confirmedQty: number | null; lineStatus: LineStatus }[],
-    ) => {
-      if (!submission) return;
-      setSaving(true);
-      setError(null);
-      try {
-        const lines =
-          linesOverride ??
-          submission.lines.map((l) => ({
-            rowId: l.rowId,
-            confirmedQty: fulfil[l.rowId]?.confirmedQty ?? null,
-            lineStatus: fulfil[l.rowId]?.lineStatus ?? "pending",
-          }));
-        const r = await fetch(`/api/admin/preorder/submissions/${submissionId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: statusOverride ?? status, lines }),
-        });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data?.error ?? "Save failed");
-        setSubmission(data.submission);
-        setStatus(data.submission.status);
-        setSavedAt(Date.now());
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Save failed");
-      } finally {
-        setSaving(false);
-      }
-    },
-    [submission, submissionId, fulfil, status],
+  // Legacy per-line fulfilment (read-only) for submissions made before immediate registration.
+  const legacyFulfil = useMemo(() => {
+    const m: Record<string, { confirmedQty: number | null; lineStatus: LineStatus }> = {};
+    for (const l of submission?.lines ?? []) if (l.lineStatus) m[l.rowId] = { confirmedQty: l.confirmedQty ?? null, lineStatus: l.lineStatus };
+    return m;
+  }, [submission]);
+  const isLegacy = !!submission && !submission.snapshot;
+  const legacyConfirmed = useMemo(
+    () => (isLegacy && sheet && Object.values(legacyFulfil).some((f) => f.lineStatus !== "pending") ? computeConfirmedTotals(sheet, quantities, legacyFulfil) : undefined),
+    [isLegacy, sheet, quantities, legacyFulfil],
   );
 
-  // Autosave: persist fulfilment / status ~900ms after the last change (no manual Save
-  // button). `save` re-identifies on every edit (it closes over fulfil/status), so this
-  // effect re-arms the timer per change, debouncing to one write once edits settle.
-  useEffect(() => {
-    if (!dirty || saving) return;
-    const t = setTimeout(() => { void save(); }, 900);
-    return () => clearTimeout(t);
-  }, [dirty, saving, save]);
-
-  // Best-effort flush if the tab is closed mid-debounce with unsaved edits.
-  const dirtyRef = useRef(false);
-  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
-  useEffect(() => {
-    const onLeave = () => { if (dirtyRef.current) void save(); };
-    window.addEventListener("beforeunload", onLeave);
-    return () => window.removeEventListener("beforeunload", onLeave);
-  }, [save]);
-
-  // Unlock a submitted preorder → revert to draft so the customer can edit & resubmit,
-  // and reset all fulfilment back to pending (a fresh start for the amended order).
-  const unlock = useCallback(async () => {
-    const resetLines = (submission?.lines ?? []).map((l) => ({
-      rowId: l.rowId,
-      confirmedQty: null,
-      lineStatus: "pending" as LineStatus,
-    }));
-    setFulfil(() => {
-      const m: Record<string, Fulfil> = {};
-      for (const l of submission?.lines ?? []) m[l.rowId] = { lineStatus: "pending", confirmedQty: null };
-      return m;
-    });
-    setStatus("draft");
-    await save("draft", resetLines);
-  }, [save, submission]);
-
-  // Push the saved confirmed lines to Metakocka as a sales order (one-shot).
-  const createSalesOrder = useCallback(async () => {
-    setCreatingSO(true);
-    setSoError(null);
-    try {
-      const r = await fetch(`/api/admin/preorder/submissions/${submissionId}/sales-order`, {
-        method: "POST",
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data?.error ?? "Failed to create sales order");
-      setSubmission(data.submission);
-      setSoDialogOpen(false);
-    } catch (e) {
-      setSoError(e instanceof Error ? e.message : "Failed to create sales order");
-    } finally {
-      setCreatingSO(false);
-    }
-  }, [submissionId]);
-
-  // Delete this partner's submission entirely, then return to the campaign overview.
-  const deleteSubmission = useCallback(async () => {
-    setDeleting(true);
-    setError(null);
-    try {
-      const r = await fetch(`/api/admin/preorder/submissions/${submissionId}`, { method: "DELETE" });
-      if (!r.ok) {
-        const data = await r.json().catch(() => ({}));
-        throw new Error(data?.error ?? "Delete failed");
+  const run = useCallback(
+    async (kind: NonNullable<typeof busy>, fn: () => Promise<void>) => {
+      setBusy(kind);
+      setActionError(null);
+      try {
+        await fn();
+      } catch (e) {
+        setActionError(e instanceof Error ? e.message : "Action failed");
+      } finally {
+        setBusy(null);
       }
-      router.push(`/preorder/${campaignId}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
-      setDeleting(false);
-    }
-  }, [submissionId, campaignId, router]);
+    },
+    [],
+  );
 
-  const isLocked = status === "submitted" || status === "confirmed";
+  const refreshOrder = () => run("refresh", async () => setData(await load(true)));
 
-  // Dismiss a customer's unlock request without unlocking.
-  const dismissRequest = useCallback(async () => {
-    setSaving(true);
-    setError(null);
-    try {
+  const register = () =>
+    run("register", async () => {
+      const r = await fetch(`/api/admin/preorder/submissions/${submissionId}/sales-order`, { method: "POST" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok && r.status !== 409) throw new Error(j?.result?.error ?? j?.error ?? "Registration failed");
+      setData(await load(true));
+      if (j?.result?.state === "failed") throw new Error(j.result.error ?? "Registration failed");
+    });
+
+  const publish = (published: boolean) =>
+    run("publish", async () => {
+      const r = await fetch(`/api/admin/preorder/submissions/${submissionId}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ published }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error ?? "Failed");
+      setPublishDialog(null);
+      setData(await load(true));
+    });
+
+  const unlock = () =>
+    run("unlock", async () => {
+      const body: Record<string, unknown> = { status: "draft" };
+      if (submission?.mkSalesOrder) body.detachOrder = { deleteInMk, reason: "unlocked for customer" };
+      const r = await fetch(`/api/admin/preorder/submissions/${submissionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.message ?? j?.error ?? "Unlock failed");
+      setUnlockDialog(false);
+      setData(await load());
+    });
+
+  const dismissRequest = () =>
+    run("dismiss", async () => {
       const r = await fetch(`/api/admin/preorder/submissions/${submissionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dismissUnlockRequest: true }),
       });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data?.error ?? "Failed");
-      setSubmission(data.submission);
-      setSavedAt(Date.now());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed");
-    } finally {
-      setSaving(false);
-    }
-  }, [submissionId]);
+      if (!r.ok) throw new Error("Failed");
+      setData(await load());
+    });
+
+  const deleteSubmission = () =>
+    run("delete", async () => {
+      const r = await fetch(`/api/admin/preorder/submissions/${submissionId}`, { method: "DELETE" });
+      if (!r.ok) throw new Error("Delete failed");
+      router.push(`/preorder/${campaignId}/submissions`);
+    });
 
   if (loading) {
     return (
       <div className="flex flex-col h-full">
         <SheetHeaderSkeleton
-          backHref={`/preorder/${campaignId}`}
+          backHref={`/preorder/${campaignId}/submissions`}
           right={
             <>
-              <span className="hidden sm:inline-flex min-w-[68px]" />
-              <div className="flex items-center rounded-lg border border-border overflow-hidden">
-                <Button variant="ghost" size="sm" disabled className="h-8 rounded-none border-0"><CheckCheck className="w-3.5 h-3.5" /> Confirm all</Button>
-                <span className="w-px self-stretch bg-border" />
-                <Button variant="ghost" size="sm" disabled className="h-8 rounded-none border-0 text-muted-foreground"><RotateCcw className="w-3.5 h-3.5" /> Reset</Button>
-              </div>
-              <Skeleton className="h-8 w-[132px] rounded-md" />
+              <Skeleton className="h-6 w-24 rounded-full" />
               <Skeleton className="h-8 w-8 rounded-md" delay={40} />
             </>
           }
         />
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
-            <div className="min-w-0">
-              <PreorderGridSkeleton
-                readOnly
-                qtyHeader="Ordered"
-                extraHeader={<th className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-2 text-left w-40">Fulfilment</th>}
-              />
+            <div className="min-w-0 space-y-6">
+              <PreorderGridSkeleton readOnly qtyHeader="Qty" />
+              <div className="rounded-2xl border border-border bg-surface p-4 space-y-3">
+                <SkeletonLine lh="h-[20px]" w="w-48" />
+                {[0, 1, 2].map((i) => (
+                  <SkeletonLine key={i} lh="h-[18px]" w="w-full" delay={stagger(i, 60, 80)} />
+                ))}
+              </div>
             </div>
             <aside className="lg:sticky lg:top-4 space-y-3">
-              <OrderSummaryPanelSkeleton confirmed />
+              <OrderSummaryPanelSkeleton />
               <div className="rounded-xl border border-border bg-surface p-4 space-y-2.5 text-[12px]">
-                <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Metakocka</div>
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Customer visibility</div>
                 <SkeletonLine lh="h-[18px]" w="w-full" delay={80} />
-                <SkeletonLine lh="h-[18px]" w="w-2/3" delay={100} />
                 <Skeleton className="h-9 w-full rounded-md" delay={120} />
               </div>
               <div className="rounded-xl border border-border bg-surface p-4 space-y-2 text-[12px]">
-                <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Partner details</div>
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="flex items-start gap-2">
-                    <Skeleton className="w-3.5 h-3.5 rounded shrink-0 mt-0.5" delay={stagger(i, 60, 140)} />
-                    <SkeletonLine lh="h-[18px]" w={["w-40", "w-24", "w-48"][i]} delay={stagger(i, 60, 160)} />
-                  </div>
-                ))}
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Metakocka</div>
+                <SkeletonLine lh="h-[18px]" w="w-2/3" delay={140} />
               </div>
             </aside>
           </div>
@@ -378,70 +274,45 @@ export default function SubmissionClient({
       </div>
     );
   }
-  if (error || !campaign || !submission) {
+  if (error || !submission || !campaign || !sheet) {
     return (
       <div className="p-8">
-        <Link href={`/preorder/${campaignId}`} className="text-[13px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-          <ArrowLeft className="w-4 h-4" /> Back to overview
+        <Link href={`/preorder/${campaignId}/submissions`} className="text-[13px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+          <ArrowLeft className="w-4 h-4" /> Back to preorders
         </Link>
-        <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">{error}</div>
+        <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">{error ?? "Not found"}</div>
       </div>
     );
   }
 
-  const setLine = (rowId: string, patch: Partial<Fulfil>) =>
-    setFulfil((prev) => ({
-      ...prev,
-      [rowId]: { confirmedQty: prev[rowId]?.confirmedQty ?? null, lineStatus: prev[rowId]?.lineStatus ?? "pending", ...patch },
-    }));
+  const stage = submission.stage ?? submissionStage(submission);
+  const isLocked = submission.status === "submitted" || submission.status === "confirmed";
+  const mkState = submission.mkOrder?.state ?? (submission.mkSalesOrder ? ("legacy" as const) : null);
+  const hasOrder = !!submission.mkSalesOrder?.mkId && (mkState === "created" || mkState === "legacy");
+  const published = !!submission.resultPublishedToCustomer && hasOrder;
+  const allocation = data?.allocation ?? { state: "none" as const };
+  const t = submission.terms;
+  const snap = submission.snapshot;
+  const mkDocHref = submission.mkSalesOrder
+    ? `/documents/${encodeURIComponent(submission.partnerMkId)}/order/${encodeURIComponent(submission.mkSalesOrder.mkId)}`
+    : null;
 
-  // Mark every ordered line confirmed (confirming its ordered quantity).
-  const confirmAll = () =>
-    setFulfil((prev) => {
-      const next = { ...prev };
-      for (const l of submission?.lines ?? []) {
-        const ordered = quantities[l.rowId] || 0;
-        next[l.rowId] = {
-          lineStatus: "confirmed",
-          confirmedQty: prev[l.rowId]?.confirmedQty ?? ordered,
-        };
-      }
-      return next;
-    });
-
-  // Reset all fulfilment to match the customer's order (pending, confirmed = ordered).
-  const resetFulfilment = () =>
-    setFulfil((prev) => {
-      const next = { ...prev };
-      for (const l of submission?.lines ?? []) {
-        next[l.rowId] = { lineStatus: "pending", confirmedQty: null };
-      }
-      return next;
-    });
-
-  const renderFulfilCell = (rowId: string) => {
-    const qty = quantities[rowId] || 0;
-    if (qty <= 0) return null;
-    const f = fulfil[rowId] ?? { confirmedQty: null, lineStatus: "pending" as LineStatus };
+  const renderLegacyCell = (rowId: string) => {
+    const f = legacyFulfil[rowId];
+    if (!f) return null;
     return (
-      <div className="flex items-center gap-2">
-        <ConfirmedStepper
-          value={f.confirmedQty}
-          ordered={qty}
-          onChange={(n) => setLine(rowId, { confirmedQty: n })}
-        />
-        <StatusPicker value={f.lineStatus} onChange={(s) => setLine(rowId, { lineStatus: s })} />
-      </div>
+      <span className="inline-flex items-center gap-2 text-[11px]">
+        <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 font-medium", LINE_STATUS_PILL[f.lineStatus])}>{LINE_STATUS_LABELS[f.lineStatus]}</span>
+        {f.confirmedQty != null && <span className="tabular-nums text-muted-foreground">× {f.confirmedQty}</span>}
+      </span>
     );
   };
-
-  const t = submission.terms;
 
   return (
     <div className="flex flex-col h-full">
       <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-20">
         <div className="flex items-center gap-3 px-4 md:px-6 h-14">
-          <Link href={`/preorder/${campaignId}`} className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back">
+          <Link href={`/preorder/${campaignId}/submissions`} className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back">
             <ArrowLeft className="w-4 h-4" />
           </Link>
           <div className="min-w-0">
@@ -457,48 +328,14 @@ export default function SubmissionClient({
             </div>
           </div>
           <div className="flex-1" />
-          <span
-            className="hidden sm:inline-flex text-[11px] text-muted-foreground items-center gap-1 min-w-[68px] justify-end"
-            title="Changes save automatically"
-          >
-            {saving ? (
-              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</>
-            ) : dirty ? (
-              <><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Unsaved</>
-            ) : savedAt ? (
-              <><Check className="w-3.5 h-3.5 text-lime-600" /> Saved</>
-            ) : null}
-          </span>
-
-          {/* Fulfilment helpers, grouped */}
-          <div className="flex items-center rounded-lg border border-border overflow-hidden">
-            <Button variant="ghost" size="sm" onClick={confirmAll} disabled={saving} className="h-8 rounded-none border-0" title="Confirm every ordered line">
-              <CheckCheck className="w-3.5 h-3.5" /> Confirm all
-            </Button>
-            <span className="w-px self-stretch bg-border" />
-            <Button variant="ghost" size="sm" onClick={resetFulfilment} disabled={saving} className="h-8 rounded-none border-0 text-muted-foreground" title="Reset all fulfilment to match the customer's order">
-              <RotateCcw className="w-3.5 h-3.5" /> Reset
-            </Button>
-          </div>
-
-          <SubmissionStatusPicker value={status} onChange={setStatus} />
-
+          <SubmissionStageBadge stage={stage} />
           <MoreMenu>
             {(close) => (
               <>
                 {isLocked && (
-                  <MenuItem
-                    icon={LockOpen}
-                    label="Unlock for customer"
-                    onClick={() => { close(); unlock(); }}
-                  />
+                  <MenuItem icon={LockOpen} label="Unlock for customer" onClick={() => { close(); setDeleteInMk(false); setUnlockDialog(true); }} />
                 )}
-                <MenuItem
-                  icon={Trash2}
-                  label="Delete submission"
-                  destructive
-                  onClick={() => { close(); setDeleteDialogOpen(true); }}
-                />
+                <MenuItem icon={Trash2} label="Delete submission" destructive onClick={() => { close(); setDeleteDialogOpen(true); }} />
               </>
             )}
           </MoreMenu>
@@ -510,9 +347,13 @@ export default function SubmissionClient({
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
-          <div className="min-w-0">
+          <div className="min-w-0 space-y-6">
+            {actionError && (
+              <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-[12px] text-destructive">{actionError}</div>
+            )}
+
             {submission.unlockRequest && (
-              <div className="mb-4 rounded-xl border border-amber-300/60 bg-amber-50 dark:bg-amber-950/30 px-4 py-3">
+              <div className="rounded-xl border border-amber-300/60 bg-amber-50 dark:bg-amber-950/30 px-4 py-3">
                 <div className="flex items-start gap-2.5">
                   <LockOpen className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
                   <div className="flex-1 min-w-0">
@@ -524,87 +365,171 @@ export default function SubmissionClient({
                     )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <Button size="xs" variant="outline" onClick={dismissRequest} disabled={saving}>Dismiss</Button>
+                    <Button size="xs" variant="outline" onClick={dismissRequest} disabled={busy !== null}>Dismiss</Button>
                     {isLocked && (
-                      <Button size="xs" onClick={unlock} disabled={saving}><LockOpen className="w-3 h-3" /> Unlock</Button>
+                      <Button size="xs" onClick={() => { setDeleteInMk(false); setUnlockDialog(true); }} disabled={busy !== null}><LockOpen className="w-3 h-3" /> Unlock</Button>
                     )}
                   </div>
                 </div>
               </div>
             )}
-            {activeTab && (
-              <PreorderGridTab
-                tab={activeTab}
-                quantities={quantities}
-                currency={currency}
-                readOnly
-                onlyFilled
-                extraHeader={<th className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-2 text-left w-40">Fulfilment</th>}
-                renderExtraCell={renderFulfilCell}
-              />
-            )}
+
+            {/* 1 · Requested preorder */}
+            <section>
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <h2 className="text-[13px] font-semibold text-foreground">Requested preorder</h2>
+                <span className="text-[11px] text-muted-foreground">
+                  what the customer submitted{submission.submittedAt ? ` · ${fmtDateTime(submission.submittedAt)}` : ""}
+                  {submission.submitSource === "admin" ? ` · filled by ${submission.submittedBy ?? "admin"}` : ""}
+                </span>
+              </div>
+              {snap && (
+                <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+                  {snap.market ? (
+                    <MarketChip name={snap.market.name} color="sky" />
+                  ) : (
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">No market</span>
+                  )}
+                  {snap.countryIso && <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">{snap.countryIso}</span>}
+                  <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+                    Price list <span className="font-medium text-foreground">{snap.partnerPricelist ?? "sheet"}</span>
+                    <SourceBadge source={snap.sources.pricelist} className="ml-0.5" />
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+                    {snap.currency} <SourceBadge source={snap.sources.currency} className="ml-0.5" />
+                  </span>
+                </div>
+              )}
+              {isLegacy && (
+                <div className="mb-3 rounded-lg border border-border bg-muted/30 px-3 py-2 text-[12px] text-muted-foreground flex items-center gap-2">
+                  <Info className="w-3.5 h-3.5 shrink-0" /> Legacy submission (before immediate Metakocka registration) — shown with the campaign&rsquo;s current prices.
+                </div>
+              )}
+              {activeTab ? (
+                <PreorderGridTab
+                  tab={activeTab}
+                  quantities={quantities}
+                  currency={currency}
+                  readOnly
+                  onlyFilled
+                  qtyHeader="Requested"
+                  extraHeader={legacyConfirmed ? <th className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-2 text-left w-40">Fulfilment</th> : undefined}
+                  renderExtraCell={legacyConfirmed ? renderLegacyCell : undefined}
+                />
+              ) : (
+                <div className="text-center text-[13px] text-muted-foreground py-12 rounded-xl border border-dashed border-border">No items in this preorder.</div>
+              )}
+            </section>
+
+            {/* 2 · Current Metakocka order */}
+            <MkOrderPanel
+              submission={submission}
+              allocation={allocation}
+              currency={currency}
+              mkDocHref={mkDocHref}
+              busy={busy}
+              onRefresh={refreshOrder}
+              onRegister={register}
+            />
           </div>
 
           <aside className="lg:sticky lg:top-4 space-y-3">
-            <OrderSummaryPanel campaign={campaign} quantities={quantities} currency={currency} confirmed={confirmedTotals} />
+            <OrderSummaryPanel campaign={sheet} quantities={quantities} currency={currency} confirmed={legacyConfirmed} />
 
-            {/* Metakocka sales order */}
+            {/* 3 · Customer visibility */}
             <div className="rounded-xl border border-border bg-surface p-4 space-y-2.5 text-[12px]">
-              <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Metakocka</div>
-              {submission.mkSalesOrder ? (
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-1.5 text-lime-700 dark:text-lime-300 font-medium">
-                    <Check className="w-4 h-4 shrink-0" /> Sales order created
-                  </div>
-                  <Link
-                    href={`/documents/${encodeURIComponent(submission.partnerMkId)}/order/${encodeURIComponent(submission.mkSalesOrder.mkId)}`}
-                    className="flex w-fit items-center gap-1.5 font-mono text-foreground hover:text-lime-600"
-                  >
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Customer visibility</div>
+                <VisibilityBadge published={published} />
+              </div>
+              {published ? (
+                <>
+                  <p className="text-muted-foreground">
+                    The customer sees the <strong className="text-foreground">current Metakocka order</strong> on their preorder page and under Orders.
+                  </p>
+                  {submission.resultPublishedAt && (
+                    <div className="text-[11px] text-muted-foreground">
+                      Shown {fmtDateTime(submission.resultPublishedAt)}
+                      {submission.resultPublishedBy ? ` · ${submission.resultPublishedBy}` : ""}
+                    </div>
+                  )}
+                  {allocation.state === "ok" && allocation.allocation.changedSincePublish && (
+                    <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/50 px-2.5 py-2 text-amber-800 dark:text-amber-200 flex items-start gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> The order changed in Metakocka since it was shown — the customer already sees the new version.
+                    </div>
+                  )}
+                  <Button size="sm" variant="outline" className="w-full" onClick={() => setPublishDialog("hide")} disabled={busy !== null}>
+                    <EyeOff className="w-3.5 h-3.5" /> Hide from customer
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <p className="text-muted-foreground">
+                    The customer sees only what they requested. Allocation changes in Metakocka stay private until you show the order.
+                  </p>
+                  <Button size="sm" className="w-full" onClick={() => setPublishDialog("show")} disabled={busy !== null || !hasOrder || allocation.state === "missing"}>
+                    <Eye className="w-3.5 h-3.5" /> Show order to customer
+                  </Button>
+                  {!hasOrder && <p className="text-[11px] text-muted-foreground">Register the Metakocka order first.</p>}
+                </>
+              )}
+            </div>
+
+            {/* Metakocka registration */}
+            <div className="rounded-xl border border-border bg-surface p-4 space-y-2.5 text-[12px]">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Metakocka</div>
+                <MkOrderStateBadge state={mkState} />
+              </div>
+              {submission.mkSalesOrder && mkDocHref ? (
+                <div className="space-y-1">
+                  <Link href={mkDocHref} className="flex w-fit items-center gap-1.5 font-mono text-foreground hover:text-lime-600">
                     {submission.mkSalesOrder.countCode} <ExternalLink className="w-3 h-3 shrink-0" />
                   </Link>
                   {submission.mkSalesOrder.createdAt && (
                     <div className="text-[11px] text-muted-foreground">
-                      {new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(submission.mkSalesOrder.createdAt))}
+                      {fmtDateTime(submission.mkSalesOrder.createdAt)}
                       {submission.mkSalesOrder.createdBy ? ` · ${submission.mkSalesOrder.createdBy}` : ""}
+                      {mkState === "legacy" ? " · created manually" : ""}
                     </div>
                   )}
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  <p className="text-muted-foreground">
-                    Push the {savedConfirmed.lines} confirmed line{savedConfirmed.lines === 1 ? "" : "s"} ({savedConfirmed.qty} pcs) to Metakocka as a sales order.
-                  </p>
-                  {savedConfirmedDiscount > 0 && (
-                    <div className="rounded-lg bg-lime-50 dark:bg-lime-950/30 border border-lime-200/60 dark:border-lime-800/50 px-2.5 py-2 space-y-0.5">
-                      <div className="font-medium text-lime-700 dark:text-lime-300">
-                        Volume discount −{fmtMoney(savedConfirmedDiscount, currency)}
-                      </div>
-                      {savedConfirmedTabs
-                        .filter((t) => t.discount > 0)
-                        .map((t) => (
-                          <div key={t.tabId} className="text-muted-foreground">
-                            {t.tabName}: {t.tier?.name || "Tier"} −{t.discountPct}% on {fmtMoney(t.amount, currency)}
-                          </div>
-                        ))}
-                      <p className="text-[11px] text-muted-foreground pt-0.5">
-                        Applied to each line&rsquo;s price on the order — the tier is re-checked against the
-                        confirmed lines, not what was originally ordered.
-                      </p>
-                    </div>
-                  )}
-                  {dirty && (
-                    <p className="text-amber-600 dark:text-amber-400">Save your changes first — the order uses saved confirmed lines.</p>
-                  )}
-                  {soError && <p className="text-destructive">{soError}</p>}
-                  <Button
-                    size="sm"
-                    className="w-full"
-                    disabled={savedConfirmed.lines === 0 || dirty || saving}
-                    onClick={() => { setSoError(null); setSoDialogOpen(true); }}
-                    title={savedConfirmed.lines === 0 ? "Confirm at least one line first" : "Create a Metakocka sales order"}
-                  >
-                    <ShoppingCart className="w-3.5 h-3.5" /> Create sales order
-                  </Button>
+              ) : submission.status !== "submitted" ? (
+                <p className="text-muted-foreground">The order is registered when the customer submits.</p>
+              ) : null}
+              {submission.mkOrder?.state === "pending" && (
+                <p className="text-sky-700 dark:text-sky-300 inline-flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Registering… since {fmtDateTime(submission.mkOrder.lockedAt)}</p>
+              )}
+              {submission.mkOrder?.state === "failed" && (
+                <div className="rounded-lg bg-rose-50 dark:bg-rose-950/30 border border-rose-200/60 dark:border-rose-800/50 px-2.5 py-2 space-y-1">
+                  <div className="font-medium text-rose-700 dark:text-rose-300">Registration failed ({submission.mkOrder.attempts} attempt{submission.mkOrder.attempts === 1 ? "" : "s"})</div>
+                  <div className="text-[11px] text-rose-700/80 dark:text-rose-300/80 break-words">{submission.mkOrder.lastError}</div>
+                </div>
+              )}
+              {submission.status === "submitted" && (mkState === "failed" || (mkState === "pending" && isStale(submission.mkOrder?.lockedAt))) && (
+                <Button size="sm" className="w-full" onClick={register} disabled={busy !== null}>
+                  {busy === "register" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShoppingCart className="w-3.5 h-3.5" />} Register in Metakocka
+                </Button>
+              )}
+              {submission.status === "submitted" && !submission.mkOrder && !submission.mkSalesOrder && (
+                <Button size="sm" className="w-full" onClick={register} disabled={busy !== null}>
+                  {busy === "register" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShoppingCart className="w-3.5 h-3.5" />} Register in Metakocka
+                </Button>
+              )}
+              {submission.mkOrder?.buyerOrder && (
+                <div className="text-[10px] text-muted-foreground font-mono">buyer_order {submission.mkOrder.buyerOrder}</div>
+              )}
+              {(submission.mkSalesOrderHistory?.length ?? 0) > 0 && (
+                <div className="pt-1 border-t border-border/60">
+                  <div className="text-[11px] font-medium text-muted-foreground flex items-center gap-1 mb-1"><History className="w-3 h-3" /> Superseded orders</div>
+                  <ul className="space-y-0.5">
+                    {submission.mkSalesOrderHistory!.map((h) => (
+                      <li key={h.mkId} className="text-[11px] flex items-center gap-1.5">
+                        <Link href={`/documents/${encodeURIComponent(submission.partnerMkId)}/order/${encodeURIComponent(h.mkId)}`} className="font-mono text-foreground hover:text-lime-600">{h.countCode || h.mkId}</Link>
+                        <span className="text-muted-foreground">{h.deletedInMk ? "deleted in MK" : "detached"} · {fmtDateTime(h.detachedAt)}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>
@@ -627,42 +552,80 @@ export default function SubmissionClient({
         </div>
       </div>
 
-      <Dialog open={soDialogOpen} onOpenChange={(o) => !o && setSoDialogOpen(false)}>
+      {/* Show / hide confirmation */}
+      <Dialog open={publishDialog !== null} onOpenChange={(o) => !o && busy !== "publish" && setPublishDialog(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <ShoppingCart className="w-4 h-4 text-lime-600" /> Create Metakocka sales order
+              {publishDialog === "show" ? <Eye className="w-4 h-4 text-lime-600" /> : <EyeOff className="w-4 h-4 text-muted-foreground" />}
+              {publishDialog === "show" ? "Show order to customer" : "Hide order from customer"}
             </DialogTitle>
           </DialogHeader>
           <div className="text-[13px] text-muted-foreground space-y-2">
-            <p>
-              This creates a <strong className="text-foreground">real sales order in Metakocka</strong> for{" "}
-              <strong className="text-foreground">{submission.partnerName}</strong> with the{" "}
-              <strong className="text-foreground">{savedConfirmed.lines}</strong> confirmed line
-              {savedConfirmed.lines === 1 ? "" : "s"} ({savedConfirmed.qty} pcs).
-            </p>
-            <p>
-              Order title: <span className="font-medium text-foreground">{campaign.season?.trim() || campaign.title}</span>.
-            </p>
-            {savedConfirmedDiscount > 0 && (
+            {publishDialog === "show" ? (
+              <>
+                <p>
+                  <strong className="text-foreground">{submission.partnerName}</strong> will see the current Metakocka order
+                  {allocation.state === "ok" && (
+                    <>
+                      {" "}— <strong className="text-foreground">{allocation.allocation.allocatedQty}</strong> of{" "}
+                      <strong className="text-foreground">{allocation.allocation.requestedQty}</strong> requested items
+                      {allocation.allocation.sumAll ? <>, {fmtMoney(Number(allocation.allocation.sumAll), allocation.allocation.currency ?? currency)}</> : null}
+                    </>
+                  )}{" "}
+                  on their preorder page and under Orders in the portal.
+                </p>
+                <p>Further changes you make to the order in Metakocka will be visible to them immediately.</p>
+              </>
+            ) : (
               <p>
-                Line prices include the volume discount the confirmed lines earn —{" "}
-                <strong className="text-lime-700 dark:text-lime-300">−{fmtMoney(savedConfirmedDiscount, currency)}</strong>{" "}
-                across{" "}
-                {savedConfirmedTabs
-                  .filter((t) => t.discount > 0)
-                  .map((t) => `${t.tabName} (${t.tier?.name || "tier"} −${t.discountPct}%)`)
-                  .join(", ")}
-                .
+                The order will disappear from the customer&rsquo;s preorder page and their Orders list. They will again see only what they requested.
               </p>
             )}
           </div>
-          {soError && <p className="text-[12px] text-destructive">{soError}</p>}
+          {actionError && <p className="text-[12px] text-destructive">{actionError}</p>}
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" size="sm" onClick={() => setSoDialogOpen(false)} disabled={creatingSO}>Cancel</Button>
-            <Button size="sm" onClick={createSalesOrder} disabled={creatingSO}>
-              {creatingSO ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShoppingCart className="w-3.5 h-3.5" />}
-              Create sales order
+            <Button variant="outline" size="sm" onClick={() => setPublishDialog(null)} disabled={busy === "publish"}>Cancel</Button>
+            <Button size="sm" onClick={() => publish(publishDialog === "show")} disabled={busy === "publish"}>
+              {busy === "publish" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : publishDialog === "show" ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+              {publishDialog === "show" ? "Show to customer" : "Hide"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Unlock (detach) confirmation */}
+      <Dialog open={unlockDialog} onOpenChange={(o) => !o && busy !== "unlock" && setUnlockDialog(false)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><LockOpen className="w-4 h-4 text-lime-600" /> Unlock for customer</DialogTitle>
+          </DialogHeader>
+          <div className="text-[13px] text-muted-foreground space-y-2">
+            <p>
+              <strong className="text-foreground">{submission.partnerName}</strong> will be able to edit and resubmit their preorder.
+            </p>
+            {submission.mkSalesOrder ? (
+              <>
+                <p>
+                  The Metakocka order <span className="font-mono text-foreground">{submission.mkSalesOrder.countCode}</span> will be <strong className="text-foreground">detached</strong> from this preorder (it stays hidden from the customer). A new order is created when they resubmit.
+                </p>
+                <label className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 cursor-pointer">
+                  <input type="checkbox" className="mt-0.5" checked={deleteInMk} onChange={(e) => setDeleteInMk(e.target.checked)} />
+                  <span>
+                    <span className="font-medium text-foreground">Also delete it in Metakocka</span>
+                    <span className="block text-[11px] text-muted-foreground">Otherwise staff must cancel it there by hand.</span>
+                  </span>
+                </label>
+              </>
+            ) : submission.mkOrder?.state === "pending" ? (
+              <p className="text-amber-600 dark:text-amber-400">A registration is in progress — unlocking is refused until it settles.</p>
+            ) : null}
+          </div>
+          {actionError && <p className="text-[12px] text-destructive">{actionError}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={() => setUnlockDialog(false)} disabled={busy === "unlock"}>Cancel</Button>
+            <Button size="sm" onClick={unlock} disabled={busy === "unlock"}>
+              {busy === "unlock" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LockOpen className="w-3.5 h-3.5" />} Unlock
             </Button>
           </div>
         </DialogContent>
@@ -671,28 +634,25 @@ export default function SubmissionClient({
       <Dialog open={deleteDialogOpen} onOpenChange={(o) => !o && setDeleteDialogOpen(false)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <Trash2 className="w-4 h-4" /> Delete submission
-            </DialogTitle>
+            <DialogTitle className="flex items-center gap-2 text-destructive"><Trash2 className="w-4 h-4" /> Delete submission</DialogTitle>
           </DialogHeader>
           <div className="text-[13px] text-muted-foreground space-y-2">
             <p>
-              Permanently delete <strong className="text-foreground">{submission.partnerName}</strong>&rsquo;s
-              submission for <strong className="text-foreground">{campaign.title}</strong>? This can&rsquo;t be undone.
+              Permanently delete <strong className="text-foreground">{submission.partnerName}</strong>&rsquo;s submission for{" "}
+              <strong className="text-foreground">{campaign.title}</strong>? This can&rsquo;t be undone.
             </p>
             <p>The partner can then start a fresh preorder for this campaign.</p>
             {submission.mkSalesOrder && (
               <p className="text-amber-600 dark:text-amber-400">
-                Note: the Metakocka sales order ({submission.mkSalesOrder.countCode}) already created from it is
-                <strong> not</strong> deleted.
+                The Metakocka order ({submission.mkSalesOrder.countCode}) is <strong>not</strong> deleted; it stays hidden from the customer.
               </p>
             )}
           </div>
+          {actionError && <p className="text-[12px] text-destructive">{actionError}</p>}
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" size="sm" onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>Cancel</Button>
-            <Button variant="destructive" size="sm" onClick={deleteSubmission} disabled={deleting}>
-              {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-              Delete
+            <Button variant="outline" size="sm" onClick={() => setDeleteDialogOpen(false)} disabled={busy === "delete"}>Cancel</Button>
+            <Button variant="destructive" size="sm" onClick={deleteSubmission} disabled={busy === "delete"}>
+              {busy === "delete" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} Delete
             </Button>
           </div>
         </DialogContent>
@@ -701,9 +661,169 @@ export default function SubmissionClient({
   );
 }
 
+function isStale(lockedAt?: string | null): boolean {
+  if (!lockedAt) return true;
+  return Date.now() - new Date(lockedAt).getTime() > 180_000;
+}
+
+// The "Current Metakocka order" panel: the live order joined with the request.
+function MkOrderPanel({
+  submission,
+  allocation,
+  currency,
+  mkDocHref,
+  busy,
+  onRefresh,
+  onRegister,
+}: {
+  submission: PreorderSubmission;
+  allocation: AllocationResult;
+  currency: string;
+  mkDocHref: string | null;
+  busy: string | null;
+  onRefresh: () => void;
+  onRegister: () => void;
+}) {
+  const state = submission.mkOrder?.state ?? (submission.mkSalesOrder ? "legacy" : null);
+  const head = (
+    <div className="flex flex-wrap items-center gap-2 mb-2">
+      <h2 className="text-[13px] font-semibold text-foreground">Current Metakocka order</h2>
+      <span className="text-[11px] text-muted-foreground">what exists in Metakocka right now</span>
+      <div className="flex-1" />
+      {submission.mkSalesOrder && (
+        <Button size="xs" variant="ghost" onClick={onRefresh} disabled={busy !== null} title="Re-read the order from Metakocka">
+          {busy === "refresh" ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} Refresh
+        </Button>
+      )}
+      {mkDocHref && (
+        <Link href={mkDocHref} className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+          Open in Documents <ExternalLink className="w-3 h-3" />
+        </Link>
+      )}
+    </div>
+  );
+
+  if (submission.status !== "submitted" && submission.status !== "confirmed") {
+    return (
+      <section>
+        {head}
+        <div className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-[12px] text-muted-foreground">Not submitted yet — no order exists.</div>
+      </section>
+    );
+  }
+  if (state === "pending") {
+    return (
+      <section>
+        {head}
+        <div className="rounded-xl border border-sky-200/70 bg-sky-50 dark:border-sky-800/50 dark:bg-sky-950/30 px-4 py-4 text-[12px] text-sky-800 dark:text-sky-200 flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin shrink-0" /> Registering the order in Metakocka…
+        </div>
+      </section>
+    );
+  }
+  if (state === "failed" || !submission.mkSalesOrder) {
+    return (
+      <section>
+        {head}
+        <div className="rounded-xl border border-rose-200/70 bg-rose-50 dark:border-rose-800/50 dark:bg-rose-950/30 px-4 py-4 text-[12px] text-rose-800 dark:text-rose-200 flex items-start gap-3">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <div className="font-medium">No Metakocka order yet{state === "failed" ? " — the registration failed" : ""}.</div>
+            {submission.mkOrder?.lastError && <div className="text-[11px] mt-0.5 break-words opacity-80">{submission.mkOrder.lastError}</div>}
+          </div>
+          <Button size="sm" onClick={onRegister} disabled={busy !== null} className="shrink-0">
+            {busy === "register" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShoppingCart className="w-3.5 h-3.5" />} Register now
+          </Button>
+        </div>
+      </section>
+    );
+  }
+  if (allocation.state === "missing") {
+    return (
+      <section>
+        {head}
+        <div className="rounded-xl border border-rose-200/70 bg-rose-50 dark:border-rose-800/50 dark:bg-rose-950/30 px-4 py-4 text-[12px] text-rose-800 dark:text-rose-200 flex items-start gap-3">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <div className="font-medium">Order {submission.mkSalesOrder.countCode} no longer exists in Metakocka.</div>
+            <div className="text-[11px] mt-0.5 opacity-80">It was deleted there. Unlock the customer to detach it, or re-register from the menu after detaching.</div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+  if (allocation.state === "unavailable") {
+    return (
+      <section>
+        {head}
+        <div className="rounded-xl border border-amber-300/70 bg-amber-50 dark:border-amber-800/50 dark:bg-amber-950/30 px-4 py-4 text-[12px] text-amber-900 dark:text-amber-200 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0" /> Metakocka is not reachable right now — {allocation.error}
+        </div>
+      </section>
+    );
+  }
+  if (allocation.state !== "ok") return null;
+  const a: AllocationView = allocation.allocation;
+  const diff = a.allocatedQty - a.requestedQty;
+  return (
+    <section>
+      {head}
+      <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+        <div className="px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border text-[12px]">
+          <span className="inline-flex items-center gap-1.5 font-mono text-foreground">{a.countCode}</span>
+          {a.mkStatusDesc && <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{a.mkStatusDesc}</span>}
+          <span className="text-muted-foreground">
+            Requested <span className="font-medium text-foreground tabular-nums">{a.requestedQty}</span> · Current{" "}
+            <span className={cn("font-semibold tabular-nums", diff === 0 ? "text-lime-600 dark:text-lime-400" : diff < 0 ? "text-amber-600 dark:text-amber-400" : "text-sky-600 dark:text-sky-400")}>{a.allocatedQty}</span>
+            {diff !== 0 && <span className="text-muted-foreground"> ({diff > 0 ? "+" : ""}{diff})</span>}
+          </span>
+          {a.sumAll && <span className="text-muted-foreground">Total <span className="font-medium text-foreground tabular-nums">{fmtMoney(Number(a.sumAll), a.currency ?? currency)}</span></span>}
+          <span className="text-[10px] text-muted-foreground ml-auto">read {fmtDateTime(a.fetchedAt)}</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
+                <th className="text-left px-4 py-2">Product</th>
+                <th className="text-right px-2 py-2 w-20">Requested</th>
+                <th className="text-right px-2 py-2 w-20">Current</th>
+                <th className="text-right px-2 py-2 w-16">Δ</th>
+                <th className="text-right px-2 py-2 w-24 hidden md:table-cell">Unit</th>
+                <th className="text-right px-2 py-2 w-24 hidden md:table-cell">Line total</th>
+                <th className="text-right px-4 py-2 w-16 hidden md:table-cell">Shipped</th>
+              </tr>
+            </thead>
+            <tbody>
+              {a.lines.map((l) => {
+                const d = l.allocatedQty - l.requestedQty;
+                return (
+                  <tr key={l.code} className="border-t border-border/60">
+                    <td className="px-4 py-1.5">
+                      <div className="font-medium text-foreground truncate max-w-[26rem]">{l.name}</div>
+                      <div className="text-[10px] text-muted-foreground font-mono">{l.code}</div>
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{l.requestedQty}</td>
+                    <td className={cn("px-2 py-1.5 text-right tabular-nums font-semibold", l.status === "full" ? "text-lime-600 dark:text-lime-400" : l.status === "removed" ? "text-rose-600 dark:text-rose-400" : l.status === "added" || l.status === "increased" ? "text-sky-600 dark:text-sky-400" : "text-amber-600 dark:text-amber-400")}>{l.allocatedQty}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{d === 0 ? "" : `${d > 0 ? "+" : ""}${d}`}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums hidden md:table-cell">{l.unitPriceWithTax != null ? fmtMoney(l.unitPriceWithTax, a.currency ?? currency) : "—"}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums hidden md:table-cell">{l.lineTotal != null ? fmtMoney(l.lineTotal, a.currency ?? currency) : "—"}</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground hidden md:table-cell">{l.shipped ?? ""}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="px-4 py-2 border-t border-border text-[11px] text-muted-foreground flex items-center gap-1.5">
+          <CheckCircle2 className="w-3 h-3" /> Staff edit this order directly in Metakocka; what you see here is the live document.
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // Lightweight overflow menu (no dropdown lib in the project): a toggle button + a
-// positioned panel that closes on outside-click / Escape. Keeps rare actions
-// (Unlock, Delete) out of the crowded toolbar.
+// positioned panel that closes on outside-click / Escape.
 function MoreMenu({ children }: { children: (close: () => void) => ReactNode }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -722,14 +842,7 @@ function MoreMenu({ children }: { children: (close: () => void) => ReactNode }) 
   }, [open]);
   return (
     <div className="relative" ref={ref}>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-8 w-8 p-0"
-        onClick={() => setOpen((o) => !o)}
-        aria-label="More actions"
-        aria-expanded={open}
-      >
+      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setOpen((o) => !o)} aria-label="More actions" aria-expanded={open}>
         <MoreVertical className="w-4 h-4" />
       </Button>
       {open && (
@@ -741,17 +854,7 @@ function MoreMenu({ children }: { children: (close: () => void) => ReactNode }) 
   );
 }
 
-function MenuItem({
-  icon: Icon,
-  label,
-  onClick,
-  destructive,
-}: {
-  icon: React.ElementType;
-  label: string;
-  onClick: () => void;
-  destructive?: boolean;
-}) {
+function MenuItem({ icon: Icon, label, onClick, destructive }: { icon: React.ElementType; label: string; onClick: () => void; destructive?: boolean }) {
   return (
     <button
       onClick={onClick}
@@ -774,103 +877,5 @@ function Detail({ icon: Icon, label, value }: { icon: React.ElementType; label?:
         <span className="text-foreground break-words">{value}</span>
       </div>
     </div>
-  );
-}
-
-// Confirmed-quantity stepper. Empty = "same as ordered" (shows ordered qty as placeholder).
-function ConfirmedStepper({
-  value,
-  ordered,
-  onChange,
-}: {
-  value: number | null;
-  ordered: number;
-  onChange: (n: number | null) => void;
-}) {
-  const cur = value ?? ordered;
-  return (
-    <div className="inline-flex items-center rounded-lg border border-border bg-background overflow-hidden h-7">
-      <button
-        type="button"
-        onClick={() => onChange(Math.max(0, cur - 1))}
-        className="w-7 h-full flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 transition-colors"
-        disabled={cur <= 0}
-        aria-label="Decrease confirmed quantity"
-      >
-        <Minus className="w-3 h-3" />
-      </button>
-      <input
-        type="number"
-        min={0}
-        value={value ?? ""}
-        placeholder={String(ordered)}
-        onChange={(e) => onChange(e.target.value === "" ? null : Math.max(0, Math.floor(Number(e.target.value) || 0)))}
-        className="no-spinner h-full w-9 border-x border-border bg-transparent text-center tabular-nums text-[12px] font-medium focus:outline-none focus:bg-muted/40"
-        title="Confirmed quantity"
-      />
-      <button
-        type="button"
-        onClick={() => onChange(cur + 1)}
-        className="w-7 h-full flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-        aria-label="Increase confirmed quantity"
-      >
-        <Plus className="w-3 h-3" />
-      </button>
-    </div>
-  );
-}
-
-// Custom submission-status picker (Radix Select with a coloured pill trigger), matching
-// the per-line fulfilment picker.
-function SubmissionStatusPicker({ value, onChange }: { value: SubmissionStatus; onChange: (s: SubmissionStatus) => void }) {
-  return (
-    <Select value={value} onValueChange={(v) => onChange(v as SubmissionStatus)}>
-      <SelectTrigger
-        size="sm"
-        className={cn(
-          "h-8 w-[132px] gap-1.5 rounded-md border-0 pl-2.5 pr-2 text-[12px] font-medium shadow-none [&_svg]:opacity-60 *:data-[slot=select-value]:gap-1.5",
-          SUB_STATUS_STYLE[value],
-        )}
-      >
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent align="end">
-        {(Object.keys(SUBMISSION_STATUS_LABELS) as SubmissionStatus[]).map((s) => (
-          <SelectItem key={s} value={s} className="text-[12px]">
-            <span className="inline-flex items-center gap-2">
-              <span className={cn("w-1.5 h-1.5 rounded-full", SUB_STATUS_DOT[s])} />
-              {SUBMISSION_STATUS_LABELS[s]}
-            </span>
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
-// Beautifully styled fulfilment-status picker (Radix Select with a coloured pill trigger).
-function StatusPicker({ value, onChange }: { value: LineStatus; onChange: (s: LineStatus) => void }) {
-  return (
-    <Select value={value} onValueChange={(v) => onChange(v as LineStatus)}>
-      <SelectTrigger
-        size="sm"
-        className={cn(
-          "h-7 w-[128px] gap-1.5 rounded-full border-0 pl-2.5 pr-2 text-[11px] font-medium shadow-none [&_svg]:opacity-60 *:data-[slot=select-value]:gap-1.5",
-          LINE_STATUS_PILL[value],
-        )}
-      >
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent align="end">
-        {(Object.keys(LINE_STATUS_LABELS) as LineStatus[]).map((s) => (
-          <SelectItem key={s} value={s} className="text-[12px]">
-            <span className="inline-flex items-center gap-2">
-              <span className={cn("w-1.5 h-1.5 rounded-full", LINE_STATUS_DOT[s])} />
-              {LINE_STATUS_LABELS[s]}
-            </span>
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
   );
 }

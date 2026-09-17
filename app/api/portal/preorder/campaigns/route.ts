@@ -9,7 +9,7 @@ import {
   toObjectId,
 } from "@/lib/preorder";
 import type { IPreorderCampaign } from "@/models/preorder-campaign";
-import type { SubmissionStatus } from "@/types/preorder";
+import { submissionStage, type SubmissionStage, type SubmissionStatus } from "@/types/preorder";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +32,19 @@ export async function GET() {
   const statusByCampaign = new Map<string, SubmissionStatus>(
     subs.map((s) => [String(s.campaignId), s.status]),
   );
+  // Customer-facing stage: never leaks MK identifiers, only whether the order was
+  // registered / shown to them.
+  const stageByCampaign = new Map<string, SubmissionStage>(
+    subs.map((s) => [
+      String(s.campaignId),
+      submissionStage({
+        status: s.status,
+        mkOrder: s.mkOrder?.state ? { state: s.mkOrder.state, buyerOrder: "", attempts: 0 } : null,
+        mkSalesOrder: s.mkSalesOrder?.mkId ? { mkId: s.mkSalesOrder.mkId, countCode: s.mkSalesOrder.countCode } : null,
+        resultPublishedToCustomer: s.resultPublishedToCustomer,
+      }),
+    ]),
+  );
 
   // Union of campaigns granted (unlocked) and campaigns already submitted to.
   const ids = new Set<string>();
@@ -52,6 +65,7 @@ export async function GET() {
     .map((d) => ({
       ...toCampaignSummary(d, 0),
       mySubmissionStatus: statusByCampaign.get(String(d._id)) ?? null,
+      myStage: stageByCampaign.get(String(d._id)) ?? null,
     }));
   return NextResponse.json({ campaigns });
 }

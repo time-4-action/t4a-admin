@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getProduct } from "@/lib/product-api";
-import { getMkProductPrices, pickMkListGrossPrice } from "@/lib/metakocka";
+import { getMkProductPrices, pickMkListGrossPrice, productTaxCode } from "@/lib/metakocka";
 import type { CatalogueProduct, ProductPrice } from "@/types/product";
 
 export const runtime = "nodejs";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 // tier discounts applied). A column with no list selected falls back to the catalogue
 // name heuristic so it isn't wiped.
 
-type RepricePrices = { rrp: number | null; partnerPrice: number | null };
+type RepricePrices = { rrp: number | null; partnerPrice: number | null; taxCode: string | null };
 
 // Catalogue-name heuristic fallback (used only for a column with no MK list chosen).
 function heuristicPrice(
@@ -73,7 +73,8 @@ export async function POST(request: Request) {
       : parent
         ? heuristicPrice(parent, code, /partner/i)
         : null;
-    prices[code] = { rrp, partnerPrice };
+    // The MK tax code rides along so submissions can be pushed without re-reading prices.
+    prices[code] = { rrp, partnerPrice, taxCode: mk[code]?.length ? productTaxCode(mk[code]) : null };
   }
   return NextResponse.json({ prices });
 }

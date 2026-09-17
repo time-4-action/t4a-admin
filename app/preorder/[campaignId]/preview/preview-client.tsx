@@ -17,8 +17,10 @@ import {
   UserPlus,
   X,
   Loader2,
-  Send,
   Check,
+  Globe2,
+  AlertTriangle,
+  SlidersHorizontal,
 } from "lucide-react";
 import {
   Dialog,
@@ -41,13 +43,23 @@ import {
 } from "@/app/preorder/preorder-shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { PreorderCampaign, PreorderTerms } from "@/types/preorder";
+import { CampaignNav } from "@/app/preorder/[campaignId]/campaign-nav";
+import { MarketChip, SourceBadge } from "@/app/preorder/preorder-badges";
+import { flagEmoji } from "@/lib/countries-client";
+import { type EffectiveCampaign, type PreorderCampaign, type PreorderTerms } from "@/types/preorder";
 import type { MkPartner } from "@/types/documents";
 
 type Mode = "grid" | "guided";
 
+// The partner being filled for — from the MK picker or the ?partner= deep link.
+type PickedPartner = { mkId: string; name: string; email?: string | null; address?: MkPartner["address"]; phone?: string };
+
 export default function PreviewClient({ campaignId }: { campaignId: string }) {
-  const [campaign, setCampaign] = useState<PreorderCampaign | null>(null);
+  // The admin sheet (no partner) and, once a partner is picked, THEIR effective campaign.
+  const [adminCampaign, setAdminCampaign] = useState<PreorderCampaign | null>(null);
+  const [effective, setEffective] = useState<EffectiveCampaign | null>(null);
+  const [effectiveLoading, setEffectiveLoading] = useState(false);
+  const campaign: PreorderCampaign | null = effective ?? adminCampaign;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
@@ -55,14 +67,17 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("guided");
 
-  const [partner, setPartner] = useState<MkPartner | null>(null);
+  const [partner, setPartner] = useState<PickedPartner | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  // Deep-link from the overview ("Fill for customer") opens the picker immediately.
+  // Deep-links: ?fill=1 (overview "Fill for customer") opens the picker; ?partner=<mkId>
+  // (customer drawer "Open preview as this customer") previews that partner directly.
   useEffect(() => {
-    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("fill") === "1") {
-      setPickerOpen(true);
-    }
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("fill") === "1") setPickerOpen(true);
+    const pid = sp.get("partner");
+    if (pid) setPartner({ mkId: pid, name: pid });
   }, []);
   const [busy, setBusy] = useState<null | "save" | "submit">(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -73,24 +88,40 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
       .then(async (r) => {
         const data = await r.json();
         if (!r.ok) throw new Error(data?.error ?? "Not found");
-        setCampaign(data.campaign);
+        setAdminCampaign(data.campaign);
         setActiveTabId(data.campaign.tabs[0]?.id ?? null);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Error"))
       .finally(() => setLoading(false));
   }, [campaignId]);
 
-  // When a partner is chosen, load their existing preorder to prefill.
+  // When a partner is chosen, load THEIR effective campaign (market / country / customer
+  // rules applied server-side) and their existing preorder to prefill.
   useEffect(() => {
-    if (!partner) return;
-    fetch(`/api/admin/preorder/submissions?campaignId=${campaignId}&partnerMkId=${encodeURIComponent(partner.mkId)}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.submission) {
+    if (!partner) {
+      setEffective(null);
+      return;
+    }
+    let alive = true;
+    setEffectiveLoading(true);
+    Promise.all([
+      fetch(`/api/admin/preorder/campaigns/${campaignId}/effective?partnerMkId=${encodeURIComponent(partner.mkId)}`).then((r) => r.json()),
+      fetch(`/api/admin/preorder/submissions?campaignId=${campaignId}&partnerMkId=${encodeURIComponent(partner.mkId)}`).then((r) => r.json()),
+    ])
+      .then(([eff, sub]) => {
+        if (!alive) return;
+        if (eff?.campaign) {
+          setEffective(eff.campaign);
+          setActiveTabId((prev) => (prev && eff.campaign.tabs.some((t: { id: string }) => t.id === prev) ? prev : eff.campaign.tabs[0]?.id ?? null));
+          if (eff.partner && (partner.name === partner.mkId || !partner.email)) {
+            setPartner((p) => (p && p.mkId === eff.partner.mkId ? { ...p, name: eff.partner.name, email: eff.partner.email } : p));
+          }
+        }
+        if (sub?.submission) {
           const q: Record<string, number> = {};
-          for (const l of data.submission.lines ?? []) q[l.rowId] = l.qty;
+          for (const l of sub.submission.lines ?? []) q[l.rowId] = l.qty;
           setQuantities(q);
-          setTerms(data.submission.terms ?? {});
+          setTerms(sub.submission.terms ?? {});
         } else {
           const a = partner.address;
           const addr = a ? [a.street, [a.postNumber, a.city].filter(Boolean).join(" "), a.country].filter(Boolean).join(", ") : "";
@@ -98,8 +129,20 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
           setQuantities({});
         }
       })
-      .catch(() => {});
-  }, [partner, campaignId]);
+      .catch(() => {})
+      .finally(() => alive && setEffectiveLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [partner?.mkId, campaignId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const clearPartner = () => {
+    setPartner(null);
+    setEffective(null);
+    setQuantities({});
+    setTerms({});
+    setActiveTabId(adminCampaign?.tabs[0]?.id ?? null);
+  };
 
   const setQty = useCallback((rowId: string, qty: number) => {
     setQuantities((prev) => {
@@ -125,7 +168,7 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
             campaignId,
             partnerMkId: partner.mkId,
             partnerName: partner.name,
-            partnerEmail: partner.emails?.[0],
+            partnerEmail: partner.email ?? undefined,
             quantities,
             terms,
             action,
@@ -133,8 +176,17 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data?.error ?? "Failed");
-        setFlash(action === "submit" ? `Preorder submitted for ${partner.name}` : "Draft saved");
-        setTimeout(() => setFlash(null), 3500);
+        const reg = data?.register?.state as string | undefined;
+        setFlash(
+          action === "submit"
+            ? reg === "created"
+              ? `Preorder submitted for ${partner.name} — Metakocka order ${data.register.countCode ?? ""} created`
+              : reg === "failed"
+                ? `Preorder submitted for ${partner.name} — Metakocka registration failed (retry from the preorder page)`
+                : `Preorder submitted for ${partner.name}`
+            : "Draft saved",
+        );
+        setTimeout(() => setFlash(null), 6000);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed");
       } finally {
@@ -217,7 +269,7 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
               <UserRound className="w-3.5 h-3.5" />
               <span className="max-w-[140px] truncate">{partner.name}</span>
               <button onClick={() => setPickerOpen(true)} className="p-0.5 rounded hover:bg-lime-600/20" title="Change customer"><Pencil className="w-3 h-3" /></button>
-              <button onClick={() => { setPartner(null); setQuantities({}); setTerms({}); }} className="p-0.5 rounded hover:bg-lime-600/20" title="Clear"><X className="w-3 h-3" /></button>
+              <button onClick={clearPartner} className="p-0.5 rounded hover:bg-lime-600/20" title="Clear"><X className="w-3 h-3" /></button>
             </span>
           ) : (
             <Button size="sm" className="h-8" onClick={() => setPickerOpen(true)}>
@@ -241,7 +293,8 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
             </button>
           </div>
         </div>
-        <div className="px-4 md:px-6 pb-2">
+        <div className="px-4 md:px-6 pb-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <CampaignNav campaignId={campaignId} active="preview" compact />
           <TabBar tabs={campaign.tabs} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
         </div>
       </header>
@@ -264,6 +317,10 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
           <aside className="lg:sticky lg:top-4 space-y-3">
             <OrderSummaryPanel campaign={campaign} quantities={quantities} currency={currency} />
 
+            {partner && (effective || effectiveLoading) && (
+              <EffectiveConfigCard effective={effective} loading={effectiveLoading} campaignId={campaignId} partnerMkId={partner.mkId} />
+            )}
+
             {partner ? (
               <div className="rounded-xl border border-border bg-surface p-3 space-y-2">
                 <div className="flex items-center gap-2 pb-1">
@@ -272,7 +329,7 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="text-[13px] font-medium text-foreground truncate">{partner.name}</div>
-                    {partner.emails?.[0] && <div className="text-[11px] text-muted-foreground truncate">{partner.emails[0]}</div>}
+                    {partner.email && <div className="text-[11px] text-muted-foreground truncate">{partner.email}</div>}
                   </div>
                 </div>
                 <Button className="w-full" onClick={() => setReviewOpen(true)} disabled={busy !== null}>
@@ -294,7 +351,7 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
               </div>
             )}
 
-            {partner && (
+            {partner && partner.address && (
               <details className="rounded-xl border border-border bg-surface p-3">
                 <summary className="text-[12px] font-medium text-foreground cursor-pointer">Partner details</summary>
                 <dl className="mt-3 space-y-2">
@@ -339,12 +396,69 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
           </p>
           <PartnerPicker
             onSelect={(p) => {
-              setPartner(p);
+              setPartner({ mkId: p.mkId, name: p.name, email: p.emails?.[0] ?? null, address: p.address, phone: p.phone });
               setPickerOpen(false);
             }}
           />
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// Admin-only explanation of what the partner is seeing and where each setting came from.
+function EffectiveConfigCard({ effective, loading, campaignId, partnerMkId }: { effective: EffectiveCampaign | null; loading: boolean; campaignId: string; partnerMkId: string }) {
+  const m = effective?.effective;
+  return (
+    <div className="rounded-xl border border-sky-200/70 bg-sky-50/50 dark:border-sky-800/50 dark:bg-sky-950/20 p-3 space-y-2 text-[12px]">
+      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-semibold text-sky-700 dark:text-sky-300">
+        <SlidersHorizontal className="w-3.5 h-3.5" /> Effective configuration
+        {loading && <Loader2 className="w-3 h-3 animate-spin ml-auto" />}
+      </div>
+      {m && effective ? (
+        <>
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground w-20 shrink-0">Market</span>
+            {m.market ? <MarketChip name={m.market.name} color={m.market.color} /> : <span className="text-foreground">none</span>}
+            <span className="ml-auto text-[10px] text-muted-foreground">{m.marketSource === "manual" ? "assigned" : m.countryIso ? `${flagEmoji(m.countryIso)} ${m.countryIso}` : "no country"}</span>
+          </div>
+          <Line label="Pricing" value={effective.partnerPricelist ?? "sheet prices"} source={m.sources.pricelist} />
+          <Line
+            label="Assortment"
+            value={`${effective.tabs.reduce((n, t) => n + t.groups.reduce((a, g) => a + g.rows.length, 0), 0)} products${m.assortment.hidden ? ` · ${m.assortment.hidden} hidden` : ""}${m.assortment.exposed ? ` · ${m.assortment.exposed} added` : ""}`}
+            source={m.assortment.hiddenBy.customer || (m.hasCustomerRule && m.assortment.exposed) ? "customer" : m.assortment.hidden || m.assortment.exposed ? "market" : "campaign"}
+          />
+          <Line
+            label="Discounts"
+            value={Object.values(m.sources.tiers).includes("customer") ? "customer tiers" : Object.values(m.sources.tiers).includes("market") ? `${m.market?.name ?? "market"} tiers` : "campaign tiers"}
+            source={Object.values(m.sources.tiers).includes("customer") ? "customer" : Object.values(m.sources.tiers).includes("market") ? "market" : "campaign"}
+          />
+          <Line label="Currency" value={effective.currency} source={m.sources.currency} />
+          {effective.deadline && <Line label="Deadline" value={new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(new Date(effective.deadline))} source={m.sources.deadline} />}
+          {m.minOrderAmount != null && <Line label="Min. order" value={`${m.minOrderAmount} ${effective.currency}`} source={m.sources.minOrderAmount} />}
+          {m.note && <Line label="Note" value={m.note} source={m.sources.note} />}
+          {m.warnings.length > 0 && (
+            <div className="text-[11px] text-amber-700 dark:text-amber-300 flex items-start gap-1.5 pt-1">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> <span>{m.warnings.join(" · ")}</span>
+            </div>
+          )}
+          <Link href={`/preorder/${campaignId}/markets?customer=${encodeURIComponent(partnerMkId)}`} className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-700 dark:text-sky-300 hover:underline pt-1">
+            <Globe2 className="w-3.5 h-3.5" /> Edit customer overrides
+          </Link>
+        </>
+      ) : (
+        <p className="text-muted-foreground">Resolving…</p>
+      )}
+    </div>
+  );
+}
+
+function Line({ label, value, source }: { label: string; value: string; source: "campaign" | "market" | "customer" }) {
+  return (
+    <div className="flex items-start gap-2">
+      <span className="text-muted-foreground w-20 shrink-0">{label}</span>
+      <span className="text-foreground min-w-0 truncate" title={value}>{value}</span>
+      <SourceBadge source={source} label={source === "campaign" ? "default" : source === "market" ? "market" : "override"} className="ml-auto shrink-0" />
     </div>
   );
 }

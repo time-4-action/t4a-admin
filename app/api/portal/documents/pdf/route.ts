@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionPartner, isPortalDocKind } from "@/lib/portal";
 import { getDocument, getDocumentPdf } from "@/lib/metakocka";
+import { customerMayViewDocument } from "@/lib/preorder-visibility";
 import { parseDocKind } from "@/types/documents";
 
 export const runtime = "nodejs";
@@ -18,7 +19,8 @@ export async function GET(req: NextRequest) {
   if (!partner) return NextResponse.json({ error: "no-account" }, { status: 404 });
 
   const doc = await getDocument(kind, mkId);
-  if (!doc || doc.partner?.mkId !== partner.mkId) {
+  // Ownership + preorder visibility (an unpublished preorder order is not theirs to see yet).
+  if (!doc || !(await customerMayViewDocument(partner, doc))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 

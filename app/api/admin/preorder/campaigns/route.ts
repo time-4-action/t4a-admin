@@ -5,7 +5,7 @@ import {
   PreorderCampaign,
   submissionCountsByCampaign,
   toCampaignSummary,
-  toCampaignView,
+  toCampaignAdminView,
   genShareToken,
 } from "@/lib/preorder";
 import type { IPreorderCampaign } from "@/models/preorder-campaign";
@@ -48,5 +48,5 @@ export async function POST(request: Request) {
     shareToken: genShareToken(),
     createdBy: session?.user?.email ?? null,
   });
-  return NextResponse.json({ campaign: toCampaignView(doc) }, { status: 201 });
+  return NextResponse.json({ campaign: toCampaignAdminView(doc) }, { status: 201 });
 }
