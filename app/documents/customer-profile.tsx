@@ -1,4 +1,4 @@
-import { Building2, Mail, Phone, MapPin, ReceiptText, User } from "lucide-react";
+import { Building2, Mail, Phone, MapPin, User } from "lucide-react";
 import type { MkAddress, MkContact, MkPartner } from "@/types/documents";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 
@@ -12,43 +12,18 @@ function addrLine(a: MkAddress): string {
   return [a.street, [a.postNumber, a.city].filter(Boolean).join(" "), a.country].filter(Boolean).join(", ");
 }
 
-function Card({
-  title,
-  icon: Icon,
-  count,
-  bodyClass = "p-4",
-  children,
-}: {
-  title: string;
-  icon: React.ElementType;
-  count?: number;
-  bodyClass?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-2xl border border-border bg-surface overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/60 bg-muted/25">
-        <Icon className="h-3.5 w-3.5 text-teal-500" />
-        <span className="text-[12px] font-semibold text-foreground">{title}</span>
-        {count != null && count > 0 && (
-          <span className="ml-auto text-[11px] font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full tabular-nums">
-            {count}
-          </span>
-        )}
-      </div>
-      <div className={bodyClass}>{children}</div>
-    </div>
-  );
+// MK address types come as Slovene register labels; show them as what they are.
+function addressKind(t?: string | null): string {
+  const k = (t ?? "").trim().toLowerCase();
+  if (!k) return "Address";
+  if (k.startsWith("rač") || k.startsWith("rac") || k.includes("bill") || k.includes("invoice")) return "Billing";
+  if (k.startsWith("dob") || k.includes("deliv") || k.includes("ship")) return "Delivery";
+  return t!;
 }
 
-function Field({ label, value }: { label: string; value?: string | null }) {
-  if (!value) return null;
-  return (
-    <div className="flex items-baseline justify-between gap-4 py-1.5 border-b border-border/40 last:border-0">
-      <span className="text-[12px] text-muted-foreground shrink-0">{label}</span>
-      <span className="text-[13px] font-medium text-foreground text-right break-words">{value}</span>
-    </div>
-  );
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] ?? "?") + (parts[1]?.[0] ?? "")).toUpperCase();
 }
 
 export default function CustomerProfile({ customer }: { customer: MkPartner }) {
@@ -66,167 +41,153 @@ export default function CustomerProfile({ customer }: { customer: MkPartner }) {
     seen.add(k);
     return true;
   });
-
+  const primaryEmail = contacts.find((ct) => ct.email)?.email ?? c.emails[0];
+  const primaryPhone = contacts.find((ct) => ct.phone)?.phone ?? c.phone;
   const addresses = c.addresses ?? [];
+  const business = !!c.businessEntity || !!c.taxId;
+
+  const details: { label: string; value?: string | null }[] = [
+    { label: "Customer code", value: c.countCode },
+    { label: "VAT / tax number", value: c.taxId },
+    { label: "Payment terms", value: c.paymentDueDays ? `${c.paymentDueDays} days` : undefined },
+    { label: "Currency", value: c.currency },
+    { label: "Language", value: c.language },
+  ].filter((d) => !!d.value);
 
   return (
-    <div className="space-y-4">
-      {/* Hero */}
-      <div className="rounded-2xl border border-border bg-surface px-5 py-4 flex items-start gap-4">
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-teal-500/10 shrink-0">
-          <Building2 className="h-6 w-6 text-teal-500" />
-        </span>
-        <div className="min-w-0">
-          <h2 className="font-display text-xl md:text-2xl font-semibold text-foreground tracking-tight leading-tight break-words">
-            {c.name}
-          </h2>
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-              {c.businessEntity ? <Building2 className="h-3 w-3" /> : <User className="h-3 w-3" />}
-              {c.businessEntity ? "Business" : "Individual"}
-            </span>
-            {c.taxId && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                <ReceiptText className="h-3 w-3" /> {c.taxId}
+    <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+      {/* Identity band */}
+      <div className="relative px-5 py-6 md:px-8 md:py-8 bg-gradient-to-br from-muted/70 via-surface to-surface">
+        <div className="flex items-start gap-5">
+          <span className="flex h-16 w-16 md:h-20 md:w-20 shrink-0 items-center justify-center rounded-2xl bg-foreground text-background font-display text-2xl md:text-3xl font-semibold tracking-tight shadow-sm">
+            {initials(c.name)}
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-display text-2xl md:text-3xl font-semibold text-foreground tracking-tight leading-tight break-words">{c.name}</h2>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px]">
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                {business ? <Building2 className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+                {business ? "Company" : "Individual"}
+                {c.countCode && <span className="font-mono text-[11px] text-muted-foreground/70">· {c.countCode}</span>}
               </span>
-            )}
+              {primaryEmail && (
+                <a href={`mailto:${primaryEmail}`} className="inline-flex items-center gap-1.5 text-foreground hover:text-teal-600 dark:hover:text-teal-400 transition-colors">
+                  <Mail className="h-3.5 w-3.5 text-muted-foreground" /> {primaryEmail}
+                </a>
+              )}
+              {primaryPhone && (
+                <a href={`tel:${primaryPhone.replace(/\s/g, "")}`} className="inline-flex items-center gap-1.5 text-foreground hover:text-teal-600 dark:hover:text-teal-400 transition-colors">
+                  <Phone className="h-3.5 w-3.5 text-muted-foreground" /> {primaryPhone}
+                </a>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Masonry columns keep things balanced when one list is much longer. */}
-      <div className="columns-1 md:columns-2 gap-4 [&>*]:mb-4 [&>*]:break-inside-avoid">
-        {/* Details */}
-        <Card title="Details" icon={ReceiptText}>
-          <Field label="Customer code" value={c.countCode} />
-          <Field label="Tax number" value={c.taxId} />
-          <Field label="Type" value={c.businessEntity ? "Business entity" : "Individual"} />
-          <Field label="Payment terms" value={c.paymentDueDays ? `${c.paymentDueDays} days` : undefined} />
-          <Field label="Currency" value={c.currency} />
-          <Field label="Language" value={c.language} />
-        </Card>
-
-        {/* Contact */}
-        {contacts.length > 0 && (
-          <Card
-            title="Contact"
-            icon={Mail}
-            count={contacts.length}
-            bodyClass="max-h-[380px] overflow-y-auto divide-y divide-border/40"
-          >
-            {contacts.map((ct, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-2">
-                {ct.email ? (
-                  <a
-                    href={`mailto:${ct.email}`}
-                    className="flex items-center gap-1.5 min-w-0 flex-1 text-[12px] text-foreground hover:text-teal-600 dark:hover:text-teal-400 transition-colors"
-                  >
-                    <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <span className="truncate">{ct.email}</span>
-                  </a>
-                ) : (
-                  <span className="flex-1" />
-                )}
-                {ct.phone && (
-                  <a
-                    href={`tel:${ct.phone.replace(/\s/g, "")}`}
-                    className="flex items-center gap-1.5 text-[12px] text-muted-foreground shrink-0 hover:text-foreground transition-colors"
-                  >
-                    <Phone className="h-3 w-3 shrink-0" />
-                    {ct.phone}
-                  </a>
-                )}
-              </div>
-            ))}
-          </Card>
-        )}
-
-        {/* Addresses */}
-        {addresses.length > 0 && (
-          <Card
-            title="Addresses"
-            icon={MapPin}
-            count={addresses.length}
-            bodyClass="max-h-[380px] overflow-y-auto divide-y divide-border/40"
-          >
-            {addresses.map((a, i) => (
-              <div key={i} className="px-4 py-2.5">
-                <div className="flex items-center gap-2">
-                  {a.type && (
-                    <span className="inline-flex items-center rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide shrink-0">
-                      {a.type}
-                    </span>
-                  )}
-                  <span className="text-[13px] text-foreground min-w-0">{addrLine(a) || "—"}</span>
+      {/* Three quiet columns: details · addresses · people */}
+      <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border/60 border-t border-border/60">
+        <section className="p-5">
+          <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-3">Account</h3>
+          {details.length === 0 ? (
+            <p className="text-[12px] text-muted-foreground">No further details on file.</p>
+          ) : (
+            <dl className="space-y-2.5">
+              {details.map((d) => (
+                <div key={d.label}>
+                  <dt className="text-[11px] text-muted-foreground">{d.label}</dt>
+                  <dd className="text-[13px] font-medium text-foreground break-words">{d.value}</dd>
                 </div>
-                {(a.paymentDueDays || a.currency || a.language) && (
-                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
-                    {a.paymentDueDays && <span>{a.paymentDueDays}-day terms</span>}
-                    {a.currency && <span>{a.currency}</span>}
-                    {a.language && <span>{a.language}</span>}
+              ))}
+            </dl>
+          )}
+        </section>
+
+        <section className="p-5">
+          <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-3">Addresses</h3>
+          {addresses.length === 0 ? (
+            <p className="text-[12px] text-muted-foreground">No address on file.</p>
+          ) : (
+            <ul className="space-y-3">
+              {addresses.map((a, i) => (
+                <li key={i} className="flex items-start gap-2.5">
+                  <MapPin className="h-3.5 w-3.5 mt-[3px] text-muted-foreground shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-[11px] text-muted-foreground">{addressKind(a.type)}</div>
+                    <div className="text-[13px] text-foreground leading-snug">
+                      {a.street && <div>{a.street}</div>}
+                      <div>{[a.postNumber, a.city].filter(Boolean).join(" ")}</div>
+                      {a.country && <div>{a.country}</div>}
+                      {!addrLine(a) && <div>—</div>}
+                    </div>
                   </div>
-                )}
-              </div>
-            ))}
-          </Card>
-        )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="p-5">
+          <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-3">Contacts</h3>
+          {contacts.length === 0 ? (
+            <p className="text-[12px] text-muted-foreground">No contact on file.</p>
+          ) : (
+            <ul className="space-y-2.5 max-h-[320px] overflow-y-auto">
+              {contacts.map((ct, i) => (
+                <li key={i} className="min-w-0">
+                  {ct.email && (
+                    <a href={`mailto:${ct.email}`} className="block text-[13px] text-foreground truncate hover:text-teal-600 dark:hover:text-teal-400 transition-colors">
+                      {ct.email}
+                    </a>
+                  )}
+                  {ct.phone && (
+                    <a href={`tel:${ct.phone.replace(/\s/g, "")}`} className="block text-[12px] text-muted-foreground hover:text-foreground transition-colors">
+                      {ct.phone}
+                    </a>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+
+      <div className="px-5 py-2.5 border-t border-border/60 bg-muted/20 text-[11px] text-muted-foreground">
+        These details come from our records. If something is wrong or has changed, contact us and we will update them.
       </div>
     </div>
   );
 }
 
-// Twin of the profile above: hero, then the same masonry with Details,
-// Contact and Addresses cards. Labels and card chrome render for real.
+// Twin of the profile above: identity band, then the three columns.
 export function CustomerProfileSkeleton() {
   return (
-    <div className="space-y-4">
-      <div className="rounded-2xl border border-border bg-surface px-5 py-4 flex items-start gap-4">
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-teal-500/10 shrink-0">
-          <Building2 className="h-6 w-6 text-teal-500" />
-        </span>
-        <div className="min-w-0">
-          {/* text-xl md:text-2xl leading-tight → 25px / 30px */}
-          <SkeletonLine lh="h-[25px] md:h-[30px]" h="h-5 md:h-6" w="w-56" />
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            <Skeleton className="h-[20.5px] w-24 rounded-full" delay={40} />
-            <Skeleton className="h-[20.5px] w-28 rounded-full" delay={60} />
+    <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+      <div className="px-5 py-6 md:px-8 md:py-8 bg-gradient-to-br from-muted/70 via-surface to-surface flex items-start gap-5">
+        <Skeleton className="h-16 w-16 md:h-20 md:w-20 rounded-2xl shrink-0" />
+        <div className="min-w-0 flex-1">
+          <SkeletonLine lh="h-[30px] md:h-[36px]" h="h-6 md:h-7" w="w-64" delay={20} />
+          <div className="mt-2 flex flex-wrap items-center gap-4">
+            <SkeletonLine lh="h-[20px]" w="w-24" delay={40} />
+            <SkeletonLine lh="h-[20px]" w="w-44" delay={60} />
+            <SkeletonLine lh="h-[20px]" w="w-28" delay={80} />
           </div>
         </div>
       </div>
-
-      <div className="columns-1 md:columns-2 gap-4 [&>*]:mb-4 [&>*]:break-inside-avoid">
-        <Card title="Details" icon={ReceiptText}>
-          {["Customer code", "Tax number", "Type", "Payment terms", "Currency", "Language"].map((label, i) => (
-            <div key={label} className="flex items-baseline justify-between gap-4 py-1.5 border-b border-border/40 last:border-0">
-              <span className="text-[12px] text-muted-foreground shrink-0">{label}</span>
-              <SkeletonLine lh="h-[19.5px]" h="h-3.5" w={["w-20", "w-24", "w-28", "w-16", "w-10", "w-8"][i]} delay={stagger(i, 40, 80)} />
+      <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border/60 border-t border-border/60">
+        {["Account", "Addresses", "Contacts"].map((title, col) => (
+          <section key={title} className="p-5">
+            <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-3">{title}</h3>
+            <div className="space-y-2.5">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i}>
+                  <SkeletonLine lh="h-[16px]" h="h-2.5" w="w-20" delay={stagger(col * 3 + i, 50)} />
+                  <SkeletonLine lh="h-[20px]" w={["w-40", "w-52", "w-32"][i]} delay={stagger(col * 3 + i, 50, 20)} />
+                </div>
+              ))}
             </div>
-          ))}
-        </Card>
-        <Card title="Contact" icon={Mail} bodyClass="divide-y divide-border/40">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="flex items-center gap-3 px-4 py-2">
-              <span className="flex items-center gap-1.5 min-w-0 flex-1">
-                <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <SkeletonLine lh="h-[18px]" w={["w-40", "w-32", "w-44"][i]} delay={stagger(i, 60, 320)} />
-              </span>
-              <span className="flex items-center gap-1.5 shrink-0">
-                <Phone className="h-3 w-3 text-muted-foreground shrink-0" />
-                <SkeletonLine lh="h-[18px]" w="w-24" delay={stagger(i, 60, 340)} />
-              </span>
-            </div>
-          ))}
-        </Card>
-        <Card title="Addresses" icon={MapPin} bodyClass="divide-y divide-border/40">
-          {[0, 1].map((i) => (
-            <div key={i} className="px-4 py-2.5">
-              <div className="flex items-center gap-2">
-                <Skeleton className="h-[19px] w-14 rounded-full shrink-0" delay={stagger(i, 60, 500)} />
-                <SkeletonLine lh="h-[19.5px]" h="h-3.5" w={i === 0 ? "w-56" : "w-48"} delay={stagger(i, 60, 520)} />
-              </div>
-            </div>
-          ))}
-        </Card>
+          </section>
+        ))}
       </div>
     </div>
   );
