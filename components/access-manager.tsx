@@ -36,7 +36,7 @@ interface Role {
   name: string;
 }
 
-export type AccessAccent = "indigo" | "amber" | "rose" | "blue" | "teal" | "lime";
+export type AccessAccent = "indigo" | "amber" | "rose" | "blue" | "teal" | "lime" | "cyan";
 
 // Full literal class strings per accent (Tailwind can't see interpolated names).
 const ACCENTS: Record<
@@ -164,6 +164,24 @@ const ACCENTS: Record<
     titleOn: "text-lime-700 dark:text-lime-300",
     ack: "text-lime-600 dark:text-lime-400 border-lime-200 dark:border-lime-800",
     btn: "bg-lime-500 hover:bg-lime-600 border-lime-500 text-white",
+  },
+  cyan: {
+    iconText: "text-cyan-600 dark:text-cyan-500",
+    chip: "bg-cyan-50 border-cyan-200/70 dark:bg-cyan-950/40 dark:border-cyan-800/50",
+    switchOn: "bg-cyan-500",
+    countBadge:
+      "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/50 dark:text-cyan-300",
+    accentBar: "bg-cyan-500",
+    rowGranted: "bg-cyan-50/50 dark:bg-cyan-950/15",
+    badge:
+      "bg-cyan-50 text-cyan-700 border-cyan-200/70 dark:bg-cyan-950/40 dark:text-cyan-300 dark:border-cyan-800/60",
+    panelOn:
+      "border-cyan-300 bg-cyan-50 dark:bg-cyan-950/40 dark:border-cyan-600/60",
+    iconOn: "bg-cyan-500",
+    iconOff: "bg-cyan-100 dark:bg-cyan-900/50",
+    titleOn: "text-cyan-700 dark:text-cyan-300",
+    ack: "text-cyan-600 dark:text-cyan-400 border-cyan-200 dark:border-cyan-800",
+    btn: "bg-cyan-500 hover:bg-cyan-600 border-cyan-500 text-white",
   },
 };
 

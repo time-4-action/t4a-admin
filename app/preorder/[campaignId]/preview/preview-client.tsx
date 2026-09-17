@@ -33,6 +33,7 @@ import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   TabBar,
   TabTierBanner,
+  PricingBanner,
   PreorderGridTab,
   PreorderGuidedTab,
   OrderSummaryPanel,
@@ -44,9 +45,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CampaignHeader } from "@/app/preorder/[campaignId]/campaign-nav";
-import { MarketChip, SourceBadge } from "@/app/preorder/preorder-badges";
+import { MarketChip, SourceBadge, WarningList } from "@/app/preorder/preorder-badges";
 import { Flag } from "@/components/flag";
-import { type EffectiveCampaign, type PreorderCampaign, type PreorderTerms } from "@/types/preorder";
+import { CUSTOMER_KIND_LABELS, VAT_SOURCE_LABELS, type EffectiveCampaign, type PreorderCampaign, type PreorderTerms } from "@/types/preorder";
+import { fmtVatRate } from "@/lib/pricing";
 import type { MkPartner } from "@/types/documents";
 
 type Mode = "grid" | "guided";
@@ -303,15 +305,16 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
                 <TabBar tabs={campaign.tabs} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
               </div>
             )}
+            <PricingBanner pricing={campaign.pricing} className="mb-4" />
             {activeTab && (
-              <TabTierBanner tab={activeTab} quantities={quantities} currency={currency} className="mb-4" />
+              <TabTierBanner tab={activeTab} quantities={quantities} currency={currency} pricing={campaign.pricing} className="mb-4" />
             )}
             {!activeTab ? (
               <div className="text-center text-[13px] text-muted-foreground py-16">This sheet has no tabs yet.</div>
             ) : mode === "grid" ? (
-              <PreorderGridTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} />
+              <PreorderGridTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={campaign.pricing} />
             ) : (
-              <PreorderGuidedTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} />
+              <PreorderGuidedTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={campaign.pricing} />
             )}
           </div>
 
@@ -435,12 +438,36 @@ function EffectiveConfigCard({ effective, loading, campaignId, partnerMkId }: { 
             source={Object.values(m.sources.tiers).includes("customer") ? "customer" : Object.values(m.sources.tiers).includes("market") ? "market" : "campaign"}
           />
           <Line label="Currency" value={effective.currency} source={m.sources.currency} />
+          <div className="flex items-start gap-2">
+            <span className="text-muted-foreground w-20 shrink-0">Customer</span>
+            <span className="text-foreground min-w-0 truncate">
+              {CUSTOMER_KIND_LABELS[m.pricing.ctx.kind]} · {m.pricing.ctx.basis === "rrp" ? "RRP incl. VAT" : "partner price excl. VAT"}
+            </span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="text-muted-foreground w-20 shrink-0">VAT</span>
+            <span className={cn("min-w-0 truncate", m.pricing.ctx.vat.rate == null ? "text-amber-700 dark:text-amber-300 font-medium" : "text-foreground")}>
+              {m.pricing.ctx.vat.rate == null ? `not configured${m.countryIso ? ` for ${m.countryIso}` : ""}` : `${fmtVatRate(m.pricing.ctx.vat.rate)}${m.countryIso && m.pricing.ctx.basis === "rrp" ? ` · ${m.countryIso}` : ""}`}
+            </span>
+            <span
+              className={cn(
+                "ml-auto shrink-0 inline-flex items-center rounded-full px-1.5 py-px text-[10px] font-medium",
+                m.pricing.ctx.vat.source === "campaign"
+                  ? "bg-lime-100 text-lime-700 dark:bg-lime-900/40 dark:text-lime-300"
+                  : m.pricing.ctx.vat.source === "missing"
+                    ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                    : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+              )}
+            >
+              {VAT_SOURCE_LABELS[m.pricing.ctx.vat.source].toLowerCase()}
+            </span>
+          </div>
           {effective.deadline && <Line label="Deadline" value={new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(new Date(effective.deadline))} source={m.sources.deadline} />}
           {m.minOrderAmount != null && <Line label="Min. order" value={`${m.minOrderAmount} ${effective.currency}`} source={m.sources.minOrderAmount} />}
           {m.note && <Line label="Note" value={m.note} source={m.sources.note} />}
           {m.warnings.length > 0 && (
             <div className="text-[11px] text-amber-700 dark:text-amber-300 flex items-start gap-1.5 pt-1">
-              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> <span>{m.warnings.join(" · ")}</span>
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> <WarningList codes={m.warnings} />
             </div>
           )}
           <Link href={`/preorder/${campaignId}/markets?customer=${encodeURIComponent(partnerMkId)}`} className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-700 dark:text-sky-300 hover:underline pt-1">

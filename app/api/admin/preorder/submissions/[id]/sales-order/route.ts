@@ -3,6 +3,7 @@ import type { Types } from "mongoose";
 import { auth0 } from "@/lib/auth";
 import { connectDB, PreorderSubmission, toSubmissionView, toObjectId } from "@/lib/preorder";
 import { readSubmissionOrder, registerSalesOrder } from "@/lib/preorder-mk";
+import { repriceSubmission } from "@/lib/preorder-submit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,15 @@ export async function POST(_req: Request, { params }: RouteParams) {
       { error: "A sales order already exists for this submission.", submission: toSubmissionView(doc) },
       { status: 409 },
     );
+  }
+
+  // A preorder without a pricing snapshot (submitted before VAT support), or one the
+  // admin asks to re-price, is re-priced from the campaign as it is now before the
+  // order is built.
+  const body = (await _req.json().catch(() => ({}))) as { reprice?: boolean };
+  if (body.reprice || !doc.snapshot?.pricing) {
+    const rp = await repriceSubmission(doc);
+    if (!rp.ok) return NextResponse.json({ error: rp.message, submission: toSubmissionView(doc) }, { status: rp.status });
   }
 
   const session = await auth0.getSession();

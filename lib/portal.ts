@@ -6,7 +6,9 @@ import "server-only";
 // see" for every /portal page and /api/portal route.
 
 import { auth0 } from "@/lib/auth";
-import { resolvePartnerByEmail } from "@/lib/metakocka";
+import { getPartnerById, resolvePartnerByEmail } from "@/lib/metakocka";
+import { readImpersonation } from "@/lib/portal-impersonation";
+import { cached } from "@/lib/auth0-cache";
 import type { DocKind, MkPartner } from "@/types/documents";
 
 // The document families a customer may see in the portal. Offers are internal
@@ -18,7 +20,28 @@ export function isPortalDocKind(kind: DocKind | null | undefined): kind is DocKi
   return !!kind && PORTAL_DOC_KINDS.includes(kind);
 }
 
+// The partner the portal shows. Normally the session email's partner; for an admin
+// who is "viewing the portal as" a customer (lib/portal-impersonation.ts — a signed
+// cookie honoured only with an eligible admin role) it is that customer.
 export async function getSessionPartner(): Promise<MkPartner | null> {
+  return (await getPortalViewer()).partner;
+}
+
+export type PortalViewer = {
+  partner: MkPartner | null;
+  // Set while an admin views the portal as a customer: who they really are.
+  impersonating: { partnerMkId: string; partnerName: string; adminEmail: string | null; returnTo: string } | null;
+};
+
+export async function getPortalViewer(): Promise<PortalViewer> {
+  const imp = await readImpersonation();
+  if (imp) {
+    const partner = await cached(`portal-as:${imp.partnerMkId}`, 60_000, () => getPartnerById(imp.partnerMkId));
+    return {
+      partner,
+      impersonating: { partnerMkId: imp.partnerMkId, partnerName: partner?.name ?? imp.partnerName, adminEmail: imp.adminEmail, returnTo: imp.returnTo },
+    };
+  }
   const session = await auth0.getSession();
-  return resolvePartnerByEmail(session?.user?.email);
+  return { partner: await resolvePartnerByEmail(session?.user?.email), impersonating: null };
 }

@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Loader2, Check, RefreshCw, Trash2, ExternalLink, Link2, Eye, AlertTriangle, Mail, Phone, MapPin, Hash, Building2, User, Compass, Copy, LayoutList, Wallet, Percent, Boxes, ChevronRight, ChevronDown } from "lucide-react";
+import { Loader2, Check, RefreshCw, Trash2, ExternalLink, Link2, Lock, LockOpen, AlertTriangle, Mail, Phone, MapPin, Hash, Building2, User, Compass, Copy, LayoutList, Wallet, Percent, Boxes, ChevronRight, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -16,13 +16,14 @@ import { EditorModal, EditorModalBody, EditorModalFooter, EditorModalHeader } fr
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
 import { cn } from "@/lib/utils";
-import { MarketChip, SubmissionStageBadge } from "@/app/preorder/preorder-badges";
+import { MarketChip, SubmissionStageBadge, WarningList } from "@/app/preorder/preorder-badges";
 import { Flag } from "@/components/flag";
 import { resolveEffectiveCampaign, resolvePartnerContext } from "@/lib/preorder-effective";
 import type { CustomerRow } from "@/lib/preorder-customers";
 import type { MkPricelist } from "@/types/documents";
 import { type CommercialConfig, type CustomerRule, type EffectiveMeta, type PreorderCampaignAdmin } from "@/types/preorder";
 import { CommercialConfigForm, configSectionCounts } from "./commercial-config-form";
+import { ViewAsCustomerButton } from "@/components/view-as-customer-button";
 import { CountrySelect } from "./country-picker";
 import { CustomerKindBadge } from "./tables";
 
@@ -61,7 +62,7 @@ export function CustomerModal({
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<RuleDraft>({ marketId: null, countryIso: null, note: "", config: {} });
   const [hasRule, setHasRule] = useState(false);
-  const [saving, setSaving] = useState<null | "rule" | "remove" | "refresh" | "country">(null);
+  const [saving, setSaving] = useState<null | "rule" | "remove" | "refresh" | "country" | "access">(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [dirPick, setDirPick] = useState(false); // directory-country picker revealed
   const [advanced, setAdvanced] = useState(false); // placement "Advanced" opened
@@ -141,6 +142,24 @@ export function CustomerModal({
       await fetch(`/api/admin/preorder/campaigns/${campaignId}/customers/${encodeURIComponent(partnerMkId)}`, { method: "DELETE" });
       onSaved();
       await load();
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  // Unlock / lock the campaign for this customer by hand (what the invite link does).
+  const setAccess = async (grant: boolean) => {
+    if (!partnerMkId) return;
+    setSaving("access");
+    setError(null);
+    try {
+      const r = await fetch(`/api/admin/preorder/campaigns/${campaignId}/customers/${encodeURIComponent(partnerMkId)}/access`, { method: grant ? "POST" : "DELETE" });
+      const j = (await r.json().catch(() => ({}))) as { error?: string };
+      if (!r.ok) throw new Error(j.error ?? "Could not change access");
+      onSaved();
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not change access");
     } finally {
       setSaving(null);
     }
@@ -234,12 +253,7 @@ export function CustomerModal({
         right={
           customer ? (
             <>
-              <Link
-                href={`/preorder/${campaignId}/preview?partner=${encodeURIComponent(customer.partnerMkId)}`}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-[12px] font-medium text-foreground hover:bg-muted"
-              >
-                <Eye className="w-3.5 h-3.5" /> Preview as customer
-              </Link>
+              <ViewAsCustomerButton partnerMkId={customer.partnerMkId} />
               <button
                 type="button"
                 onClick={refreshFromMk}
@@ -329,10 +343,23 @@ export function CustomerModal({
                       ) : (
                         <span className="text-[14px] font-medium text-foreground">Not unlocked</span>
                       )}
-                      {!customer.access && inviteUrl && (
-                        <Button type="button" size="sm" variant="outline" className="h-8 text-[12px]" onClick={() => navigator.clipboard?.writeText(inviteUrl)}>
-                          <Link2 className="w-3.5 h-3.5" /> Copy invite link
-                        </Button>
+                      {customer.access ? (
+                        !customer.submissionId && (
+                          <Button type="button" size="sm" variant="ghost" className="h-8 text-[12px] text-muted-foreground" onClick={() => setAccess(false)} disabled={saving !== null} title="Take the campaign away again — they will no longer see it in the portal">
+                            {saving === "access" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Lock className="w-3.5 h-3.5" />} Lock
+                          </Button>
+                        )
+                      ) : (
+                        <>
+                          <Button type="button" size="sm" className="h-8 text-[12px] bg-lime-600 hover:bg-lime-700 text-white" onClick={() => setAccess(true)} disabled={saving !== null} title="Give this customer the campaign now — no invite link needed">
+                            {saving === "access" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LockOpen className="w-3.5 h-3.5" />} Unlock for this customer
+                          </Button>
+                          {inviteUrl && (
+                            <Button type="button" size="sm" variant="outline" className="h-8 text-[12px]" onClick={() => navigator.clipboard?.writeText(inviteUrl)}>
+                              <Link2 className="w-3.5 h-3.5" /> Copy invite link
+                            </Button>
+                          )}
+                        </>
                       )}
                     </StatusCard>
                     <StatusCard label="Preorder">
@@ -425,7 +452,7 @@ export function CustomerModal({
                     {(detail?.effective.warnings.length ?? 0) > 0 && (
                       <div className="mt-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/50 px-4 py-3 text-[12px] text-amber-800 dark:text-amber-200 flex items-start gap-2">
                         <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                        <span>{detail!.effective.warnings.join(" · ")}</span>
+                        <WarningList codes={detail!.effective.warnings} />
                       </div>
                     )}
                   </div>
@@ -562,7 +589,7 @@ export function CustomerModal({
               {tab === "commercial" && (
                 <div className="space-y-5">
                   <TabIntro title="Pricing & terms" hint="Each field shows what the customer inherits. Override only what should differ for them." />
-                  <CommercialConfigForm section="commercial" value={draft.config} onChange={(config) => setDraft({ ...draft, config })} inherited={inherited} campaign={campaign} pricelists={pricelists} layer="customer" />
+                  <CommercialConfigForm section="commercial" value={draft.config} onChange={(config) => setDraft({ ...draft, config })} inherited={inherited} campaign={campaign} pricelists={pricelists} layer="customer" customerKind={customer?.kind ?? null} />
                 </div>
               )}
 

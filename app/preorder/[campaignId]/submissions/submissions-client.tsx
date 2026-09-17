@@ -4,7 +4,9 @@ import Link from "next/link";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { HeaderFilter } from "@/components/ui/header-filter";
-import { ChevronRight, Users, LockOpen, Mail, Search, AlertTriangle, ExternalLink, X } from "lucide-react";
+import { ChevronRight, Users, LockOpen, Mail, Search, AlertTriangle, ExternalLink, X, Eye, EyeOff, Loader2, Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
@@ -281,6 +283,34 @@ export default function SubmissionsClient({ campaignId, initialStage }: { campai
 
   const failures = subs.filter((s) => s.mkState === "failed").length;
 
+  // Campaign-wide "Show order to customer": every registered, still-hidden preorder.
+  const showable = useMemo(() => subs.filter((s) => s.stage === "registered" && !s.published), [subs]);
+  const shown = useMemo(() => subs.filter((s) => s.published), [subs]);
+  const [bulk, setBulk] = useState<null | { published: boolean }>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<null | { published: boolean; total: number; done: number; skipped: { partnerName: string; error?: string }[] }>(null);
+
+  const runBulk = async (published: boolean) => {
+    setBulkBusy(true);
+    try {
+      const r = await fetch(`/api/admin/preorder/campaigns/${campaignId}/submissions/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ published }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error ?? "Failed");
+      setBulkResult(j);
+      const s = await fetch(`/api/admin/preorder/campaigns/${campaignId}/submissions`).then((x) => x.json());
+      setSubs(s?.submissions ?? []);
+      setUnlocked(s?.unlocked ?? []);
+    } catch (e) {
+      setBulkResult({ published, total: 0, done: 0, skipped: [{ partnerName: "—", error: e instanceof Error ? e.message : "Failed" }] });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       <CampaignHeader
@@ -288,7 +318,62 @@ export default function SubmissionsClient({ campaignId, initialStage }: { campai
         active="preorders"
         title={campaign ? campaign.title : <SkeletonLine lh="h-[19px]" h="h-3.5" w="w-48" />}
         meta={campaign ? <><CampaignStatusBadge status={campaign.status} /> Preorders</> : <Skeleton className="h-2.5 w-24" delay={40} />}
+        actions={
+          !loading && !error ? (
+            <>
+              {shown.length > 0 && (
+                <Button variant="outline" size="sm" className="h-8" onClick={() => setBulk({ published: false })} title="Hide every shown order from its customer again">
+                  <EyeOff className="w-3.5 h-3.5" /> Hide all ({shown.length})
+                </Button>
+              )}
+              <Button size="sm" className="h-8 bg-lime-600 hover:bg-lime-700 text-white" onClick={() => setBulk({ published: true })} disabled={showable.length === 0} title={showable.length ? "Show every registered Metakocka order to its customer" : "No registered, still-hidden orders"}>
+                <Eye className="w-3.5 h-3.5" /> Show all orders to customers{showable.length ? ` (${showable.length})` : ""}
+              </Button>
+            </>
+          ) : undefined
+        }
       />
+
+      <Dialog open={!!bulk} onOpenChange={(o) => { if (!o && !bulkBusy) { setBulk(null); setBulkResult(null); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {bulk?.published ? <Eye className="w-4 h-4 text-lime-600" /> : <EyeOff className="w-4 h-4" />}
+              {bulk?.published ? "Show all orders to customers" : "Hide all orders from customers"}
+            </DialogTitle>
+            <DialogDescription>
+              {bulk?.published
+                ? `${showable.length} registered preorder${showable.length === 1 ? "" : "s"} will show the current Metakocka order on the customer's preorder page and under their orders. Each order is re-read from Metakocka first; ones that no longer exist are skipped.`
+                : `${shown.length} customer${shown.length === 1 ? "" : "s"} will stop seeing their order until you show it again.`}
+            </DialogDescription>
+          </DialogHeader>
+          {bulkResult && (
+            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-[12px] space-y-1">
+              <div className="flex items-center gap-1.5 text-foreground font-medium"><Check className="w-3.5 h-3.5 text-lime-600" /> {bulkResult.done} of {bulkResult.total} {bulkResult.published ? "shown" : "hidden"}</div>
+              {bulkResult.skipped.length > 0 && (
+                <ul className="text-amber-700 dark:text-amber-300 space-y-0.5">
+                  {bulkResult.skipped.map((x, i) => (
+                    <li key={i}>{x.partnerName}: {x.error}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            {bulkResult ? (
+              <Button size="sm" onClick={() => { setBulk(null); setBulkResult(null); }}>Done</Button>
+            ) : (
+              <>
+                <Button variant="outline" size="sm" onClick={() => setBulk(null)} disabled={bulkBusy}>Cancel</Button>
+                <Button size="sm" className={cn(bulk?.published && "bg-lime-600 hover:bg-lime-700 text-white")} onClick={() => bulk && runBulk(bulk.published)} disabled={bulkBusy}>
+                  {bulkBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : bulk?.published ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  {bulk?.published ? `Show ${showable.length}` : `Hide ${shown.length}`}
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
         {error ? (

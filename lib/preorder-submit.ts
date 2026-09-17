@@ -14,14 +14,18 @@ import "server-only";
 // (E11000) ⇒ 409 `locked`. Two browser tabs submitting at once therefore produce exactly
 // one transition; the loser never reaches Metakocka.
 
-import { connectDB, PreorderSubmission, loadEffectiveCampaignForPartner, toObjectId, type PartnerFacts } from "@/lib/preorder";
+import { connectDB, PreorderCampaign, PreorderSubmission, loadEffectiveCampaignForPartner, toObjectId, type PartnerFacts } from "@/lib/preorder";
+import { getMkCustomer, effectiveCountryIso, customerKind } from "@/lib/mk-customers";
+import { getPartnerById } from "@/lib/metakocka";
+import { getVatSettings } from "@/lib/vat-settings";
 import { registerSalesOrder, type SubmitActor, type RegisterResult } from "@/lib/preorder-mk";
 import type { MkOrderPort } from "@/lib/preorder-mk";
 import { buildCommercialSnapshot } from "@/lib/preorder-snapshot";
 import type { IPreorderCampaign } from "@/models/preorder-campaign";
 import type { IPreorderSubmission, ISubmissionLine } from "@/models/preorder-submission";
 import type { MkPartner } from "@/types/documents";
-import { buyerOrderKey, computeTotals, flattenRows, totalsNet, type PreorderTerms } from "@/types/preorder";
+import { buyerOrderKey, computePricedOrder, flattenRows, totalsNet, type PreorderTerms } from "@/types/preorder";
+import type { VatConfig } from "@/lib/pricing";
 
 export type SubmitInput = {
   campaignDoc: IPreorderCampaign;
@@ -33,9 +37,11 @@ export type SubmitInput = {
   // Tests inject a fake Metakocka port.
   port?: MkOrderPort;
   now?: Date;
+  // The global VAT table, when the caller already read it (tests inject one).
+  vat?: VatConfig;
 };
 
-export type SubmitError = "locked" | "campaign-not-open" | "min-order" | "invalid";
+export type SubmitError = "locked" | "campaign-not-open" | "min-order" | "invalid" | "vat-missing" | "rrp-missing";
 
 export type SubmitResult =
   | { ok: true; doc: IPreorderSubmission; dropped: string[]; register: RegisterResult | null }
@@ -53,7 +59,8 @@ export async function saveOrSubmitPreorder(input: SubmitInput): Promise<SubmitRe
   if (!campaignId) return { ok: false, status: 400, error: "invalid", message: "invalid campaign" };
 
   // 1. What THIS partner may order: the effective campaign (hidden rows are gone).
-  const effective = loadEffectiveCampaignForPartner(campaignDoc, partner);
+  const vat = input.vat ?? (await getVatSettings());
+  const effective = await loadEffectiveCampaignForPartner(campaignDoc, partner, { vat });
   const flat = flattenRows(effective);
   const validRowIds = new Set(flat.map(({ row }) => row.id));
   const codeByRow = new Map(flat.map(({ row }) => [row.id, row.code]));
@@ -67,8 +74,39 @@ export async function saveOrSubmitPreorder(input: SubmitInput): Promise<SubmitRe
     else dropped.push(rowId);
   }
 
-  const totals = computeTotals(effective, cleanQty);
+  const priced = computePricedOrder(effective, cleanQty);
+  const totals = priced.totals;
   const submit = input.action === "submit";
+
+  // VAT is never guessed: a consumer whose country has no configured rate cannot be
+  // registered (admins included — the Metakocka order would carry a made-up rate).
+  // Drafts may still be saved.
+  const ctx = effective.pricing;
+  if (submit && (!ctx || ctx.vat.rate == null)) {
+    const where = ctx?.countryIso ?? "this customer's country";
+    return {
+      ok: false,
+      status: 422,
+      error: "vat-missing",
+      message: `No VAT rate is configured for ${where}, so this preorder cannot be submitted yet. Please contact us.`,
+    };
+  }
+  // A consumer orders at the RRP; a row without one has no price to order at. The
+  // sheet shows such rows as "not orderable" with a remove link, so this only fires
+  // for a stale draft / a forged request.
+  if (submit && ctx?.basis === "rrp") {
+    const noRrp = flattenRows(effective)
+      .filter(({ row }) => cleanQty[row.id] > 0 && row.unpriced)
+      .map(({ row }) => row.name || row.code);
+    if (noRrp.length) {
+      return {
+        ok: false,
+        status: 422,
+        error: "rrp-missing",
+        message: `${noRrp.length === 1 ? "This product has" : "These products have"} no consumer price yet and cannot be ordered by an individual — remove ${noRrp.length === 1 ? "it" : "them"} from your preorder: ${noRrp.slice(0, 5).join(", ")}${noRrp.length > 5 ? ", …" : ""}.`,
+      };
+    }
+  }
 
   // Minimum order value applies to customers only (an admin filling on behalf may
   // deliberately record a smaller order).
@@ -112,6 +150,15 @@ export async function saveOrSubmitPreorder(input: SubmitInput): Promise<SubmitRe
       lineStatus: prev?.lineStatus ?? "pending",
     };
   });
+  // A DRAFT never loses a quantity the customer cannot see right now (a row hidden by
+  // an admin, a tab taken away): those lines are carried over untouched and come back
+  // the moment the row is visible again. Only a submit settles them — and the fill
+  // page tells the customer which ones are not going through before they submit.
+  if (!submit && existing?.status === "draft") {
+    for (const l of existing.lines) {
+      if (!validRowIds.has(l.rowId) && l.qty > 0 && !(l.rowId in cleanQty)) lines.push(l);
+    }
+  }
 
   const identity = { partnerName: partner.name, partnerEmail: partner.email ?? undefined };
 
@@ -125,7 +172,7 @@ export async function saveOrSubmitPreorder(input: SubmitInput): Promise<SubmitRe
         { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
       ).exec();
     } else {
-      const snapshot = buildCommercialSnapshot(effective, cleanQty, now);
+      const snapshot = buildCommercialSnapshot(effective, cleanQty, now, vat);
       doc = await PreorderSubmission.findOneAndUpdate(
         { campaignId, partnerMkId: partner.mkId, status: "draft" },
         {
@@ -183,4 +230,70 @@ export async function saveOrSubmitPreorder(input: SubmitInput): Promise<SubmitRe
   }
 
   return { ok: true, doc, dropped, register };
+}
+
+// Re-price a SUBMITTED preorder from the campaign as it is now: resolve the partner's
+// effective campaign again (prices, VAT, tiers) for the quantities they submitted and
+// replace the frozen snapshot. Used for preorders that carry no pricing snapshot
+// (submitted before VAT support) so they can still be registered in Metakocka, and
+// as an explicit admin action. Never touches a preorder that already has an MK order.
+export type RepriceResult = { ok: true; doc: IPreorderSubmission } | { ok: false; status: number; error: SubmitError | "has-order"; message: string };
+
+export async function repriceSubmission(
+  doc: IPreorderSubmission,
+  opts: { vat?: VatConfig; now?: Date; partner?: MkPartner | null } = {}, // tests inject the partner
+): Promise<RepriceResult> {
+  await connectDB();
+  if (doc.status !== "submitted") return { ok: false, status: 409, error: "invalid", message: "Only a submitted preorder can be re-priced." };
+  if (doc.mkSalesOrder?.mkId && (!doc.mkOrder || doc.mkOrder.state === "created")) {
+    return { ok: false, status: 409, error: "has-order", message: "This preorder already has a Metakocka order — detach it first." };
+  }
+  const campaignDoc = await PreorderCampaign.findById(doc.campaignId).exec();
+  if (!campaignDoc) return { ok: false, status: 404, error: "invalid", message: "Campaign not found." };
+
+  const directory = await getMkCustomer(doc.partnerMkId);
+  const mk = opts.partner !== undefined ? opts.partner : await getPartnerById(doc.partnerMkId);
+  const partner: PartnerFacts = {
+    mkId: doc.partnerMkId,
+    countryIso: directory ? effectiveCountryIso(directory) : null,
+    countrySource: directory?.countryIsoManual ? "manual" : directory?.countrySource ?? null,
+    kind: directory ? customerKind(directory) : mk ? customerKind(mk) : null,
+    mk,
+  };
+  const vat = opts.vat ?? (await getVatSettings());
+  const effective = await loadEffectiveCampaignForPartner(campaignDoc, partner, { vat });
+  const ctx = effective.pricing;
+  if (!ctx || ctx.vat.rate == null) {
+    return { ok: false, status: 422, error: "vat-missing", message: `No VAT rate is configured for ${ctx?.countryIso ?? "this customer's country"} — set it under Preorder → VAT rates first.` };
+  }
+  const rowsById = new Map(flattenRows(effective).map(({ row }) => [row.id, row]));
+  const quantities: Record<string, number> = {};
+  const lost: string[] = [];
+  for (const l of doc.lines) {
+    if (l.qty <= 0) continue;
+    const row = rowsById.get(l.rowId);
+    if (!row || row.unpriced) lost.push(l.code || l.rowId);
+    else quantities[l.rowId] = l.qty;
+  }
+  // Never re-price away part of what the customer submitted.
+  if (lost.length) {
+    return {
+      ok: false,
+      status: 422,
+      error: "invalid",
+      message: `Cannot re-price: ${lost.length} submitted line${lost.length === 1 ? " is" : "s are"} no longer available to this customer (${lost.slice(0, 5).join(", ")}${lost.length > 5 ? ", …" : ""}). Restore the product / its price on the sheet, or unlock the preorder for the customer.`,
+    };
+  }
+  if (Object.keys(quantities).length === 0) {
+    return { ok: false, status: 422, error: "invalid", message: "The preorder has no lines to re-price." };
+  }
+  const now = opts.now ?? new Date();
+  const snapshot = buildCommercialSnapshot(effective, quantities, now, vat);
+  const totals = computePricedOrder(effective, quantities).totals;
+  const fresh = await PreorderSubmission.findOneAndUpdate(
+    { _id: doc._id },
+    { $set: { totals, snapshot: { ...snapshot, resolvedAt: now, deadline: snapshot.deadline ? new Date(snapshot.deadline) : null } } },
+    { returnDocument: "after" },
+  ).exec();
+  return fresh ? { ok: true, doc: fresh } : { ok: false, status: 404, error: "invalid", message: "Preorder not found." };
 }

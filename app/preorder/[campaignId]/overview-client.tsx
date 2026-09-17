@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   UserPlus,
   Link2,
-  Check,
   Eye,
   AlertTriangle,
   Globe2,
@@ -41,8 +40,6 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
   const [unlocked, setUnlocked] = useState<PreorderAccessSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -59,26 +56,6 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
       .finally(() => setLoading(false));
   }, [campaignId]);
 
-  // The magic invite link (token ensured server-side); URL built from the browser origin.
-  useEffect(() => {
-    fetch(`/api/admin/preorder/campaigns/${campaignId}/invite`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d?.path) setInviteUrl(`${window.location.origin}${d.path}`);
-      })
-      .catch(() => {});
-  }, [campaignId]);
-
-  const copyInvite = async () => {
-    if (!inviteUrl) return;
-    try {
-      await navigator.clipboard.writeText(inviteUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    } catch {
-      /* clipboard blocked — ignore */
-    }
-  };
 
   const currency = campaign?.currency ?? "EUR";
 
@@ -128,9 +105,6 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
         }
         actions={
           <>
-            <Button variant="outline" size="sm" className="h-8" onClick={copyInvite} disabled={!inviteUrl} title={inviteUrl ?? "Invite link"}>
-              {copied ? <><Check className="w-3.5 h-3.5 text-lime-600" /> Copied</> : <><Link2 className="w-3.5 h-3.5" /> Copy invite link</>}
-            </Button>
             <Link href={`/preorder/${campaignId}/preview?fill=1`}>
               <Button variant="outline" size="sm" className="h-8"><UserPlus className="w-3.5 h-3.5" /> Fill for customer</Button>
             </Link>
@@ -227,7 +201,6 @@ function OverviewSkeleton({ campaignId }: { campaignId: string }) {
         meta={<><Skeleton className="h-[16.5px] w-12 rounded-full" delay={40} /><Skeleton className="h-2.5 w-24" delay={60} /></>}
         actions={
           <>
-            <Button variant="outline" size="sm" className="h-8" disabled><Link2 className="w-3.5 h-3.5" /> Copy invite link</Button>
             <Button variant="outline" size="sm" className="h-8" disabled><UserPlus className="w-3.5 h-3.5" /> Fill for customer</Button>
           </>
         }

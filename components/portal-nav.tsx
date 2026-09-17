@@ -41,7 +41,7 @@ function Avatar({ user }: { user?: PortalUser }) {
   );
 }
 
-export default function PortalNav({ user }: { user?: PortalUser }) {
+export default function PortalNav({ user, viewingAs }: { user?: PortalUser; viewingAs?: { partnerMkId: string; partnerName: string } | null }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -112,13 +112,22 @@ export default function PortalNav({ user }: { user?: PortalUser }) {
         </div>
         {user && (
           <div className="flex items-center rounded-xl px-3 py-2 gap-2.5">
-            <Avatar user={user} />
+            <Avatar user={viewingAs ? { name: viewingAs.partnerName } : user} />
             <div className="flex-1 min-w-0">
-              {user.name && (
-                <p className="text-[12px] font-medium text-foreground truncate leading-tight">{user.name}</p>
-              )}
-              {user.email && (
-                <p className="text-[10px] text-muted-foreground truncate leading-tight">{user.email}</p>
+              {viewingAs ? (
+                <>
+                  <p className="text-[12px] font-medium text-foreground truncate leading-tight">{viewingAs.partnerName}</p>
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400 truncate leading-tight">viewed by {user.email ?? user.name}</p>
+                </>
+              ) : (
+                <>
+                  {user.name && (
+                    <p className="text-[12px] font-medium text-foreground truncate leading-tight">{user.name}</p>
+                  )}
+                  {user.email && (
+                    <p className="text-[10px] text-muted-foreground truncate leading-tight">{user.email}</p>
+                  )}
+                </>
               )}
             </div>
             <a

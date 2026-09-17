@@ -7,7 +7,10 @@ import { sections } from "./sections";
 export default async function WelcomePage() {
   const session = await auth0.getSession();
   const roles = rolesFromIdToken(session?.tokenSet?.idToken);
-  const visibleSections = sections.filter((s) => canSee(roles, s.section));
+  // A card may carry its own gate (General mixes user-admin and access-admin cards).
+  const visibleSections = sections
+    .map((s) => ({ ...s, cards: s.cards.filter((c) => canSee(roles, c.section ?? s.section)) }))
+    .filter((s) => s.cards.length > 0);
 
   const firstName = (session?.user?.name || session?.user?.email || "")
     .toString()

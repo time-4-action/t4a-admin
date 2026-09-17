@@ -8,6 +8,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -44,6 +46,8 @@ import {
   GripVertical,
   Percent,
   Copy,
+  Lock,
+  LockOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
@@ -75,6 +79,8 @@ import {
   type CampaignStatus,
 } from "@/types/preorder";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
+import { VatModal } from "./vat-modal";
+import type { VatOverride } from "@/lib/pricing";
 import type { MkPricelist } from "@/types/documents";
 
 type RowDraft = Omit<PreorderRow, "id" | "order">;
@@ -123,12 +129,40 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   // variants to an EXISTING group ("Add from catalogue" in the group footer).
   const [picker, setPicker] = useState<{ tabId: string; groupId?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [deleteTabId, setDeleteTabId] = useState<string | null>(null); // confirm before a tab goes
+  const [vatOpen, setVatOpen] = useState(false);
+  // Campaign-level VAT overrides + the countries its markets mention (the VAT modal
+  // lists those first). Saved by the modal itself, never by the autosave.
+  const [vatOverrides, setVatOverrides] = useState<VatOverride[]>([]);
+  const [marketCountries, setMarketCountries] = useState<string[]>([]);
   const [csvTab, setCsvTab] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [pricelists, setPricelists] = useState<MkPricelist[]>([]);
   const [repricing, setRepricing] = useState(false);
   const [repricedAt, setRepricedAt] = useState<number | null>(null);
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
+
+  // Rows a customer could not be priced for: no RRP (hidden from individuals) / no
+  // partner price (companies would fall back to the RRP). Per tab for the summary.
+  const unpriced = useMemo(() => {
+    const rrp: string[] = [];
+    const partner: string[] = [];
+    const rrpTabs = new Set<string>();
+    const partnerTabs = new Set<string>();
+    for (const t of campaign?.tabs ?? [])
+      for (const g of t.groups)
+        for (const r of g.rows) {
+          if (r.rrp == null) {
+            rrp.push(r.code);
+            rrpTabs.add(t.name || "Untitled");
+          }
+          if (r.partnerPrice == null && r.discountedPrice == null) {
+            partner.push(r.code);
+            partnerTabs.add(t.name || "Untitled");
+          }
+        }
+    return { rrp, partner, rrpTabs: Array.from(rrpTabs), partnerTabs: Array.from(partnerTabs) };
+  }, [campaign]);
 
   const sensors = useSensors(
     // A small drag threshold so plain clicks (select / double-click rename) still register.
@@ -151,6 +185,8 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
         if (!r.ok) throw new Error(data?.error ?? "Not found");
         setCampaign(data.campaign);
         setActiveTabId(data.campaign.tabs[0]?.id ?? null);
+        setVatOverrides(data.campaign.vatOverrides ?? []);
+        setMarketCountries(((data.campaign.markets ?? []) as { countries?: string[] }[]).flatMap((m) => m.countries ?? []));
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Error"))
       .finally(() => setLoading(false));
@@ -427,10 +463,9 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
             </span>
           </div>
         }
-        actions={
-          <>
+        beforeActions={
             <span
-              className="text-[11px] text-muted-foreground inline-flex items-center gap-1 min-w-[70px] justify-end"
+              className={cn("text-[11px] text-muted-foreground inline-flex items-center gap-1 justify-end", !saving && !dirty && !savedAt && "hidden")}
               title="Changes save automatically"
             >
               {saving ? (
@@ -441,6 +476,9 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                 <><Check className="w-3.5 h-3.5 text-lime-600" /> Saved</>
               ) : null}
             </span>
+        }
+        actions={
+          <>
             <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)} className="h-8" title="Season, deadline">
               <Settings2 className="w-3.5 h-3.5" /> Settings
             </Button>
@@ -452,16 +490,18 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
           </>
         }
       />
-      {/* Campaign-wide: where the RRP / Partner numbers on EVERY tab come from. Sits
-          above the tab rail on purpose — it is not a property of the selected tab. */}
+      {/* Campaign-wide: where the RRP / Partner numbers on EVERY tab come from, and how
+          VAT applies. Sits above the tab rail on purpose — not a property of the selected tab. */}
       <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6 py-2.5">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <div className="min-w-0">
-            <div className="text-[13px] font-semibold text-foreground">Price lists</div>
-            <div className="text-[11px] text-muted-foreground">Every RRP and partner price on every tab is read from these two Metakocka lists.</div>
+            <div className="text-[13px] font-semibold text-foreground">Pricing &amp; VAT</div>
+            <div className="text-[11px] text-muted-foreground">
+              RRP (incl. VAT) and partner price (excl. VAT) on every tab come from these two Metakocka lists. Companies pay the partner price at 0% VAT; individuals pay the RRP with their country&rsquo;s VAT inside it.
+            </div>
           </div>
           <div className="flex-1" />
-          <InlineField label="RRP" hint="Recommended retail price list (incl. VAT), shown next to the partner price">
+          <InlineField label="RRP" hint="Recommended retail price list (incl. VAT) — what individuals pay; shown to companies for reference">
             <PricelistSelect
               label="RRP list"
               value={campaign.rrpPricelist ?? null}
@@ -470,7 +510,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
               className={inlineSelect}
             />
           </InlineField>
-          <InlineField label="Partner" hint="The price list the sheet's partner prices come from (excl. VAT)">
+          <InlineField label="Partner" hint="The price list the sheet's partner prices come from (excl. VAT) — what companies pay, zero-rated">
             <PricelistSelect
               label="Partner list"
               value={campaign.partnerPricelist ?? null}
@@ -490,8 +530,42 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
             {repricing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
             {repricedAt && !repricing ? "Repriced ✓" : "Re-price all tabs"}
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 bg-background"
+            onClick={() => setVatOpen(true)}
+            title="Per-country VAT rates: inherit the global table or override a country for this campaign"
+          >
+            <Percent className="w-3.5 h-3.5" />
+            VAT rates
+            {vatOverrides.length > 0 && (
+              <span className="ml-1 inline-flex items-center rounded-full bg-lime-100 text-lime-700 dark:bg-lime-900/40 dark:text-lime-300 px-1.5 text-[10px] font-semibold tabular-nums">
+                {vatOverrides.length} override{vatOverrides.length === 1 ? "" : "s"}
+              </span>
+            )}
+          </Button>
         </div>
       </div>
+      <VatModal open={vatOpen} onOpenChange={setVatOpen} campaignId={campaignId} overrides={vatOverrides} marketCountries={marketCountries} onSaved={setVatOverrides} />
+      {(unpriced.rrp.length > 0 || unpriced.partner.length > 0) && (
+        <div className="shrink-0 border-b border-amber-300/60 dark:border-amber-800/60 bg-amber-50/80 dark:bg-amber-950/30 px-4 md:px-6 py-2 text-[12px] text-amber-800 dark:text-amber-300 flex flex-wrap items-center gap-x-4 gap-y-1">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          {unpriced.rrp.length > 0 && (
+            <span>
+              <span className="font-semibold">{unpriced.rrp.length} product{unpriced.rrp.length === 1 ? "" : "s"} without an RRP</span> — hidden from individuals until priced
+              {unpriced.rrpTabs.length > 0 && <span className="text-amber-700/80 dark:text-amber-300/70"> ({unpriced.rrpTabs.join(", ")})</span>}
+            </span>
+          )}
+          {unpriced.partner.length > 0 && (
+            <span>
+              <span className="font-semibold">{unpriced.partner.length} without a partner price</span> — companies would pay the RRP
+              {unpriced.partnerTabs.length > 0 && <span className="text-amber-700/80 dark:text-amber-300/70"> ({unpriced.partnerTabs.join(", ")})</span>}
+            </span>
+          )}
+          <span className="text-amber-700/80 dark:text-amber-300/70">Highlighted cells below · Re-price reads the lists again.</span>
+        </div>
+      )}
 
       <div className="flex-1 min-h-0 flex">
         {/* Tab rail */}
@@ -576,7 +650,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                     </Button>
                   );
                 })()}
-                <Button variant="ghost" size="sm" onClick={() => deleteTab(activeTab.id)} className="h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+                <Button variant="ghost" size="sm" onClick={() => setDeleteTabId(activeTab.id)} className="h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
                   <Trash2 className="w-3.5 h-3.5" /> Delete tab
                 </Button>
               </div>
@@ -590,13 +664,16 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                 onApplyToAllTabs={() =>
                   mutate((c) => ({
                     ...c,
+                    // Locked tabs keep their own ladder.
                     tabs: c.tabs.map((t) =>
-                      t.id === activeTab.id
+                      t.id === activeTab.id || t.tiersLocked
                         ? t
                         : { ...t, tiers: (activeTab.tiers ?? []).map((x) => ({ ...x, id: uid() })) },
                     ),
                   }))
                 }
+                onToggleLock={() => mutateTab(activeTab.id, (t) => ({ ...t, tiersLocked: !t.tiersLocked }))}
+                otherTabs={campaign.tabs.filter((t) => t.id !== activeTab.id).map((t) => ({ name: t.name, locked: !!t.tiersLocked, tiers: (t.tiers ?? []).length }))}
               />
 
               {/* Products on this tab: the sheet itself starts here. */}
@@ -638,7 +715,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                         onDeleteGroup={() => deleteGroup(activeTab.id, g.id)}
                         onAddRow={() => addManualRow(activeTab.id, g.id)}
                         onAddFromCatalogue={() => setPicker({ tabId: activeTab.id, groupId: g.id })}
-                        pricing={{ rrp: campaign.rrpPricelist ?? null, partner: campaign.partnerPricelist ?? null }}
+                        pricing={{ rrp: campaign.rrpPricelist ?? null, partner: campaign.partnerPricelist ?? null, currency: campaign.currency }}
                         onUpdateRow={(rowId, patch) => updateRow(activeTab.id, g.id, rowId, patch)}
                         onDeleteRow={(rowId) => deleteRow(activeTab.id, g.id, rowId)}
                         onReorderRows={(a, o) => reorderRows(activeTab.id, g.id, a, o)}
@@ -667,6 +744,39 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
       {error && campaign && (
         <div className="fixed bottom-4 right-4 z-30 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive shadow">{error}</div>
       )}
+
+      {deleteTabId && (() => {
+        const t = campaign.tabs.find((x) => x.id === deleteTabId);
+        const rows = t ? t.groups.reduce((n, g) => n + g.rows.length, 0) : 0;
+        return (
+          <Dialog open onOpenChange={(o) => !o && setDeleteTabId(null)}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-destructive" /> Delete tab “{t?.name || "Untitled"}”?</DialogTitle>
+                <DialogDescription>
+                  {rows > 0
+                    ? `Its ${t?.groups.length ?? 0} group${(t?.groups.length ?? 0) === 1 ? "" : "s"} and ${rows} product${rows === 1 ? "" : "s"} go with it, and quantities customers already saved for them are dropped.`
+                    : "The tab is empty."}{" "}
+                  This cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" size="sm" onClick={() => setDeleteTabId(null)}>Keep tab</Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => {
+                    deleteTab(deleteTabId);
+                    setDeleteTabId(null);
+                  }}
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Delete tab
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
 
       {settingsOpen && (
         <Dialog open onOpenChange={(o) => !o && setSettingsOpen(false)}>
@@ -745,7 +855,7 @@ function priceStr(n?: number | null): string {
 // A price cell: shows two decimals, edits as a plain number, commits on blur /
 // Enter (so typing never fights a formatter), and re-syncs when the row's value
 // changes underneath it (re-price).
-function PriceInput({ value, onCommit, placeholder = "—" }: { value?: number | null; onCommit: (n: number | null) => void; placeholder?: string }) {
+function PriceInput({ value, onCommit, placeholder = "—", warn }: { value?: number | null; onCommit: (n: number | null) => void; placeholder?: string; warn?: string }) {
   const [text, setText] = useState(() => priceStr(value));
   const [focused, setFocused] = useState(false);
   useEffect(() => {
@@ -761,7 +871,9 @@ function PriceInput({ value, onCommit, placeholder = "—" }: { value?: number |
       className={cn(
         "h-8 w-full rounded-md border border-transparent bg-transparent px-2 text-[12.5px] text-right tabular-nums text-foreground",
         "hover:border-border focus:border-ring focus:bg-background focus:outline-none placeholder:text-muted-foreground/50",
+        warn && value == null && "border-amber-400/70 bg-amber-50/60 dark:bg-amber-950/20 placeholder:text-amber-600/70",
       )}
+      title={warn && value == null ? warn : undefined}
       value={text}
       placeholder={placeholder}
       inputMode="decimal"
@@ -826,8 +938,8 @@ const RowEditor = memo(function RowEditor({
       </td>
       <td className={cell}><input className={cn(inp, "font-mono text-[11.5px] text-muted-foreground focus:text-foreground")} value={row.code} placeholder="SKU" onChange={(e) => onChange({ code: e.target.value })} /></td>
       <td className={cell}><input className={inp} value={row.variantLabel ?? row.size ?? ""} placeholder="size / label" onChange={(e) => onChange({ variantLabel: e.target.value || null })} /></td>
-      <td className={cn(cell, "border-l border-l-border/40")}><PriceInput value={row.rrp} onCommit={(n) => onChange({ rrp: n })} /></td>
-      <td className={cell}><PriceInput value={row.partnerPrice} onCommit={(n) => onChange({ partnerPrice: n })} /></td>
+      <td className={cn(cell, "border-l border-l-border/40")}><PriceInput value={row.rrp} onCommit={(n) => onChange({ rrp: n })} warn="No RRP — hidden from individuals until priced" /></td>
+      <td className={cell}><PriceInput value={row.partnerPrice} onCommit={(n) => onChange({ partnerPrice: n })} warn="No partner price — companies would pay the RRP" /></td>
       <td className={cell}><PriceInput value={row.discountedPrice} onCommit={(n) => onChange({ discountedPrice: n })} /></td>
       {/* actions */}
       <td className={cn(cell, "pr-2 whitespace-nowrap")}>
@@ -1037,7 +1149,7 @@ function GroupSection({
 
 // ── Variant table: memoized so a group being dragged/reordered doesn't force
 // every *other* group to re-render its whole rows table on each drag frame. ──
-type PricingLabels = { rrp: string | null; partner: string | null };
+type PricingLabels = { rrp: string | null; partner: string | null; currency: string };
 
 const VariantTable = memo(function VariantTable({
   rows, pricing, sensors, onReorderRows, onUpdateRow, onDeleteRow,
@@ -1076,17 +1188,17 @@ const VariantTable = memo(function VariantTable({
               <th className="text-left font-medium px-3 py-2">Variant</th>
               <th className="text-left font-medium px-3 py-2">SKU</th>
               <th className="text-left font-medium px-3 py-2">Size / label</th>
-              <th className="text-right font-medium px-3 py-2 border-l border-l-border/40" title={pricing.rrp ? `From “${pricing.rrp}” — incl. VAT` : "Recommended retail price, incl. VAT"}>
-                RRP
-                {pricing.rrp && <div className="text-[10px] font-normal text-muted-foreground/70 truncate max-w-[110px] ml-auto">{pricing.rrp}</div>}
+              <th className="text-right font-medium px-3 py-2 border-l border-l-border/40 whitespace-nowrap min-w-[112px] align-bottom" title={pricing.rrp ? `From the “${pricing.rrp}” price list — what individuals pay` : "Recommended retail price — what individuals pay"}>
+                <div>RRP</div>
+                <div className="text-[10px] font-normal text-muted-foreground/70">{pricing.currency} · incl. VAT</div>
               </th>
-              <th className="text-right font-medium px-3 py-2" title={pricing.partner ? `From “${pricing.partner}” — excl. VAT` : "Partner price, excl. VAT"}>
-                Partner
-                {pricing.partner && <div className="text-[10px] font-normal text-muted-foreground/70 truncate max-w-[110px] ml-auto">{pricing.partner}</div>}
+              <th className="text-right font-medium px-3 py-2 whitespace-nowrap min-w-[112px] align-bottom" title={pricing.partner ? `From the “${pricing.partner}” price list — what companies pay` : "Partner price — what companies pay"}>
+                <div>Partner</div>
+                <div className="text-[10px] font-normal text-muted-foreground/70">{pricing.currency} · excl. VAT</div>
               </th>
-              <th className="text-right font-medium px-3 py-2" title="Discounted partner price — overrides the partner price when set">
-                Discounted
-                <div className="text-[10px] font-normal text-muted-foreground/70">optional</div>
+              <th className="text-right font-medium px-3 py-2 whitespace-nowrap min-w-[112px] align-bottom" title="Optional discounted partner price (a price, not a percentage) — replaces the partner price for companies when set">
+                <div>Discounted</div>
+                <div className="text-[10px] font-normal text-muted-foreground/70">{pricing.currency} · excl. VAT · optional</div>
               </th>
               <th className="py-2" />
             </tr>
@@ -1118,16 +1230,23 @@ function TierEditor({
   currency,
   onChange,
   onApplyToAllTabs,
+  onToggleLock,
+  otherTabs,
   otherTabCount,
 }: {
   tab: PreorderTab;
   currency: string;
   onChange: (tiers: PreorderTier[]) => void;
   onApplyToAllTabs: () => void;
+  onToggleLock: () => void;
+  otherTabs: { name: string; locked: boolean; tiers: number }[];
   otherTabCount: number;
 }) {
   const tiers = useMemo(() => tab.tiers ?? [], [tab.tiers]);
   const [copied, setCopied] = useState(false);
+  const [confirmCopy, setConfirmCopy] = useState(false);
+  const copyTargets = otherTabs.filter((t) => !t.locked);
+  const overwritten = copyTargets.filter((t) => t.tiers > 0);
 
   // The ladder as every reader (partner sheet, review, sales order) will see it.
   const ladder = useMemo(() => activeTiers(tiers), [tiers]);
@@ -1190,29 +1309,65 @@ function TierEditor({
           </TooltipTrigger>
           <TooltipContent side="bottom" align="start">
             Spend enough inside <span className="font-medium">{tab.name || "this tab"}</span> and every line in it drops by that tier&rsquo;s
-            percentage. Only the highest tier reached applies; each tab counts on its own. Thresholds are the totals the partner sees, incl. VAT.
+            percentage. Only the highest tier reached applies; each tab counts on its own. Thresholds are compared with the customer's subtotal in their own price basis — companies on partner prices excl. VAT, individuals on RRP incl. VAT.
           </TooltipContent>
         </Tooltip>
         <span className="text-[12px] text-muted-foreground tabular-nums">
           {ladder.length === 0 ? "None — list price" : `${ladder.length} tier${ladder.length === 1 ? "" : "s"} · up to −${best.discountPct}% from ${fmtMoney(best.minAmount, currency)}`}
         </span>
         <div className="flex-1" />
+        {otherTabCount > 0 && (
+          <Button
+            variant="ghost"
+            size="xs"
+            className={cn("h-7", tab.tiersLocked ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")}
+            onClick={onToggleLock}
+            title={tab.tiersLocked ? "Locked: “Copy to all tabs” from another tab leaves this ladder alone. Click to unlock." : "Lock this ladder so “Copy to all tabs” from another tab cannot overwrite it"}
+          >
+            {tab.tiersLocked ? <Lock className="w-3 h-3" /> : <LockOpen className="w-3 h-3" />}
+            {tab.tiersLocked ? "Locked" : "Lock"}
+          </Button>
+        )}
         {otherTabCount > 0 && tiers.length > 0 && (
           <Button
             variant="ghost"
             size="xs"
             className="h-7 text-muted-foreground"
-            onClick={() => {
-              onApplyToAllTabs();
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2000);
-            }}
-            title={`Copy this ladder onto the other ${otherTabCount} tab${otherTabCount === 1 ? "" : "s"}, replacing theirs`}
+            onClick={() => (copyTargets.length === 0 ? undefined : setConfirmCopy(true))}
+            disabled={copyTargets.length === 0}
+            title={copyTargets.length === 0 ? "Every other tab is locked" : `Copy this ladder onto the other ${copyTargets.length} tab${copyTargets.length === 1 ? "" : "s"}, replacing theirs`}
           >
             {copied ? <Check className="w-3 h-3 text-lime-600" /> : <Copy className="w-3 h-3" />}
             {copied ? "Copied" : "Copy to all tabs"}
           </Button>
         )}
+        <Dialog open={confirmCopy} onOpenChange={setConfirmCopy}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-amber-500" /> Copy this ladder to all tabs?</DialogTitle>
+              <DialogDescription>
+                The volume discounts of <span className="font-medium text-foreground">{tab.name || "this tab"}</span> ({ladder.length} tier{ladder.length === 1 ? "" : "s"}) will replace the ladder on{" "}
+                {copyTargets.length} other tab{copyTargets.length === 1 ? "" : "s"}
+                {overwritten.length > 0 ? ` — ${overwritten.map((t) => t.name).join(", ")} already ${overwritten.length === 1 ? "has" : "have"} a ladder that will be overwritten.` : "."}
+                {otherTabs.some((t) => t.locked) && ` Locked tabs are left alone: ${otherTabs.filter((t) => t.locked).map((t) => t.name).join(", ")}.`}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" size="sm" onClick={() => setConfirmCopy(false)}>Cancel</Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  onApplyToAllTabs();
+                  setConfirmCopy(false);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+              >
+                <Copy className="w-3.5 h-3.5" /> Copy to {copyTargets.length} tab{copyTargets.length === 1 ? "" : "s"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         <Button size="sm" variant="outline" className="h-8 bg-background" onClick={addTier}>
           <Plus className="w-3.5 h-3.5" /> Add tier
         </Button>

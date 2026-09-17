@@ -74,10 +74,11 @@ MongoDB connection is cached on `global._mongooseConn` to survive Next.js hot-re
 | `UserLimit` | `userlimits` | Per-user spending cap with period (`daily/weekly/monthly/total`) and current spend. |
 | `Conversation` | `conversations` | One document per conversation; used only to count `convToday` on the dashboard. |
 | `BuilderPreset` | `builderpresets` | A saved Section Builder configuration, **shared** across everyone with builder access. `config` is the builder's own state blob (opaque to the server); carries creator/last-editor stamps, a `versionLabel`, a notes thread, and a capped version history. Index on `(builder, updatedAt)`. |
-| `PreorderCampaign` | `preordercampaigns` | One master order sheet (`tabs` → groups → rows) + embedded `markets[]`, `customerRules[]`, `priceBooks[]`, invite `shareToken`. See the Preorder module. |
+| `PreorderCampaign` | `preordercampaigns` | One master order sheet (`tabs` → groups → rows) + embedded `markets[]`, `customerRules[]`, `priceBooks[]`, `vatOverrides[]`, invite `shareToken`. See the Preorder module. |
 | `PreorderSubmission` | `preordersubmissions` | One partner's response per campaign (unique `(campaignId, partnerMkId)`): lines, totals, frozen `snapshot`, MK order reference `mkSalesOrder` + sync state `mkOrder`, publication flags, detached-order history. Indexes on `partnerMkId + mkOrder.state`, `mkSalesOrder.mkId`, `mkOrder.buyerOrder`. |
 | `PreorderAccess` | `preorderaccesses` | The invite grant (`(campaignId, partnerMkId)` unique) — the campaign access boundary. |
 | `MkCustomer` | `mkcustomers` | Directory of Metakocka partners (address, tax id, resolved country, manual country, stale flag) feeding Markets & Customers; `MkCustomerSyncState` (singleton) tracks the full sync. |
+| `VatSettings` | `vatsettings` | Singleton (`key: "vat"`): the global VAT rate per country + optional fallback rate, edited at `/preorder/vat-rates`. See Pricing & VAT in the Preorder module. |
 
 ### Dev-User Filtering
 
@@ -546,6 +547,27 @@ partner resolution for the portal lives in `lib/portal.ts` (`getSessionPartner`)
 | Invoices / Credit notes / Orders | `/portal/{invoices,credit-notes,orders}` | List as one table card: toolbar (search by number/title + count), proportional grid columns (Issued / Due / Items / Status / Amount); column headings sort (click toggles direction), the **Status heading is the status select**, and clicking a row's status pill filters too; 25-per-page client-side pager. The API returns the complete list, so filtering + paging are purely client-side (`DocumentList` in `documents-shared.tsx`). The invoice **Due** column is the large, urgency-coloured cell (rose + "n days overdue", amber within 7 days). **Credit notes** render with the same bill layout (Due / payment badge / summary strip / payment panel) with refund wording (Credited / Refunded / Open). **Offers are never shown to customers** — no page, nav link, API `type`, or PDF; the whole **Related documents** card is admin-only (`showLinks={false}` in the portal) (`PORTAL_DOC_KINDS` / `isPortalDocKind` in `lib/portal.ts`); admins still browse them under `/documents`. |
 | Detail | `/portal/{…}/[mkId]` | Full doc + **Download PDF**. Ownership re-checked. Invoices and orders show a **Billing / Delivery address** card (MK `partner` / `receiver`; no `receiver` = same as billing). Order lines carry a **Shipped** column. |
 | No account | `/portal/no-account` | Email not matched to a partner. |
+
+**View portal as a customer (admin impersonation).** `lib/portal-impersonation.ts`:
+`POST /api/admin/portal/impersonate { partnerMkId, returnTo }` (preorder- or
+documents-admins, `canImpersonate`) sets a signed httpOnly cookie
+(`t4a_portal_as`, HMAC with `AUTH0_SECRET`, 4 h) holding the partner id + name +
+the admin page to return to. `getPortalViewer()` in `lib/portal.ts` honours it
+**only when the session holds an eligible admin role** — the cookie alone grants
+nothing — and `getSessionPartner()` then returns that partner for every portal
+page/route, so the admin sees exactly the customer's preorders and documents.
+Writes made meanwhile are made **as the customer** (a preorder submitted this way
+reads exactly as if the customer had submitted it). The root layout passes `viewingAs` to `AppShell`,
+which renders `components/viewing-as-banner.tsx` across the portal ("Stop viewing
+as customer" → `DELETE /api/portal/impersonation` → back to `returnTo`); the
+portal nav shows the customer's name with "viewed by <admin>". Entry points
+("View as customer", `components/view-as-customer-button.tsx`): the **Customers**
+section (`/customers`, its own nav section, `SECTION_ROLES.customers = ["admin",
+"preorder-admin", "customers-admin"]`, `/customers/access` grants the role — the
+whole Metakocka directory with each customer's preorder activity across campaigns,
+fed by `GET /api/admin/preorder/customers?activity=1`, which the `customers`
+section gates together with `/api/admin/portal/*`),
+the preorder customer modal and the Documents customer header.
 | Customer picker (admin) | `/documents` | Search a partner by name/email/tax. |
 | Customer docs (admin) | `/documents/[partnerMkId]` | Offers/Orders/Invoices/Credit notes tabs. |
 | Detail (admin) | `/documents/[partnerMkId]/[kind]/[mkId]` | Same detail view, any partner. |
@@ -621,9 +643,10 @@ from client input.
 | Page | Path | Notes |
 |---|---|---|
 | Campaigns | `/preorder` | List + create; `marketCount` / override badges. |
+| VAT rates | `/preorder/vat-rates` | Global per-country VAT table + fallback rate (consumer preorders). Nav entry of the Preorder section. |
 | Overview | `/preorder/[id]` | KPIs (incl. In Metakocka / Published / Integration failures), latest preorders. Every campaign page renders the shared `CampaignHeader` (`app/preorder/[campaignId]/campaign-nav.tsx`): a fixed-height title row (back · title + meta · actions) over the `CampaignNav` underline tab strip (Overview · Sheet · Markets & Customers · Preorders · Preview), so the tabs sit on the same pixels everywhere. Page-specific toolbars (sheet settings, preview sheet tabs) live **below** the header, never inside it; small view switchers go in `navExtra` (right end of the tab row). |
 | Sheet | `/preorder/[id]/edit` | Builder (autosaves `tabs`). Row eye toggle = **restricted** (not in the default assortment). Re-price also refreshes the price books. |
-| Markets & Customers | `/preorder/[id]/markets` | List-based: summary strip + **Customers** view (directory table, company/individual split) and **Markets** view (a full-width priority list — drag to reorder) and **Countries** view (table for assignment) + a contextual right drawer for a country (`components/ui/drawer.tsx`, non-modal). **Markets and customers open in the large tabbed editor modal** (`market-modal.tsx`, `customer-modal.tsx` on `components/ui/editor-modal.tsx`): header + tab strip — a customer gets Overview · Placement · Pricing & terms · Volume discounts · Assortment, a market gets Market · Pricing & terms · Volume discounts · Assortment — the config tabs are slices of `commercial-config-form.tsx` (`section` prop). See below. |
+| Markets & Customers | `/preorder/[id]/markets` | List-based: summary strip + **Customers** view (directory table, company/individual split) and **Markets** view (a full-width priority list — drag to reorder) and **Countries** view (table for assignment) **Markets, customers and countries all open in the large editor modal** (`market-modal.tsx`, `customer-modal.tsx`, `country-modal.tsx` on `components/ui/editor-modal.tsx`; a country shows its market select + a searchable, kind-filtered, paged customer list): header + tab strip — a customer gets Overview · Placement · Pricing & terms · Volume discounts · Assortment, a market gets Market · Pricing & terms · Volume discounts · Assortment — the config tabs are slices of `commercial-config-form.tsx` (`section` prop). See below. |
 | Preorders | `/preorder/[id]/submissions` | Full table with stage / Metakocka / visibility columns, filters incl. integration failures. |
 | Preorder detail | `/preorder/[id]/submissions/[sid]` | Three panels: **Requested preorder** (frozen snapshot), **Current Metakocka order** (live, compared line by line), **Customer visibility** (Show/Hide order to customer). Unlock detaches the MK order (optionally deletes it). |
 | Preview | `/preorder/[id]/preview` | Pick a partner (`?partner=<mkId>` deep link) → the sheet renders their **effective** campaign with an admin-only "Effective configuration" card (market, pricing, assortment, discounts, sources, warnings). "Fill for customer" submits through the same service as the portal. |
@@ -638,10 +661,13 @@ from client input.
 block. Because the shape is unchanged, the pricing engine in `types/preorder.ts`
 (`computeTotals`, `rowUnitPrice`, …) and every fill component work on it as-is.
 The single server entry point is `loadEffectiveCampaignForPartner(doc, partner)`
-in `lib/preorder.ts` (portal GET, submit, admin preview, customer tables).
+in `lib/preorder.ts` (portal GET, submit, admin preview, customer tables) — async,
+because it reads the global VAT table (`getVatSettings()`; pass `{ vat }` to reuse
+one read).
 
 - **Layers** are `CommercialConfig` objects (`partnerPricelist`, `currency`,
-  `deadline`, `note`, `minOrderAmount`, `hiddenIds`, `exposedIds`, `tiersByTab`).
+  `deadline`, `note`, `minOrderAmount`, `hiddenIds`, `exposedIds`, `tiersByTab`,
+  `vatMode`, `vatRate`, `vatCompanies`).
   An **absent** key inherits; a present key overrides — `tiersByTab: [{tabId, tiers: []}]`
   means "no ladder on this tab", `hiddenIds: []` "hide nothing". Mongoose schemas
   default these to `undefined` on purpose; read layers through `marketView` /
@@ -670,11 +696,57 @@ in `lib/preorder.ts` (portal GET, submit, admin preview, customer tables).
 - **Pricing**: the sheet's row prices ARE the campaign price list. A layer that
   picks another list uses the campaign's **price book** for it
   (`priceBooks[]`, refreshed by `POST …/price-books/refresh` and the builder's
-  Re-price via `lib/preorder-pricebooks.ts`); the book price replaces
+  Re-price via `lib/preorder-pricebooks.ts`); the book's `net` price replaces
   `partnerPrice` and clears the manual `discountedPrice`; a missing entry keeps
   the sheet price (`priceSource: "fallback"` + warning). No FX: a book currency
   ≠ effective currency is a warning.
 - Deadline is display-only; `minOrderAmount` is enforced at customer submit only.
+
+#### Pricing & VAT (`lib/pricing.ts` — the one money service)
+
+Every row carries **two prices**, always shown to everyone: `rrp` (**gross**,
+VAT-inclusive consumer price) and `partnerPrice` (**net**, excl. VAT — stored net
+since the VAT work; `pickMkListNetPrice` / `pickMkListGrossPrice` in
+`lib/metakocka.ts`, `json/product_list` is read with `show_tax_factor`). Who pays
+which is decided by the customer's **kind** (`customerKind()`: tax id ⇒
+`business`, else `person`):
+
+- **company → partner price, 0% VAT (zero-rated)**; **individual → RRP with the
+  country's VAT extracted from it** — never added on top (€100 RRP in SI = 81.97
+  net + 18.03 VAT). Volume tiers apply to both, compared with the subtotal in
+  the customer's basis.
+- The VAT rate of a country resolves **campaign override → global table →
+  configured fallback → `missing`** (`resolveVatRate`). Global rates live in the
+  `VatSettings` singleton (`models/vat-settings.ts`, `lib/vat-settings.ts`; edited
+  at **Preorder → VAT rates** `/preorder/vat-rates`, `GET/PUT
+  /api/admin/preorder/vat` — preorder section, like everything else here). Campaign
+  overrides are `campaign.vatOverrides[{iso, rate}]` (PATCH on the campaign; the
+  Sheet page's **Pricing & VAT** toolbar → `edit/vat-modal.tsx`, Global vs
+  Campaign override, Reset to global). **A missing rate is never guessed**: the
+  resolver warns `vat-missing:<iso>`, the portal shows an amber banner and
+  disables submit, and `saveOrSubmitPreorder` answers `422 vat-missing` (admins
+  too; drafts still save). An individual ordering a row without an RRP gets
+  `422 rrp-missing`.
+- **Layer VAT policy** (`VatPolicy`, the config keys `vatMode` / `vatRate` /
+  `vatCompanies`, editable in the market and customer modals under Pricing &
+  terms → VAT, `vatPolicyFor` in the resolver, provenance `sources.vat`):
+  `vatMode` = `country` (default, the rate chain above) | `exempt` (VAT switched
+  off, 0%, source `exempt`) | `fixed` (one `vatRate` for every individual in the
+  layer, source `market` / `customer`); `vatCompanies: true` charges VAT to
+  companies too — added ON TOP of the net partner price (MK line `price` +
+  `tax_factor`). Rule beats market beats campaign default per key.
+- The resolver puts a `PricingContext` (`{ kind, basis, countryIso, vat }`) on
+  the effective campaign root (`campaign.pricing`, also
+  `effective.pricing.ctx`); `campaignFromSnapshot` restores it from the
+  snapshot, so every fill component prices the same way with no prop threading
+  (`rowUnitPrice(row, basis)`, `computePricedOrder`, `PricingBanner`,
+  `VatBreakdown`). The admin builder has no context and prices on the partner
+  basis.
+- Money is **integer cents** (`toCents`/`splitGross`/`priceLine`/`priceOrder`);
+  VAT is split per line and totals are the Σ of the lines (invoice-style — a
+  one-shot split of the order total could differ by a cent).
+  `PreorderSubmissionTotals.net` stays "payable after tier discounts in the
+  customer's basis"; the VAT-net lives in `snapshot.pricing.totals`.
 
 #### Submission → Metakocka lifecycle (`lib/preorder-submit.ts`, `lib/preorder-mk.ts`)
 
@@ -684,22 +756,37 @@ Race safety without optimistic concurrency: each write is a single
 `findOneAndUpdate` upsert whose filter includes `status: "draft"` on the unique
 `(campaignId, partnerMkId)` slot — a locked document makes the filter miss, the
 upsert hits the unique index (E11000) ⇒ 409 `locked`. Submit stores the
-**commercial snapshot** (`snapshot`: resolved lines with unit prices, tiers,
-market, list, currency, sources — only ordered rows) and opens a registration
-window (`mkOrder.state = "pending"`, `submitRevision++`).
+**commercial snapshot** (`snapshot`: resolved lines with the used unit price,
+`rrp` + `partnerPrice`, the frozen per-line `unitNet/unitVat/unitGross` +
+`lineNet/lineVat/lineGross`, tiers, market, list, currency, sources — only
+ordered rows — plus `snapshot.pricing = { kind, basis, countryIso, vatRate,
+vatSource, totals: {net, vat, gross} }`; later VAT/price changes never touch it)
+and opens a registration window (`mkOrder.state = "pending"`,
+`submitRevision++`).
 
 `registerSalesOrder()` then creates the MK order from the **snapshot** (tier
-discount baked into `price_with_tax`; tax codes from `row.taxCode`, captured by
-`products/resolve` + `reprice`, batched MK read only for rows lacking one):
+discount baked into the unit price; the VAT treatment is the snapshot's: a
+company's lines go as `price` = net, an individual's as `price_with_tax` = gross
+RRP; each line carries the rate as MK's documented `tax_factor` ("0.22"). When a
+**Metakocka tax code** is configured for the rate (VAT rates page → optional
+codes table, `VatSettings.taxCodes`, frozen into `snapshot.pricing.mkTaxCode` at
+submit and re-looked-up at register time) it is sent as `tax` instead — the way
+round for lines MK refuses a factor for (the 0 % company line: MK answered
+"Extra columns not supported yet on SalesOrder Products" to `tax_factor: "0"`),
+`MK_ZERO_TAX_CODE` being the env equivalent for 0 %. `MK_LINE_TAX_MODE=code`
+makes a code mandatory for every rate. `GET /api/admin/preorder/vat/mk-tax-codes`
+discovers the account's codes from the sheets' product price lists for the
+page's dropdown. A snapshot without `pricing` cannot be registered):
 
 1. **Lookup first, every time**: `get_document { doc_type: "sales_order", buyer_order }`
    with the deterministic key `buyerOrderKey(id, rev) = T4A<id>.<rev>` (MK's
    `buyer_order` is `char, 30`). Found ⇒ adopt. Inconclusive (MK down) ⇒ `failed`
    without creating — never create blind.
-2. `put_document` (60 s budget — MK's own example takes ~48 s) with `buyer_order`,
-   `extra_column t4a_preorder_submission / t4a_preorder_campaign`,
-   `document_change_log_notes`. On failure re-lookup once, then `failed` +
-   `lastError`.
+2. `put_document` (60 s budget — MK's own example takes ~48 s) with `buyer_order`
+   and `document_change_log_notes` (= `T4A preorder <submissionId>`). **No
+   `extra_column`** — this account rejects it on sales orders ("Extra columns not
+   supported yet on SalesOrder Products"). On failure re-lookup once, then `failed`
+   + `lastError`.
 3. Retries (`POST /api/portal/preorder/submissions/[id]/register` for the
    customer, `POST /api/admin/preorder/submissions/[id]/sales-order` for admins)
    take the lock from `failed` or a `pending` older than
@@ -710,7 +797,19 @@ discount baked into `price_with_tax`; tax codes from `row.taxCode`, captured by
 (sync state) are separate fields on purpose: the reference sub-schema has
 `required` fields, so a pending attempt must not live there. **Legacy
 submissions** (hand-pushed before this flow) have a reference and no `mkOrder`;
-they read as `stage: "registered"` and stay customer-visible — no migration.
+they read as `stage: "registered"` and stay customer-visible — no migration. A
+submitted preorder whose snapshot has no `pricing` block (submitted before VAT
+support) cannot be registered as is; the admin register route and the customer's
+retry call `repriceSubmission()` (`lib/preorder-submit.ts`) first, which
+re-resolves the partner's effective campaign for the submitted quantities and
+replaces the snapshot (refused once an MK order exists; `{ reprice: true }` on the
+admin route forces it). **Campaign-wide publish**: `POST
+…/campaigns/[id]/submissions/publish { published, ids? }` runs `publishResult`
+over every registered, still-hidden (or shown) submission — the "Show all orders
+to customers" / "Hide all" buttons on the Preorders page. **Manual access**:
+`POST/DELETE …/campaigns/[id]/customers/[partnerMkId]/access` grants / removes
+the invite-link grant by hand (customer modal "Unlock for this customer" / "Lock";
+removal refused once a submission exists).
 
 Publication: `POST …/submissions/[id]/publish { published }` re-reads the live
 order (a deleted order cannot be published), sets `resultPublishedToCustomer` /
@@ -768,7 +867,7 @@ and exposes `registration: { state, canRetry }` + `published`.
   selects, Type column) and a **Markets & countries** view (`MarketsPanel` +
   `CountriesTable`: every country with customers or in a market, company /
   individual / unlocked counts, an inline market select per row and checkbox
-  bulk-assign — `POST …/markets {assign}`). The market drawer picks countries with
+  bulk-assign — `POST …/markets {assign}`). The market modal picks countries with
   `country-picker.tsx` (searchable, customer counts, warns when a country is moved
   from another market, one-click "add every unassigned European country with
   customers"). Country names for the pickers come from the geo endpoint
@@ -789,15 +888,20 @@ and exposes `registration: { state, canRetry }` + `published`.
   client-side with the same pure resolver (campaign without that layer).
 
 Tests: `npm test` (vitest; `server-only` is stubbed, Mongo tests use
-`mongodb-memory-server`) — resolver precedence / assortment / pricing / tiers,
-snapshot immutability, countries, submit idempotency & race, MK failure/retry/
-adoption, publication, Documents visibility, markets API, directory upserts.
-`npm run typecheck` = `tsc --noEmit`.
+`mongodb-memory-server`) — pricing/VAT service (cents, splits, rate priority,
+line + order pricing), VAT settings, resolver precedence / assortment / pricing
+/ tiers / pricing context, snapshot immutability incl. frozen VAT, countries,
+submit idempotency & race, B2B/B2C MK payloads, vat-missing / rrp-missing
+blocks, MK failure/retry/adoption, publication, Documents visibility, markets
+API, directory upserts. `npm run typecheck` = `tsc --noEmit`.
 
 Optional env vars: `MK_HOME_COUNTRY` (default `SI`), `MK_PARTNER_SYNC_MODE`
-(`all` | `sharded`), `MK_DEFAULT_TAX_CODE` (last-resort MK tax code, default
-`EX4`), `MK_DEFAULT_VAT_RATE`, `PRODUCT_API_BASE` / `PRODUCT_API_KEY` (catalogue
-used by the sheet builder).
+(`all` | `sharded`), `MK_DEFAULT_TAX_CODE` (MK tax code stored on rows for
+reference, default `EX4`), `MK_DEFAULT_VAT_RATE` (product VAT % used only to
+gross/net MK list prices lacking a tax factor), `MK_ZERO_TAX_CODE` (a `tax` code for
+zero-rated lines instead of `tax_factor: 0`), `MK_LINE_TAX_MODE` (`code` = a
+configured tax code is mandatory per rate; default: `tax_factor`, codes optional),
+`PRODUCT_API_BASE` / `PRODUCT_API_KEY` (catalogue used by the sheet builder).
 
 ### API Routes (`app/api/admin/`)
 
@@ -842,6 +946,7 @@ NEXT_PUBLIC_AUTOMATION_ADMIN_ROLE_NAME # Role that grants the Automation section
 NEXT_PUBLIC_BUILDER_ADMIN_ROLE_NAME  # Role that grants the Builder section (default: "builder-admin")
 NEXT_PUBLIC_DOCUMENTS_ADMIN_ROLE_NAME # Role that grants the Documents browse section (default: "documents-admin")
 NEXT_PUBLIC_PREORDER_ADMIN_ROLE_NAME  # Role that grants the Preorder section (default: "preorder-admin")
+NEXT_PUBLIC_CUSTOMERS_ADMIN_ROLE_NAME # Role that grants the Customers section on its own (default: "customers-admin"; preorder-admins have it implicitly)
 MK_HOME_COUNTRY              # ISO-2 home country for domestic MK partners without an address country (default: SI)
 MK_PARTNER_SYNC_MODE         # Customer directory sync strategy: all (default) | sharded
 AUTH0_BASE_URL               # Production base URL (set by docker-compose)

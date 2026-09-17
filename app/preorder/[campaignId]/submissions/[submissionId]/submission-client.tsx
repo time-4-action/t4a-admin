@@ -7,6 +7,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   ArrowLeft,
+  Building2,
+  UserRound,
   Lock,
   LockOpen,
   Loader2,
@@ -40,6 +42,8 @@ import {
 import { MkOrderStateBadge, SourceBadge, SubmissionStageBadge, VisibilityBadge, MarketChip } from "@/app/preorder/preorder-badges";
 import {
   LINE_STATUS_LABELS,
+  CUSTOMER_KIND_LABELS,
+  VAT_SOURCE_LABELS,
   computeConfirmedTotals,
   submissionStage,
   type AllocationResult,
@@ -48,6 +52,8 @@ import {
   type PreorderCampaign,
   type PreorderSubmission,
 } from "@/types/preorder";
+import { fmtVatRate } from "@/lib/pricing";
+import { ViewAsCustomerButton } from "@/components/view-as-customer-button";
 
 type LoadData = {
   submission: PreorderSubmission;
@@ -328,6 +334,7 @@ export default function SubmissionClient({
             </div>
           </div>
           <div className="flex-1" />
+          <ViewAsCustomerButton partnerMkId={submission.partnerMkId} to={`/portal/preorders/${campaignId}`} className="hidden sm:inline-flex" />
           <SubmissionStageBadge stage={stage} />
           <MoreMenu>
             {(close) => (
@@ -398,6 +405,26 @@ export default function SubmissionClient({
                   <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
                     {snap.currency} <SourceBadge source={snap.sources.currency} className="ml-0.5" />
                   </span>
+                  {snap.pricing ? (
+                    <>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+                        {snap.pricing.kind === "business" ? <Building2 className="w-3 h-3" /> : <UserRound className="w-3 h-3" />}
+                        <span className="font-medium text-foreground">{CUSTOMER_KIND_LABELS[snap.pricing.kind]}</span>
+                        · {snap.pricing.basis === "rrp" ? "RRP incl. VAT" : "partner price excl. VAT"}
+                      </span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+                        VAT <span className="font-medium text-foreground">{fmtVatRate(snap.pricing.vatRate)}</span>
+                        <span className="text-[10px]">· {VAT_SOURCE_LABELS[snap.pricing.vatSource].toLowerCase()}</span>
+                      </span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground tabular-nums">
+                        Net <span className="font-medium text-foreground">{fmtMoney(snap.pricing.totals.net, snap.currency)}</span>
+                        · VAT <span className="font-medium text-foreground">{fmtMoney(snap.pricing.totals.vat, snap.currency)}</span>
+                        · Gross <span className="font-medium text-foreground">{fmtMoney(snap.pricing.totals.gross, snap.currency)}</span>
+                      </span>
+                    </>
+                  ) : (
+                    <span className="rounded-full bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 text-amber-700 dark:text-amber-300">No VAT snapshot (submitted before VAT support)</span>
+                  )}
                 </div>
               )}
               {isLegacy && (
@@ -415,6 +442,7 @@ export default function SubmissionClient({
                   qtyHeader="Requested"
                   extraHeader={legacyConfirmed ? <th className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-2 text-left w-40">Fulfilment</th> : undefined}
                   renderExtraCell={legacyConfirmed ? renderLegacyCell : undefined}
+                  pricing={sheet.pricing}
                 />
               ) : (
                 <div className="text-center text-[13px] text-muted-foreground py-12 rounded-xl border border-dashed border-border">No items in this preorder.</div>

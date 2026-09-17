@@ -27,14 +27,17 @@ import {
   PackageCheck,
   ExternalLink,
   Info,
+  ChevronRight,
 } from "lucide-react";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
-import { computeConfirmedTotals } from "@/types/preorder";
+import { computeConfirmedTotals, flattenRows } from "@/types/preorder";
+import { vatIsMissing, vatLabel } from "@/lib/pricing";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   TabBar,
   TabTierBanner,
+  PricingBanner,
   PreorderGridTab,
   PreorderGuidedTab,
   OrderSummaryPanel,
@@ -52,6 +55,7 @@ import {
   type PortalSubmission,
   type PreorderTerms,
   type LineStatus,
+  type PricingContext,
 } from "@/types/preorder";
 
 type Mode = "grid" | "guided";
@@ -170,6 +174,22 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
   // the live effective campaign.
   const sheet: PreorderCampaign | null = locked && frozen ? frozen : campaign;
   const currency = sheet?.currency ?? campaign?.currency ?? "EUR";
+  // No configured VAT rate for this customer's country: nothing can be submitted.
+  const vatMissing = vatIsMissing(campaign?.pricing);
+  // Rows this customer cannot order (no consumer price) that still carry a quantity —
+  // e.g. saved before the price was removed. They block submit until removed.
+  const unpricedFilled = useMemo(
+    () => (sheet ? flattenRows(sheet).filter(({ row }) => row.unpriced && (quantities[row.id] || 0) > 0) : []),
+    [sheet, quantities],
+  );
+  // Saved quantities on rows that are not on this customer's sheet any more (hidden by
+  // an admin, product removed). Kept in the draft; shown here so nothing vanishes
+  // silently — they are left out of a submit.
+  const orphanLines = useMemo(() => {
+    if (!sheet || locked) return [];
+    const known = new Set(flattenRows(sheet).map(({ row }) => row.id));
+    return (submission?.lines ?? []).filter((l) => !known.has(l.rowId) && (quantities[l.rowId] || 0) > 0);
+  }, [sheet, locked, submission, quantities]);
 
   // Legacy per-line admin fulfilment (submissions made before immediate registration).
   const lineInfo = useMemo(() => {
@@ -238,14 +258,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
         } else {
           setSubmission(data.submission);
           setStatus(data.submission.status);
-          if (dropped.length) {
-            setQuantities((prev) => {
-              const next = { ...prev };
-              for (const id of dropped) delete next[id];
-              return next;
-            });
-          }
-          setFlash(dropped.length ? `Draft saved · ${dropped.length} item${dropped.length === 1 ? "" : "s"} no longer available were removed` : "Draft saved");
+          setFlash(dropped.length ? `Draft saved · ${dropped.length} item${dropped.length === 1 ? "" : "s"} kept aside (no longer offered to you)` : "Draft saved");
         }
         setTimeout(() => setFlash(null), 4500);
       } catch (e) {
@@ -430,41 +443,58 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
           </div>
           <div className="flex-1" />
           {!locked && (
-            <div className="hidden sm:flex items-center gap-0.5 rounded-lg border border-border p-0.5">
-              <button onClick={() => setMode("grid")} className={cn("flex items-center gap-1 rounded-md px-2 py-1 text-[12px]", mode === "grid" ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:text-foreground")}>
-                <Table2 className="w-3.5 h-3.5" /> Grid
-              </button>
-              <button onClick={() => setMode("guided")} className={cn("flex items-center gap-1 rounded-md px-2 py-1 text-[12px]", mode === "guided" ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:text-foreground")}>
-                <LayoutGrid className="w-3.5 h-3.5" /> Store
-              </button>
+            // How to browse the sheet — sits with the tabs, where the customer is looking.
+            // Two real choices with a one-line explanation each, not a tiny icon toggle.
+            <div className="flex items-stretch gap-0.5 rounded-xl bg-muted p-1 shrink-0" role="group" aria-label="How to fill the order">
+              {(
+                [
+                  ["guided", LayoutGrid, "Catalogue", "browse with pictures"],
+                  ["grid", Table2, "Order sheet", "every variant in a table"],
+                ] as [Mode, React.ElementType, string, string][]
+              ).map(([m, Icon, label, hint]) => {
+                const on = mode === m;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMode(m)}
+                    aria-pressed={on}
+                    className={cn(
+                      "flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-left transition-colors",
+                      on ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <Icon className={cn("w-4 h-4 shrink-0", on ? "text-lime-600" : "text-muted-foreground/70")} />
+                    <span className="flex flex-col leading-tight">
+                      <span className="text-[12px] font-semibold">{label}</span>
+                      <span className="text-[10px] text-muted-foreground">{hint}</span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
-        <div className="px-4 md:px-6 pb-2">
-          <TabBar tabs={tabsForBar} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
-        </div>
+        {tabsForBar.length > 0 && (
+          <div className="px-4 md:px-6 pb-2.5 flex items-center gap-3">
+            <span className="text-[11px] font-medium text-muted-foreground shrink-0">{tabsForBar.length > 1 ? "Sections" : "Section"}</span>
+            <div className="flex-1 min-w-0">
+              <TabBar tabs={tabsForBar} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
+            </div>
+          </div>
+        )}
       </header>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
           {/* Sheet */}
           <div className="min-w-0">
-            {!locked && campaign.effective.note && (
-              <div className="mb-4 rounded-xl border border-lime-300/60 bg-lime-50 dark:border-lime-800/50 dark:bg-lime-950/30 px-4 py-3 text-[13px] text-lime-900 dark:text-lime-200 flex items-start gap-2">
-                <Info className="w-4 h-4 shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-lime-700 dark:text-lime-400">Your terms</div>
-                  <p className="whitespace-pre-line mt-0.5">{campaign.effective.note}</p>
-                </div>
-              </div>
-            )}
-
             {locked && submitted && (
               <RegistrationBanner registration={registration} published={published} busy={busy === "retry"} onRetry={retryRegistration} />
             )}
 
             {published && allocation && (
-              <YourOrderCard allocation={allocation} currency={currency} orderMkId={orderMkId} />
+              <YourOrderCard allocation={allocation} currency={currency} orderMkId={orderMkId} pricing={sheet?.pricing} />
             )}
 
             {locked && !submitted && (
@@ -481,13 +511,39 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
               </h2>
             )}
 
-            {activeTab && (
-              <TabTierBanner
-                tab={activeTab}
-                quantities={quantities}
-                currency={currency}
-                className="mb-4"
-              />
+            {/* One quiet frame for everything the customer needs to know while filling:
+                how they are priced, and how far they are from the section's discount. */}
+            {(sheet.pricing || orphanLines.length > 0 || unpricedFilled.length > 0 || (activeTab && (activeTab.tiers?.length ?? 0) > 0)) && (
+              <div className="mb-4 rounded-xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
+                <PricingBanner pricing={sheet.pricing} bare />
+                {orphanLines.length > 0 && (
+                  <div className="px-4 py-2.5 text-[12px] text-amber-800 dark:text-amber-300 flex items-start gap-2.5 bg-amber-50/70 dark:bg-amber-950/30">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-px text-amber-600" />
+                    <div className="min-w-0">
+                      <span className="font-semibold">{orphanLines.length} item{orphanLines.length === 1 ? "" : "s"} from your saved preorder {orphanLines.length === 1 ? "is" : "are"} no longer offered to you</span>{" "}
+                      ({orphanLines.slice(0, 4).map((l) => `${l.code || "item"} × ${l.qty}`).join(", ")}{orphanLines.length > 4 ? ", …" : ""}). {orphanLines.length === 1 ? "It stays" : "They stay"} in your draft but will not be part of a submitted preorder — contact us if you still need {orphanLines.length === 1 ? "it" : "them"}.
+                    </div>
+                  </div>
+                )}
+                {unpricedFilled.length > 0 && !locked && (
+                  <div className="px-4 py-2.5 text-[12px] text-amber-800 dark:text-amber-300 flex items-start gap-2.5 bg-amber-50/70 dark:bg-amber-950/30">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-px text-amber-600" />
+                    <div className="min-w-0">
+                      <span className="font-semibold">{unpricedFilled.length} product{unpricedFilled.length === 1 ? "" : "s"} in your preorder {unpricedFilled.length === 1 ? "has" : "have"} no consumer price yet</span>{" "}
+                      and cannot be ordered: {unpricedFilled.slice(0, 4).map(({ row }) => row.name).join(", ")}{unpricedFilled.length > 4 ? ", …" : ""}.{" "}
+                      <button
+                        type="button"
+                        className="underline font-medium"
+                        onClick={() => setQuantities((prev) => { const next = { ...prev }; for (const { row } of unpricedFilled) delete next[row.id]; return next; })}
+                      >
+                        Remove {unpricedFilled.length === 1 ? "it" : "them"}
+                      </button>{" "}
+                      or contact us.
+                    </div>
+                  </div>
+                )}
+                {activeTab && <TabTierBanner tab={activeTab} quantities={quantities} currency={currency} pricing={sheet.pricing} bare />}
+              </div>
             )}
             {!activeTab ? (
               <div className="text-center text-[13px] text-muted-foreground py-16">
@@ -505,70 +561,30 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
                   renderQty={renderQtyCell}
                   extraHeader={<th className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-2 text-left w-32">Status</th>}
                   renderExtraCell={renderStatusCell}
+                  pricing={sheet.pricing}
                 />
               ) : (
-                <PreorderGridTab tab={activeTab} quantities={quantities} currency={currency} readOnly onlyFilled />
+                <PreorderGridTab tab={activeTab} quantities={quantities} currency={currency} readOnly onlyFilled pricing={sheet.pricing} />
               )
             ) : mode === "grid" ? (
-              <PreorderGridTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} />
+              <PreorderGridTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={sheet.pricing} />
             ) : (
-              <PreorderGuidedTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} />
+              <PreorderGuidedTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={sheet.pricing} />
             )}
 
-            {/* Details */}
-            <section className="mt-6 rounded-xl border border-border bg-surface p-4">
-              <h2 className="text-[13px] font-semibold text-foreground mb-3">Your details</h2>
-              {locked ? (
-                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
-                  <ViewRow label="Name" value={partnerName} />
-                  <ViewRow label="Country" value={terms.country} />
-                  <ViewRow label="Invoice address" value={terms.invoiceAddress} />
-                  <ViewRow label="Shipping address" value={terms.shippingAddress} />
-                  <ViewRow label="Phone" value={terms.phone} />
-                  <ViewRow label="Requested delivery" value={terms.deliveryDate ? fmtDate(terms.deliveryDate) : ""} />
-                  {terms.comment && <ViewRow label="Comment" value={terms.comment} className="sm:col-span-2" />}
-                </dl>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label="Name" value={partnerName} readOnly />
-                  <Field label="Country" value={terms.country ?? ""} onChange={(v) => setTerms((t) => ({ ...t, country: v }))} />
-                  <Field label="Invoice address" value={terms.invoiceAddress ?? ""} onChange={(v) => setTerms((t) => ({ ...t, invoiceAddress: v }))} className="sm:col-span-2" />
-                  <Field label="Shipping address" value={terms.shippingAddress ?? ""} onChange={(v) => setTerms((t) => ({ ...t, shippingAddress: v }))} className="sm:col-span-2" />
-                  <Field label="Phone" value={terms.phone ?? ""} onChange={(v) => setTerms((t) => ({ ...t, phone: v }))} />
-                  <div>
-                    <label className="text-[11px] font-medium text-muted-foreground">Requested delivery</label>
-                    <Input
-                      type="date"
-                      value={terms.deliveryDate ? terms.deliveryDate.slice(0, 10) : ""}
-                      onChange={(e) => setTerms((t) => ({ ...t, deliveryDate: e.target.value ? new Date(e.target.value).toISOString() : null }))}
-                      className="mt-1 h-9 text-[12px]"
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="text-[11px] font-medium text-muted-foreground">Comment</label>
-                    <textarea
-                      value={terms.comment ?? ""}
-                      onChange={(e) => setTerms((t) => ({ ...t, comment: e.target.value }))}
-                      rows={2}
-                      className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-[12px] focus:border-ring focus:outline-none"
-                      placeholder="Anything we should know about this order…"
-                    />
-                  </div>
-                </div>
-              )}
-            </section>
           </div>
 
           {/* Sidebar */}
           <aside className="lg:sticky lg:top-4 space-y-3">
-            <OrderSummaryPanel campaign={sheet} quantities={quantities} currency={currency} confirmed={confirmedTotals} />
+            <div className="rounded-xl border border-border bg-surface overflow-hidden">
+            <OrderSummaryPanel campaign={sheet} quantities={quantities} currency={currency} confirmed={confirmedTotals} bare />
             {campaign.effective.minOrderAmount && !locked && (
-              <p className="text-[11px] text-muted-foreground px-1">
+              <p className="text-[11px] text-muted-foreground px-4 -mt-2 pb-2">
                 Minimum order value: <span className="font-medium text-foreground">{fmtMoney(campaign.effective.minOrderAmount, currency)}</span>
               </p>
             )}
             {locked ? (
-              <div className="rounded-xl border border-border bg-surface p-3 space-y-2">
+              <div className="border-t border-border/60 p-3 space-y-2">
                 <div className="text-[12px] text-muted-foreground flex items-start gap-2">
                   <Lock className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   {submitted ? "This preorder is submitted and locked." : "This campaign is closed."}
@@ -600,10 +616,15 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
                 )}
               </div>
             ) : (
-              <div className="rounded-xl border border-border bg-surface p-3 space-y-2">
-                <Button className="w-full" onClick={() => setReviewOpen(true)} disabled={busy !== null}>
+              <div className="border-t border-border/60 p-3 space-y-2">
+                <Button className="w-full bg-lime-600 hover:bg-lime-700 text-white" onClick={() => setReviewOpen(true)} disabled={busy !== null || vatMissing || unpricedFilled.length > 0}>
                   <Eye className="w-4 h-4" /> Preview &amp; submit
                 </Button>
+                {vatMissing && (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-300 text-center">
+                    Submitting is disabled until the VAT rate for your country is configured.
+                  </p>
+                )}
                 <Button variant="outline" className="w-full" onClick={() => save("save")} disabled={busy !== null}>
                   {busy === "save" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                   Save draft
@@ -615,6 +636,61 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
                 )}
               </div>
             )}
+            </div>
+
+            {/* The only two things the customer fills in besides quantities. */}
+            {!locked && (
+              <div className="rounded-xl border border-border bg-surface p-3 space-y-2.5">
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Delivery &amp; note</div>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground">Requested delivery <span className="font-normal">(optional)</span></label>
+                  <Input
+                    type="date"
+                    value={terms.deliveryDate ? terms.deliveryDate.slice(0, 10) : ""}
+                    onChange={(e) => setTerms((t) => ({ ...t, deliveryDate: e.target.value ? new Date(e.target.value).toISOString() : null }))}
+                    className="mt-1 h-8 text-[12px]"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground">Comment <span className="font-normal">(optional)</span></label>
+                  <textarea
+                    value={terms.comment ?? ""}
+                    onChange={(e) => setTerms((t) => ({ ...t, comment: e.target.value }))}
+                    rows={2}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-[12px] focus:border-ring focus:outline-none"
+                    placeholder="Anything we should know…"
+                  />
+                </div>
+              </div>
+            )}
+
+            {!locked && campaign.effective.note && (
+              <div className="rounded-xl border border-lime-300/60 bg-lime-50 dark:border-lime-800/50 dark:bg-lime-950/30 px-3 py-2.5 text-[12px] text-lime-900 dark:text-lime-200 flex items-start gap-2">
+                <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-lime-700 dark:text-lime-400">Your terms</div>
+                  <p className="whitespace-pre-line mt-0.5">{campaign.effective.note}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Who is ordering — Metakocka's data, read-only, tucked away. */}
+            <details className="rounded-xl border border-border bg-surface group">
+              <summary className="cursor-pointer list-none px-3 py-2 flex items-center gap-2 text-[12px] text-muted-foreground hover:text-foreground">
+                <ChevronRight className="w-3.5 h-3.5 transition-transform group-open:rotate-90" />
+                <span className="font-medium text-foreground truncate">{partnerName}</span>
+                <span className="ml-auto text-[11px]">your details</span>
+              </summary>
+              <dl className="px-3 pb-3 space-y-1.5 text-[12px]">
+                <ViewRow label="Invoice address" value={terms.invoiceAddress} />
+                <ViewRow label="Shipping address" value={terms.shippingAddress} />
+                <ViewRow label="Country" value={terms.country} />
+                <ViewRow label="Phone" value={terms.phone} />
+                {locked && <ViewRow label="Requested delivery" value={terms.deliveryDate ? fmtDate(terms.deliveryDate) : ""} />}
+                {locked && terms.comment && <ViewRow label="Comment" value={terms.comment} />}
+                <p className="text-[10px] text-muted-foreground pt-1">From our records — contact us if something is wrong.</p>
+              </dl>
+            </details>
           </aside>
         </div>
       </div>
@@ -720,10 +796,12 @@ function YourOrderCard({
   allocation,
   currency,
   orderMkId,
+  pricing,
 }: {
   allocation: AllocationResult;
   currency: string;
   orderMkId: string | null;
+  pricing?: PricingContext | null;
 }) {
   if (allocation.state === "missing") {
     return (
@@ -793,7 +871,7 @@ function YourOrderCard({
           {total != null && (
             <tfoot>
               <tr className="border-t border-emerald-200/60 dark:border-emerald-800/40">
-                <td className="px-4 py-2 text-[11px] text-muted-foreground" colSpan={3}>Order total (incl. VAT)</td>
+                <td className="px-4 py-2 text-[11px] text-muted-foreground" colSpan={3}>Order total{pricing ? ` (${vatLabel(pricing)})` : ""}</td>
                 <td className="px-4 py-2 text-right tabular-nums font-semibold text-foreground">{fmtMoney(total, a.currency ?? currency)}</td>
               </tr>
             </tfoot>
@@ -801,32 +879,6 @@ function YourOrderCard({
         </table>
       </div>
     </section>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  readOnly,
-  className,
-}: {
-  label: string;
-  value: string;
-  onChange?: (v: string) => void;
-  readOnly?: boolean;
-  className?: string;
-}) {
-  return (
-    <div className={className}>
-      <label className="text-[11px] font-medium text-muted-foreground">{label}</label>
-      <Input
-        value={value}
-        readOnly={readOnly}
-        onChange={(e) => onChange?.(e.target.value)}
-        className={cn("mt-1 h-9 text-[12px]", readOnly && "bg-muted/50 text-muted-foreground")}
-      />
-    </div>
   );
 }
 

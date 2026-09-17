@@ -17,7 +17,25 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { cn } from "@/lib/utils";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
 import { SourceBadge } from "@/app/preorder/preorder-badges";
-import { activeTiers, flattenRows, rowUnitPrice, type CommercialConfig, type ConfigSource, type EffectiveCampaign, type PreorderCampaign, type PreorderGroup, type PreorderRow, type PreorderTab, type PreorderTier } from "@/types/preorder";
+import {
+  activeTiers,
+  flattenRows,
+  rowUnitPrice,
+  VAT_MODE_LABELS,
+  VAT_MODES,
+  type CommercialConfig,
+  type ConfigSource,
+  type CustomerKind,
+  type EffectiveCampaign,
+  type PreorderCampaign,
+  type PreorderGroup,
+  type PreorderRow,
+  type PreorderTab,
+  type PreorderTier,
+  type VatMode,
+  type VatPolicy,
+} from "@/types/preorder";
+import { fmtVatRate, normalizeVatRate } from "@/lib/pricing";
 import type { MkPricelist } from "@/types/documents";
 
 // What the layer inherits if it sets nothing: the effective campaign WITHOUT this layer.
@@ -34,6 +52,9 @@ export type ConfigFormProps = {
   compact?: boolean;
   /** Render only one part of the form (no section headings). Default: everything. */
   section?: ConfigSection;
+  // The customer's kind (customer layer only): a company sees just the company VAT
+  // switch, an individual just the VAT rate. A market holds both kinds → both rows.
+  customerKind?: CustomerKind | null;
 };
 
 export type ConfigSection = "commercial" | "tiers" | "assortment";
@@ -41,7 +62,7 @@ export type ConfigSection = "commercial" | "tiers" | "assortment";
 // How many of a layer's overrides fall into each section — for tab badges.
 export function configSectionCounts(value: CommercialConfig): Record<ConfigSection, number> {
   return {
-    commercial: (["partnerPricelist", "currency", "deadline", "minOrderAmount", "note"] as const).filter((k) => value[k] !== undefined).length,
+    commercial: (["partnerPricelist", "currency", "deadline", "minOrderAmount", "note", "vatMode", "vatRate", "vatCompanies"] as const).filter((k) => value[k] !== undefined).length,
     tiers: value.tiersByTab?.length ?? 0,
     assortment: (value.hiddenIds?.length ?? 0) + (value.exposedIds?.length ?? 0),
   };
@@ -59,7 +80,7 @@ function fmtDate(v?: string | null): string {
   return Number.isNaN(d.getTime()) ? "" : new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(d);
 }
 
-export function CommercialConfigForm({ value, onChange, inherited, campaign, pricelists, layer, section }: ConfigFormProps) {
+export function CommercialConfigForm({ value, onChange, inherited, campaign, pricelists, layer, section, customerKind }: ConfigFormProps) {
   const set = <K extends keyof CommercialConfig>(key: K, v: CommercialConfig[K]) => onChange({ ...value, [key]: v });
   const reset = (key: keyof CommercialConfig) => {
     const next = { ...value };
@@ -168,6 +189,40 @@ export function CommercialConfigForm({ value, onChange, inherited, campaign, pri
       </Section>
       )}
 
+      {/* ── VAT ── */}
+      {only("commercial") && (
+      <Section title="VAT" bare={false}>
+        <p className="text-[11px] text-muted-foreground -mt-1">
+          {customerKind === "business"
+            ? "A company pays the net partner price and is zero-rated unless VAT is switched on here."
+            : customerKind === "person"
+              ? "An individual pays the RRP with VAT inside it — choose where that rate comes from."
+              : `Individuals pay the RRP with VAT inside it; companies pay the partner price and are zero-rated. Change how VAT applies to everyone in this ${layer}.`}
+        </p>
+        {customerKind !== "business" && (
+          <VatModeRow value={value} set={set} reset={reset} has={has} inheritedPolicy={inherited.effective.pricing.vatPolicy} inheritedSource={src.vat} />
+        )}
+        {customerKind !== "person" && (
+        <FieldRow
+          label="VAT for companies"
+          overridden={has("vatCompanies")}
+          inheritedValue={inherited.effective.pricing.vatPolicy.chargeCompanies ? "Charged — VAT is added to the net partner price" : "Zero-rated — companies pay 0% VAT"}
+          inheritedSource={src.vat}
+          onOverride={() => set("vatCompanies", inherited.effective.pricing.vatPolicy.chargeCompanies)}
+          onReset={() => reset("vatCompanies")}
+        >
+          <Select value={value.vatCompanies ? "charge" : "zero"} onValueChange={(v) => set("vatCompanies", v === "charge")}>
+            <SelectTrigger size="sm" className="h-8 text-[12px] w-72"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="zero" className="text-[12px]">Zero-rated — companies pay 0% VAT</SelectItem>
+              <SelectItem value="charge" className="text-[12px]">Charge VAT — added to the net partner price</SelectItem>
+            </SelectContent>
+          </Select>
+        </FieldRow>
+        )}
+      </Section>
+      )}
+
       {/* ── Volume discounts ── */}
       {only("tiers") && (
       <Section title="Volume discounts" bare={!!section}>
@@ -185,6 +240,90 @@ export function CommercialConfigForm({ value, onChange, inherited, campaign, pri
   );
 }
 
+// VAT mode + fixed rate: one row, because the rate only means something with the
+// "fixed" mode. Overriding the mode carries the rate along; reset clears both.
+function VatModeRow({
+  value,
+  set,
+  reset,
+  has,
+  inheritedPolicy,
+  inheritedSource,
+}: {
+  value: CommercialConfig;
+  set: <K extends keyof CommercialConfig>(key: K, v: CommercialConfig[K]) => void;
+  reset: (key: keyof CommercialConfig) => void;
+  has: (key: keyof CommercialConfig) => boolean;
+  inheritedPolicy: VatPolicy;
+  inheritedSource: ConfigSource;
+}) {
+  const overridden = has("vatMode") || has("vatRate");
+  const mode: VatMode = value.vatMode ?? inheritedPolicy.mode;
+  const inheritedText =
+    inheritedPolicy.mode === "fixed"
+      ? `Fixed rate ${inheritedPolicy.fixedRate != null ? fmtVatRate(inheritedPolicy.fixedRate) : "(not set)"} for everyone`
+      : inheritedPolicy.mode === "exempt"
+        ? "VAT exempt — 0% for everyone (VAT switched off)"
+        : "Country rates — each individual's country rate (global table / campaign overrides)";
+  const [rateText, setRateText] = useState<string>(value.vatRate != null ? String(value.vatRate) : "");
+  return (
+    <FieldRow
+      label="VAT rate"
+      overridden={overridden}
+      inheritedValue={inheritedText}
+      inheritedSource={inheritedSource}
+      onOverride={() => {
+        setRateText(inheritedPolicy.fixedRate != null ? String(inheritedPolicy.fixedRate) : "");
+        set("vatMode", inheritedPolicy.mode);
+      }}
+      onReset={() => {
+        reset("vatMode");
+        reset("vatRate");
+      }}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Select
+          value={mode}
+          onValueChange={(v) => {
+            set("vatMode", v as VatMode);
+            if (v !== "fixed") reset("vatRate");
+          }}
+        >
+          <SelectTrigger size="sm" className="h-8 text-[12px] w-48"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {VAT_MODES.map((m) => (
+              <SelectItem key={m} value={m} className="text-[12px]">{VAT_MODE_LABELS[m]}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {mode === "fixed" && (
+          <div className="relative w-28">
+            <Input
+              value={rateText}
+              inputMode="decimal"
+              placeholder="e.g. 20"
+              onChange={(e) => {
+                setRateText(e.target.value);
+                set("vatRate", normalizeVatRate(e.target.value));
+              }}
+              aria-invalid={rateText.trim() !== "" && normalizeVatRate(rateText) === null ? true : undefined}
+              className={cn("h-8 pr-6 text-right text-[12px] tabular-nums", rateText.trim() !== "" && normalizeVatRate(rateText) === null && "border-rose-400")}
+            />
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground pointer-events-none">%</span>
+          </div>
+        )}
+        <span className="text-[11px] text-muted-foreground">
+          {mode === "exempt"
+            ? "VAT is switched off: everyone here pays 0% VAT."
+            : mode === "fixed"
+              ? "One rate for every individual here, whatever their country. Leave empty to block orders."
+              : "Each individual's country rate applies (global table, campaign overrides)."}
+        </span>
+      </div>
+    </FieldRow>
+  );
+}
+
 function Section({ title, bare, children }: { title: string; bare?: boolean; children: React.ReactNode }) {
   return (
     <section className="space-y-3">
@@ -194,17 +333,45 @@ function Section({ title, bare, children }: { title: string; bare?: boolean; chi
   );
 }
 
-// The Override / Reset pair every inheritable field carries. Real buttons — the
-// whole point of an override editor is finding these.
-function OverrideToggle({ overridden, onOverride, onReset }: { overridden: boolean; onOverride: () => void; onReset: () => void }) {
-  return overridden ? (
-    <Button type="button" size="sm" variant="ghost" onClick={onReset} className="h-8 text-[12px] text-muted-foreground">
-      <RotateCcw className="w-3.5 h-3.5" /> Reset to inherited
-    </Button>
-  ) : (
-    <Button type="button" size="sm" variant="outline" onClick={onOverride} className="h-8 text-[12px] border-lime-500/50 text-lime-700 dark:text-lime-400 hover:bg-lime-50 dark:hover:bg-lime-950/30">
-      <PenLine className="w-3.5 h-3.5" /> Override
-    </Button>
+// The inherit / override switch every inheritable field carries: a two-state
+// segmented control (the same pattern as the app's other mode switches), so the
+// state reads at a glance and flipping back is the same gesture as flipping on.
+export function OverrideToggle({
+  overridden,
+  onOverride,
+  onReset,
+  inheritLabel = "Inherited",
+  overrideLabel = "Override",
+}: {
+  overridden: boolean;
+  onOverride: () => void;
+  onReset: () => void;
+  /** Label of the inherit state, e.g. "Global" in the campaign VAT editor. */
+  inheritLabel?: string;
+  overrideLabel?: string;
+}) {
+  const seg = "inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[12px] font-medium transition-colors whitespace-nowrap";
+  return (
+    <div role="group" className="inline-flex items-center rounded-lg bg-muted p-0.5 gap-0.5 shrink-0">
+      <button
+        type="button"
+        onClick={() => overridden && onReset()}
+        aria-pressed={!overridden}
+        className={cn(seg, !overridden ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+      >
+        {overridden && <RotateCcw className="w-3 h-3" />}
+        {inheritLabel}
+      </button>
+      <button
+        type="button"
+        onClick={() => !overridden && onOverride()}
+        aria-pressed={overridden}
+        className={cn(seg, overridden ? "bg-lime-600 text-white shadow-sm" : "text-muted-foreground hover:text-foreground")}
+      >
+        <PenLine className="w-3 h-3" />
+        {overrideLabel}
+      </button>
+    </div>
   );
 }
 

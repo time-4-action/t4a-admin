@@ -2,6 +2,7 @@
 import { usePathname } from "next/navigation";
 import Nav from "@/components/nav";
 import PortalNav from "@/components/portal-nav";
+import { ViewingAsBanner } from "@/components/viewing-as-banner";
 
 // Chooses the chrome by route: the stripped-down B2B portal shell under /portal,
 // the full admin sidebar everywhere else. Middleware (lib/proxy.ts) already
@@ -10,13 +11,18 @@ import PortalNav from "@/components/portal-nav";
 
 type ShellUser = { name?: string | null; email?: string | null; picture?: string | null };
 
+export type ViewingAs = { partnerMkId: string; partnerName: string };
+
 export default function AppShell({
   user,
   roles,
+  viewingAs,
   children,
 }: {
   user?: ShellUser;
   roles?: string[];
+  // Set when an admin is viewing the portal as a customer (lib/portal-impersonation.ts).
+  viewingAs?: ViewingAs | null;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -24,10 +30,15 @@ export default function AppShell({
 
   return (
     <>
-      {isPortal ? <PortalNav user={user} /> : <Nav user={user} roles={roles} />}
-      <main className="flex-1 min-w-0 overflow-hidden bg-background pt-12 md:pt-0">
-        {children}
-      </main>
+      {isPortal ? <PortalNav user={user} viewingAs={viewingAs} /> : <Nav user={user} roles={roles} />}
+      {isPortal && viewingAs ? (
+        <main className="flex-1 min-w-0 overflow-hidden bg-background pt-12 md:pt-0 flex flex-col">
+          <ViewingAsBanner viewingAs={viewingAs} />
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col [&>*]:flex-1 [&>*]:min-h-0">{children}</div>
+        </main>
+      ) : (
+        <main className="flex-1 min-w-0 overflow-hidden bg-background pt-12 md:pt-0">{children}</main>
+      )}
     </>
   );
 }

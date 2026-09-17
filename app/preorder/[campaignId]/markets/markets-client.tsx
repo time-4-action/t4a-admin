@@ -24,7 +24,7 @@ import type { PreorderCampaignAdmin, PreorderMarket } from "@/types/preorder";
 import type { CountryGeo } from "@/lib/preorder-customers";
 import { MarketModal, type MarketDraft } from "./market-modal";
 import { CustomerModal } from "./customer-modal";
-import { CountryDrawer } from "./country-drawer";
+import { CountryModal } from "./country-modal";
 import { CountriesTable, CustomersTable, MarketsPanel, marketCustomerCounts, type CustomerFilters } from "./tables";
 
 type View = "customers" | "markets" | "countries";
@@ -450,7 +450,7 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
         inviteUrl={inviteUrl}
         onSaved={() => void refreshAll()}
       />
-      <CountryDrawer
+      <CountryModal
         open={drawer?.type === "country"}
         onOpenChange={(o) => !o && setDrawer(null)}
         campaignId={campaignId}

@@ -92,12 +92,13 @@ export type MkPricelist = {
 export type MkProductPrice = {
   listCode: string; // the price list's count_code
   title: string; // the price list's name (matches campaign rrp/partnerPricelist)
-  price: number; // base price_def.price
+  price: number; // base list price as MK stores it (price_def.price, or price_def.price_with_tax backed out to net)
+  priceWithTax?: number; // price_def.price_with_tax when the list is defined gross
   discount?: number; // percentage off, if any
-  effective: number; // net price after discount
+  effective: number; // NET price after discount — the number to charge a company
   currency?: string;
   tax?: string; // MK tax code (e.g. "EX4") from price_def.tax, when present
-  taxRate?: number; // VAT % from price_def.tax_desc (e.g. 22), when present
+  taxRate?: number; // VAT % from price_def.tax_desc / tax_factor (e.g. 22), when present
   // Whether this list is priced NET (a tax was declared → add VAT for the gross
   // price). Lists without a tax are already gross (consumer/RRP prices).
   net: boolean;

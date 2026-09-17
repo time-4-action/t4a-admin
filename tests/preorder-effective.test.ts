@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveEffectiveCampaign, resolvePartnerContext, referencedPricelists } from "@/lib/preorder-effective";
-import { computeTotals, flattenRows, rowUnitPrice, type PreorderCampaign } from "@/types/preorder";
+import { computePricedOrder, computeTotals, flattenRows, rowUnitPrice, type PreorderCampaign } from "@/types/preorder";
 import { baseCampaign } from "./helpers/fixtures";
 
 const ctx = (iso: string | null, partnerMkId = "p1") => ({ partnerMkId, countryIso: iso, countrySource: iso ? ("mk" as const) : null });
@@ -18,8 +18,8 @@ describe("resolveEffectiveCampaign — precedence", () => {
       { partnerMkId: "vip", partnerName: "VIP Shop", config: { partnerPricelist: "VIP 2027", note: null } },
     ],
     priceBooks: [
-      { pricelist: "DACH list", currency: "CHF", entries: [{ code: "SKU-s1", gross: 90 }, { code: "SKU-m1", gross: 40 }], missing: 0 },
-      { pricelist: "VIP 2027", currency: "EUR", entries: [{ code: "SKU-s1", gross: 80 }], missing: 0 },
+      { pricelist: "DACH list", currency: "CHF", entries: [{ code: "SKU-s1", net: 90 }, { code: "SKU-m1", net: 40 }], missing: 0 },
+      { pricelist: "VIP 2027", currency: "EUR", entries: [{ code: "SKU-s1", net: 80 }], missing: 0 },
     ],
   });
 
@@ -157,7 +157,7 @@ describe("resolveEffectiveCampaign — pricing", () => {
   it("other list with a price book: book price overlays, manual discount dropped, missing → fallback + warning", () => {
     const c = baseCampaign({
       markets: [{ id: "m", name: "M", color: "sky", countries: ["SI"], config: { partnerPricelist: "VIP 2027" } }],
-      priceBooks: [{ pricelist: "VIP 2027", currency: "EUR", entries: [{ code: "SKU-s1", gross: 80, taxCode: "EX1" }, { code: "SKU-s2", gross: 160 }], missing: 1 }],
+      priceBooks: [{ pricelist: "VIP 2027", currency: "EUR", entries: [{ code: "SKU-s1", net: 80, taxCode: "EX1" }, { code: "SKU-s2", net: 160 }], missing: 1 }],
     });
     const e = resolveEffectiveCampaign(c, ctx("SI"));
     const rows = flattenRows(e).map((r) => r.row);
@@ -167,7 +167,7 @@ describe("resolveEffectiveCampaign — pricing", () => {
     expect(rows[1].discountedPrice).toBeNull();
     expect(rowUnitPrice(rows[2])).toBe(50); // m1 missing from the book → sheet price
     expect(rows[2].priceSource).toBe("fallback");
-    expect(e.effective.pricing).toEqual({ pricelist: "VIP 2027", fromBook: 2, fallback: 1, manual: 0 });
+    expect(e.effective.pricing).toMatchObject({ pricelist: "VIP 2027", fromBook: 2, fallback: 1, manual: 0 });
     expect(e.effective.warnings).toContain("price-missing:SKU-m1");
     expect(computeTotals(e, { s1: 1, s2: 1, m1: 1 }).amount).toBe(290);
   });
@@ -234,5 +234,76 @@ describe("resolveEffectiveCampaign — output shape", () => {
     expect(e.markets).toBeUndefined();
     expect(e.customerRules).toBeUndefined();
     expect(e.priceBooks).toBeUndefined();
+  });
+});
+
+describe("resolveEffectiveCampaign — pricing context (kind, basis, VAT)", () => {
+  const vat = { rates: { SI: 22, AT: 20 }, fallbackRate: null, taxCodes: [] };
+  const person = (iso: string | null) => ({ partnerMkId: "p9", countryIso: iso, countrySource: iso ? ("mk" as const) : null, kind: "person" as const });
+  const company = (iso: string | null) => ({ ...person(iso), kind: "business" as const });
+
+  it("company → partner basis, zero-rated, whatever the country", () => {
+    const e = resolveEffectiveCampaign(baseCampaign(), company("DE"), vat);
+    expect(e.pricing).toEqual({ kind: "business", basis: "partner", countryIso: "DE", vat: { rate: 0, source: "zero-rated" } });
+    expect(e.effective.pricing.ctx).toEqual(e.pricing);
+    expect(rowUnitPrice(flattenRows(e)[0].row, e.pricing!.basis)).toBe(100);
+    expect(e.effective.warnings).toEqual([]);
+  });
+
+  it("individual → RRP basis with the country's global rate", () => {
+    const e = resolveEffectiveCampaign(baseCampaign(), person("SI"), vat);
+    expect(e.pricing).toEqual({ kind: "person", basis: "rrp", countryIso: "SI", vat: { rate: 22, source: "global" } });
+    expect(rowUnitPrice(flattenRows(e)[0].row, e.pricing!.basis)).toBe(200);
+    expect(computeTotals(e, { s1: 1 })).toEqual({ qty: 1, amount: 200, discount: 0, net: 200 });
+  });
+
+  it("campaign override beats the global rate; fallback covers the rest", () => {
+    const c = baseCampaign({ vatOverrides: [{ iso: "AT", rate: 13 }] });
+    expect(resolveEffectiveCampaign(c, person("AT"), vat).pricing?.vat).toEqual({ rate: 13, source: "campaign" });
+    expect(resolveEffectiveCampaign(c, person("SI"), vat).pricing?.vat).toEqual({ rate: 22, source: "global" });
+    expect(resolveEffectiveCampaign(c, person("DE"), { ...vat, fallbackRate: 20 }).pricing?.vat).toEqual({ rate: 20, source: "fallback" });
+  });
+
+  it("missing rate is reported as a warning, never guessed", () => {
+    const e = resolveEffectiveCampaign(baseCampaign(), person("DE"), vat);
+    expect(e.pricing?.vat).toEqual({ rate: null, source: "missing" });
+    expect(e.effective.warnings).toContain("vat-missing:DE");
+    expect(resolveEffectiveCampaign(baseCampaign(), person(null), vat).effective.warnings).toContain("vat-missing:no-country");
+    // No VAT table at all (the resolver's default) → the same.
+    expect(resolveEffectiveCampaign(baseCampaign(), person("SI")).pricing?.vat.source).toBe("missing");
+  });
+
+  it("market / customer VAT policy: exempt, fixed rate, charge companies — rule beats market", () => {
+    const c = baseCampaign({
+      markets: [{ id: "exp", name: "Export", color: "sky", countries: ["JP"], config: { vatMode: "exempt" } }, { id: "eu", name: "EU", color: "teal", countries: ["SI", "AT"], config: { vatMode: "fixed", vatRate: 20, vatCompanies: true } }],
+      customerRules: [{ partnerMkId: "vip", partnerName: "VIP", config: { vatMode: "country" } }],
+    });
+    const jp = resolveEffectiveCampaign(c, person("JP"), vat);
+    expect(jp.pricing?.vat).toEqual({ rate: 0, source: "exempt" });
+    expect(jp.effective.sources.vat).toBe("market");
+    expect(jp.effective.pricing.vatPolicy).toMatchObject({ mode: "exempt", chargeCompanies: false });
+    const at = resolveEffectiveCampaign(c, person("AT"), vat);
+    expect(at.pricing?.vat).toEqual({ rate: 20, source: "market" });
+    const atCompany = resolveEffectiveCampaign(c, company("AT"), vat);
+    expect(atCompany.pricing).toMatchObject({ basis: "partner", vat: { rate: 20, source: "market" } });
+    expect(computePricedOrder(atCompany, { s1: 1 }).vat).toEqual({ rate: 20, net: 100, vat: 20, gross: 120 });
+    // The VIP rule switches back to country rates but inherits vatCompanies from the market.
+    const vip = resolveEffectiveCampaign(c, { ...company("SI"), partnerMkId: "vip" }, vat);
+    expect(vip.pricing?.vat).toEqual({ rate: 22, source: "global" });
+    expect(vip.effective.sources.vat).toBe("customer");
+    // Default policy: nothing set anywhere.
+    expect(resolveEffectiveCampaign(baseCampaign(), person("SI"), vat).effective.pricing.vatPolicy).toEqual({ mode: "country", fixedRate: null, chargeCompanies: false, source: "campaign" });
+  });
+
+  it("unknown kind defaults to company with a warning; individuals without an RRP are flagged", () => {
+    const e = resolveEffectiveCampaign(baseCampaign(), ctx("SI"), vat);
+    expect(e.pricing?.kind).toBe("business");
+    expect(e.effective.warnings).toContain("kind-unknown");
+    const noRrp = baseCampaign();
+    noRrp.tabs[1].groups[0].rows[0].rrp = null;
+    const p = resolveEffectiveCampaign(noRrp, person("SI"), vat);
+    expect(p.effective.warnings).toContain("rrp-missing:SKU-m1");
+    expect(flattenRows(p).find((r) => r.row.id === "m1")?.row.unpriced).toBe(true); // listed, not orderable
+    expect(computeTotals(p, { m1: 3 })).toEqual({ qty: 0, amount: 0, discount: 0, net: 0 });
   });
 });

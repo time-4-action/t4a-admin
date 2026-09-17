@@ -22,11 +22,9 @@ import { cached, invalidateCached } from "@/lib/auth0-cache";
 import {
   createSalesOrder,
   deleteSalesOrder,
-  getMkProductPrices,
   getSalesOrder,
   getPartnerById,
   getSalesOrderByBuyerOrder,
-  productTaxCode,
   type SalesOrderInput,
   type SalesOrderLookup,
 } from "@/lib/metakocka";
@@ -38,11 +36,14 @@ import {
   buyerOrderKey,
   campaignFromSnapshot,
   computeTabTotals,
-  round2,
   snapshotQuantities,
+  CUSTOMER_KIND_LABELS,
+  VAT_SOURCE_LABELS,
   type AllocationResult,
   type MkOrderState,
 } from "@/types/preorder";
+import { fmtVatRate, taxCodeForRate } from "@/lib/pricing";
+import { getVatSettings } from "@/lib/vat-settings";
 
 export type SubmitActor = { source: "customer" } | { source: "admin"; email: string | null };
 
@@ -57,7 +58,6 @@ export type MkOrderPort = {
   get: (mkId: string) => Promise<DocDetail | null | "error">;
   delete: (mkId: string) => Promise<{ ok: true } | { ok: false; error: string; status: number }>;
   partner: (mkId: string) => Promise<MkPartner | null>;
-  taxCodes: (codes: string[]) => Promise<Record<string, string>>;
 };
 
 async function getOrderOrError(mkId: string): Promise<DocDetail | null | "error"> {
@@ -72,12 +72,6 @@ export const realMkPort: MkOrderPort = {
   get: getOrderOrError,
   delete: deleteSalesOrder,
   partner: getPartnerById,
-  taxCodes: async (codes) => {
-    const prices = await getMkProductPrices(codes);
-    const out: Record<string, string> = {};
-    for (const c of codes) out[c] = productTaxCode(prices[c]);
-    return out;
-  },
 };
 
 export type RegisterResult = {
@@ -158,7 +152,10 @@ async function markFailed(id: Types.ObjectId, error: string, buyerOrder: string)
 // Build the put_document payload from the FROZEN snapshot: the order contains exactly
 // what the customer submitted, at the prices they saw, with each tab's earned volume
 // discount baked into the unit price (the document carries no price list and no
-// document-level discount, so the price must already be final).
+// document-level discount, so the price must already be final). The VAT treatment is
+// the snapshot's too: a company's lines go as NET price + tax_factor (0 when zero-rated,
+// the rate when the layer charges companies), an individual's as the GROSS RRP + the
+// country's tax_factor (MK backs out the VAT).
 async function buildOrderInput(
   doc: IPreorderSubmission,
   port: MkOrderPort,
@@ -169,22 +166,39 @@ async function buildOrderInput(
   const campaignDoc = await PreorderCampaign.findById(doc.campaignId).exec();
   if (!campaignDoc) return { ok: false, error: "Campaign not found." };
 
+  const pricing = snap.pricing;
+  if (!pricing) {
+    return { ok: false, error: "This preorder carries no pricing snapshot (submitted before VAT support). Register it again — it is re-priced from the campaign as it is now first." };
+  }
   const frozen = campaignFromSnapshot({ id: String(campaignDoc._id), title: campaignDoc.title, season: campaignDoc.season, status: campaignDoc.status }, snap);
   const tabTotals = computeTabTotals(frozen, snapshotQuantities(snap));
-  const pctByTab = new Map(tabTotals.map((t) => [t.tabId, t.discountPct]));
 
-  // Tax codes: from the snapshot; a single batched MK read only for lines lacking one.
-  const missing = Array.from(new Set(snap.lines.filter((l) => !l.taxCode).map((l) => l.code)));
-  const fetched = missing.length ? await port.taxCodes(missing) : {};
-
-  const lines = snap.lines
-    .filter((l) => l.qty > 0 && l.code)
-    .map((l) => ({
-      code: l.code,
-      amount: l.qty,
-      priceWithTax: round2(l.unitPrice * (1 - (pctByTab.get(l.tabId) ?? 0) / 100)),
-      tax: l.taxCode ?? fetched[l.code] ?? productTaxCode(undefined),
-    }));
+  const factor = Math.round(pricing.vatRate * 100) / 10000;
+  // Lines go out with MK's `tax_factor` for the rate. A tax code configured for the
+  // rate (snapshot, else the settings as they are now — an admin may add one after a
+  // failed attempt) is sent as `tax` instead; never guessed. MK_LINE_TAX_MODE=code
+  // makes a code mandatory.
+  let tax: string | null = pricing.mkTaxCode ?? null;
+  if (!tax) {
+    const settings = await getVatSettings();
+    tax = taxCodeForRate(settings.taxCodes, pricing.vatRate);
+  }
+  if (!tax && pricing.vatRate === 0 && process.env.MK_ZERO_TAX_CODE?.trim()) tax = process.env.MK_ZERO_TAX_CODE.trim();
+  if (!tax && process.env.MK_LINE_TAX_MODE === "code") {
+    return { ok: false, error: `No Metakocka tax code is configured for ${fmtVatRate(pricing.vatRate)} VAT — add it under Preorder → VAT rates (Metakocka tax codes) and register again.` };
+  }
+  const lines: SalesOrderInput["lines"] = [];
+  for (const l of snap.lines) {
+    if (l.qty <= 0 || !l.code) continue;
+    if (l.unitGross == null || l.unitNet == null) {
+      return { ok: false, error: `Line ${l.code} carries no frozen VAT figures — unlock and resubmit.` };
+    }
+    lines.push(
+      pricing.basis === "rrp"
+        ? { code: l.code, amount: l.qty, priceWithTax: l.unitGross, taxFactor: factor, tax }
+        : { code: l.code, amount: l.qty, price: l.unitNet, taxFactor: factor, tax },
+    );
+  }
 
   const partner = partnerHint ?? (await port.partner(doc.partnerMkId));
   if (!partner) return { ok: false, error: "Could not resolve this partner in Metakocka." };
@@ -192,8 +206,12 @@ async function buildOrderInput(
   const tierNotes = tabTotals
     .filter((t) => t.discount > 0)
     .map((t) => `${t.tabName}: ${t.tier?.name || "volume discount"} -${t.discountPct}%`);
+  const vatNote =
+    pricing.basis === "rrp"
+      ? `VAT: ${CUSTOMER_KIND_LABELS[pricing.kind]}, RRP incl. ${fmtVatRate(pricing.vatRate)} VAT (${pricing.countryIso ?? "?"}, ${VAT_SOURCE_LABELS[pricing.vatSource].toLowerCase()})`
+      : `VAT: ${CUSTOMER_KIND_LABELS[pricing.kind]}, partner prices excl. VAT, ${fmtVatRate(pricing.vatRate)} ${pricing.vatRate > 0 ? "added" : `(${VAT_SOURCE_LABELS[pricing.vatSource].toLowerCase()})`}`;
   const notes =
-    [doc.terms?.comment?.trim(), tierNotes.length ? `Volume discounts — ${tierNotes.join("; ")}` : ""].filter(Boolean).join("\n") ||
+    [doc.terms?.comment?.trim(), tierNotes.length ? `Volume discounts — ${tierNotes.join("; ")}` : "", vatNote].filter(Boolean).join("\n") ||
     undefined;
   const season = campaignDoc.season?.trim() || campaignDoc.title;
   const deliveryDeadline = doc.terms?.deliveryDate ? new Date(doc.terms.deliveryDate).toISOString().slice(0, 10) : undefined;
@@ -207,11 +225,10 @@ async function buildOrderInput(
       notes,
       lines,
       buyerOrder: buyerOrderKey(String(doc._id), doc.submitRevision || 1),
-      extraColumns: [
-        { name: "t4a_preorder_submission", value: String(doc._id) },
-        { name: "t4a_preorder_campaign", value: String(doc.campaignId) },
-      ],
-      changeLogNote: `T4A preorder ${season}`.slice(0, 50),
+      // No `extra_column` on the document: this MK account rejects it on sales orders
+      // ("Extra columns not supported yet on SalesOrder Products"). buyer_order is the
+      // link; the submission id rides in the change-log note.
+      changeLogNote: `T4A preorder ${String(doc._id)}`.slice(0, 50),
       deliveryDeadline,
     },
   };

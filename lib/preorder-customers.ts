@@ -30,6 +30,13 @@ export type CustomerRow = MkCustomerView & {
   warnings: string[];
 };
 
+// Per-customer preorder activity across EVERY campaign (Preorder → Customers).
+export type CustomerActivity = {
+  campaigns: { id: string; title: string; season: string | null; status: string; unlocked: boolean; stage: SubmissionStage | null }[];
+  unlocked: number;
+  submitted: number;
+};
+
 export type CustomersQuery = {
   q?: string;
   kind?: CustomerKind | null;

@@ -1,6 +1,7 @@
 "use client";
 import { Building2, Mail, Phone, ReceiptText, MapPin } from "lucide-react";
 import CustomerSelect from "./customer-select";
+import { ViewAsCustomerButton } from "@/components/view-as-customer-button";
 import type { MkPartner } from "@/types/documents";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 
@@ -20,7 +21,8 @@ export default function CustomerHeader({
     <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
       <div className="h-14 flex items-center justify-between gap-3 px-4 md:px-8">
         <h1 className="font-display text-lg font-medium tracking-tight text-foreground truncate">{title}</h1>
-        <div className="shrink-0">
+        <div className="shrink-0 flex items-center gap-2">
+          {customer && <ViewAsCustomerButton partnerMkId={customer.mkId} to="/portal/invoices" />}
           <CustomerSelect
             current={customer ? { mkId: customer.mkId, name: customer.name } : null}
             onSelect={onSelect}

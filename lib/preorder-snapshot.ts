@@ -5,7 +5,9 @@
 // No server-only import — unit-tested and shared by routes and the MK service.
 
 import {
+  campaignBasis,
   campaignFromSnapshot,
+  computePricedOrder,
   computeTotals,
   flattenRows,
   rowUnitPrice,
@@ -15,21 +17,31 @@ import {
   type CommercialSnapshot,
   type EffectiveCampaign,
   type PreorderSubmissionTotals,
+  type SnapshotPricing,
 } from "@/types/preorder";
+import { fromCents, taxCodeForRate, toCents, type VatConfig } from "@/lib/pricing";
 import type { DocDetail } from "@/types/documents";
 
-// Freeze what the partner agreed to: only ordered rows, at their effective unit price,
-// with the effective tier ladder of every tab that carries a line.
+// Freeze what the customer agreed to: only ordered rows, at their effective unit price
+// in the customer's basis, with the frozen VAT arithmetic of every line and the
+// effective tier ladder of every tab that carries a line. The `pricing` block records
+// the customer type, country, VAT rate + source and the order's net / VAT / gross —
+// later VAT-table or price changes never touch a submitted order.
 export function buildCommercialSnapshot(
   effective: EffectiveCampaign,
   quantities: Record<string, number>,
   now: Date = new Date(),
+  vat?: Pick<VatConfig, "taxCodes"> | null,
 ): CommercialSnapshot {
   const lines: CommercialSnapshot["lines"] = [];
   const tabsSeen = new Map<string, CommercialSnapshot["tabs"][number]>();
+  const priced = computePricedOrder(effective, quantities);
+  const pricedByTab = new Map(priced.tabs.map((t) => [t.tabId, t]));
+  const basis = campaignBasis(effective);
   for (const { tab, group, row } of flattenRows(effective)) {
     const qty = Math.max(0, Math.floor(quantities[row.id] || 0));
     if (qty <= 0) continue;
+    const lp = pricedByTab.get(tab.id)?.lines[row.id] ?? null;
     if (!tabsSeen.has(tab.id)) {
       tabsSeen.set(tab.id, {
         tabId: tab.id,
@@ -48,13 +60,34 @@ export function buildCommercialSnapshot(
       groupId: group.id,
       groupName: group.name,
       qty,
-      unitPrice: rowUnitPrice(row),
+      unitPrice: rowUnitPrice(row, basis),
       rrp: row.rrp ?? null,
+      partnerPrice: row.partnerPrice ?? null,
       taxCode: row.taxCode ?? null,
       priceSource: row.priceSource ?? "sheet",
+      tierPct: lp?.tierPct ?? null,
+      unitNet: lp?.unitNet ?? null,
+      unitVat: lp?.unitVat ?? null,
+      unitGross: lp?.unitGross ?? null,
+      lineNet: lp?.lineNet ?? null,
+      lineVat: lp?.lineVat ?? null,
+      lineGross: lp?.lineGross ?? null,
     });
   }
   const m = effective.effective;
+  const ctx = effective.pricing ?? null;
+  const pricing: SnapshotPricing | null =
+    ctx && ctx.vat.rate != null && priced.vat
+      ? {
+          kind: ctx.kind,
+          basis: ctx.basis,
+          countryIso: ctx.countryIso,
+          vatRate: ctx.vat.rate,
+          vatSource: ctx.vat.source,
+          mkTaxCode: taxCodeForRate(vat?.taxCodes, ctx.vat.rate),
+          totals: { net: priced.vat.net, vat: priced.vat.vat, gross: priced.vat.gross },
+        }
+      : null;
   return {
     resolvedAt: now.toISOString(),
     countryIso: m.countryIso,
@@ -67,6 +100,7 @@ export function buildCommercialSnapshot(
     sources: m.sources,
     tabs: Array.from(tabsSeen.values()),
     lines,
+    pricing,
   };
 }
 
@@ -74,6 +108,21 @@ export function buildCommercialSnapshot(
 export function snapshotTotals(snap: CommercialSnapshot): PreorderSubmissionTotals {
   const frozen = campaignFromSnapshot({ id: "", title: "", season: null, status: "closed" }, snap);
   return computeTotals(frozen, snapshotQuantities(snap));
+}
+
+// The order's net / VAT / gross summed from the frozen lines (must equal
+// snapshot.pricing.totals). Null on snapshots taken before VAT support.
+export function snapshotVatTotals(snap: CommercialSnapshot): { net: number; vat: number; gross: number } | null {
+  if (!snap.pricing) return null;
+  let net = 0;
+  let vat = 0;
+  let gross = 0;
+  for (const l of snap.lines) {
+    net += toCents(l.lineNet);
+    vat += toCents(l.lineVat);
+    gross += toCents(l.lineGross);
+  }
+  return { net: fromCents(net), vat: fromCents(vat), gross: fromCents(gross) };
 }
 
 function num(v: string | number | null | undefined): number | null {

@@ -16,8 +16,10 @@
 // the portal imports).
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, LayoutDashboard, Table2, Globe2, ClipboardList, Eye } from "lucide-react";
+import { ArrowLeft, LayoutDashboard, Table2, Globe2, ClipboardList, Eye, Link2, Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export type CampaignNavKey = "overview" | "sheet" | "markets" | "preorders" | "preview";
@@ -36,6 +38,41 @@ const ITEMS: {
   { key: "preorders", label: "Preorders", icon: ClipboardList, path: (id) => `/preorder/${id}/submissions` },
   { key: "preview", label: "Preview", icon: Eye, path: (id) => `/preorder/${id}/preview` },
 ];
+
+// The campaign's magic invite link, copyable from EVERY campaign page (it sits in
+// the header's action row). The token is ensured server-side; the absolute URL is
+// built from the browser origin.
+export function CopyInviteButton({ campaignId, className }: { campaignId: string; className?: string }) {
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/admin/preorder/campaigns/${campaignId}/invite`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (alive && d?.path) setInviteUrl(`${window.location.origin}${d.path}`);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [campaignId]);
+  const copy = async () => {
+    if (!inviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      /* clipboard blocked — ignore */
+    }
+  };
+  return (
+    <Button variant="outline" size="sm" className={cn("h-8", className)} onClick={copy} disabled={!inviteUrl} title={inviteUrl ?? "Invite link"}>
+      {copied ? <><Check className="w-3.5 h-3.5 text-lime-600" /> Copied</> : <><Link2 className="w-3.5 h-3.5" /> Copy invite link</>}
+    </Button>
+  );
+}
 
 /** The underline tab strip alone — always rendered through CampaignHeader. */
 export function CampaignNav({
@@ -107,6 +144,7 @@ export function CampaignHeader({
   backHref = "/preorder",
   title,
   meta,
+  beforeActions,
   actions,
   navExtra,
   className,
@@ -116,6 +154,8 @@ export function CampaignHeader({
   backHref?: string;
   title: React.ReactNode;
   meta?: React.ReactNode;
+  /** Status text that sits before the invite button (the sheet's autosave state). */
+  beforeActions?: React.ReactNode;
   actions?: React.ReactNode;
   navExtra?: React.ReactNode;
   className?: string;
@@ -137,7 +177,11 @@ export function CampaignHeader({
           )}
         </div>
         <div className="flex-1" />
-        {actions != null && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+        <div className="flex items-center gap-2 shrink-0">
+          {beforeActions}
+          <CopyInviteButton campaignId={campaignId} />
+          {actions}
+        </div>
       </div>
       <CampaignNav campaignId={campaignId} active={active}>
         {navExtra}

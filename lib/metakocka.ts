@@ -736,7 +736,8 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
 }
 
 // Parse one product's pricelist[] into sales price entries with the effective
-// (post-discount) price computed. Purchase-only lists are dropped.
+// (post-discount, NET) price computed. Purchase-only lists are dropped. A list
+// defined by `price_with_tax` (gross) is backed out to net with its tax factor.
 function parseProductPrices(prod: Record<string, unknown>): MkProductPrice[] {
   const pl = Array.isArray(prod.pricelist) ? (prod.pricelist as Record<string, unknown>[]) : [];
   const entries: MkProductPrice[] = [];
@@ -746,24 +747,35 @@ function parseProductPrices(prod: Record<string, unknown>): MkProductPrice[] {
       e.price_def && typeof e.price_def === "object"
         ? (e.price_def as Record<string, unknown>)
         : {};
-    const base = num(def.price);
+    const tax = str(def.tax);
+    const taxFactor = num(def.tax_factor);
+    const taxRate = num(def.tax_desc) ?? (taxFactor !== undefined ? round2(taxFactor * 100) : undefined);
+    const priceWithTax = num(def.price_with_tax);
+    let base = num(def.price);
+    if (base === undefined && priceWithTax !== undefined) {
+      base = tax ? round2(priceWithTax / (1 + (taxRate ?? productVatRateDefault()) / 100)) : priceWithTax;
+    }
     if (base === undefined) continue;
     const discount = num(def.discount);
     const effective = discount ? round2(base * (1 - discount / 100)) : base;
-    const tax = str(def.tax);
     entries.push({
       listCode: str(e.count_code) ?? "",
       title: str(e.title) ?? "",
       price: base,
+      priceWithTax,
       discount,
       effective,
       currency: str(e.currency_code),
       tax,
-      taxRate: num(def.tax_desc),
+      taxRate,
       net: !!tax,
     });
   }
   return entries;
+}
+
+function productVatRateDefault(): number {
+  return Number(process.env.MK_DEFAULT_VAT_RATE) || 22;
 }
 
 // Fetch the sales price lists (with effective prices) for a set of product codes,
@@ -779,6 +791,7 @@ export async function getMkProductPrices(
     const res = await callMetakocka("json/product_list", {
       code,
       return_pricelist: "true",
+      show_tax_factor: "true",
     });
     if (!res.ok) return;
     const raw = res.data.product_list;
@@ -810,11 +823,18 @@ export function pickMkListPrice(
 // carry no tax of their own, so we read it from a sibling list on the same product.
 export function productVatRate(entries: MkProductPrice[] | undefined): number {
   const fromList = entries?.find((e) => e.taxRate !== undefined)?.taxRate;
-  return fromList ?? (Number(process.env.MK_DEFAULT_VAT_RATE) || 22);
+  return fromList ?? productVatRateDefault();
 }
 
-// Pick a price-list title's GROSS price (discount + VAT included) — the "real" price
-// to display and to send as price_with_tax. `untaxedIsNet` decides how to treat a
+// Pick a price-list title's NET price (discount included, VAT excluded) — what the
+// preorder sheet stores as the partner price (companies are zero-rated, so this is
+// exactly what they pay). A list that declares no tax is taken as-is.
+export function pickMkListNetPrice(entries: MkProductPrice[] | undefined, title: string | null | undefined): number | null {
+  return pickMkListPrice(entries, title);
+}
+
+// Pick a price-list title's GROSS price (discount + VAT included) — what the preorder
+// sheet stores as the RRP (consumer price). `untaxedIsNet` decides how to treat a
 // list that declares no tax: partner/tier lists are net (add VAT); RRP lists are
 // already gross (consumer prices) so use as-is.
 export function pickMkListGrossPrice(
@@ -826,6 +846,7 @@ export function pickMkListGrossPrice(
   const want = title.trim().toLowerCase();
   const hit = entries.find((e) => e.title.trim().toLowerCase() === want);
   if (!hit) return null;
+  if (hit.priceWithTax !== undefined && !hit.discount) return hit.priceWithTax;
   const rate = hit.taxRate ?? productVatRate(entries);
   if (hit.net) return round2(hit.effective * (1 + rate / 100));
   return opts.untaxedIsNet ? round2(hit.effective * (1 + productVatRate(entries) / 100)) : hit.effective;
@@ -855,12 +876,30 @@ export type SalesOrderInput = {
   extraColumns?: { name: string; value: string }[];
   changeLogNote?: string; // document_change_log_notes (≤ 50 chars)
   deliveryDeadline?: string; // yyyy-mm-dd
-  // Each line references an existing product by code with an EXPLICIT GROSS unit price
-  // (priceWithTax = discount + VAT included, retrieved from the partner price list and
-  // locked at order time — we don't put a price list on the document) and a tax code
-  // (put_document requires tax per line; MK backs out the net/VAT from the gross).
-  lines: { code: string; amount: number; priceWithTax: number; tax: string }[];
+  // Each line references an existing product by code with an EXPLICIT unit price locked
+  // at order time (we don't put a price list on the document) and its VAT factor:
+  //  • consumer lines carry the GROSS price (priceWithTax = RRP, tier discount baked
+  //    in) and the country's factor — MK backs the net/VAT out of the gross;
+  //  • company lines carry the NET price (price = partner price after tier) and a
+  //    factor of 0 (zero-rated).
+  // VAT per line: MK's documented `tax_factor` ("0.22") by default — no account
+  // codes needed. A configured tax code for the rate (VAT settings → Metakocka tax
+  // codes) is sent as `tax` instead, which is the fallback for lines MK refuses a
+  // factor for (a zero-rated line: MK_ZERO_TAX_CODE or the 0 % code).
+  // `MK_LINE_TAX_MODE=code` makes codes mandatory.
+  lines: { code: string; amount: number; price?: number; priceWithTax?: number; taxFactor: number; tax: string | null }[];
 };
+
+function mkLineTax(l: SalesOrderInput["lines"][number]): Record<string, string> {
+  const zeroCode = process.env.MK_ZERO_TAX_CODE?.trim();
+  const code = l.tax ?? (l.taxFactor === 0 ? zeroCode : undefined);
+  if (code) return { tax: code };
+  return { tax_factor: String(round4(l.taxFactor)) };
+}
+
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
+}
 
 // Create a Metakocka sales order via put_document. Outward-facing + hard to
 // reverse — callers gate it behind an explicit admin action.
@@ -888,13 +927,13 @@ export async function createSalesOrder(
       place: addr.city ?? partner.city ?? "",
       country: addr.country ?? "",
     },
-    // Explicit GROSS price + tax per line (price_with_tax already includes the partner
-    // discount and VAT; tax gives MK the rate to back out net). No price list on the doc.
+    // Explicit unit price + VAT factor per line (see SalesOrderInput.lines). No price
+    // list on the document.
     product_list: lines.map((l) => ({
       code: l.code,
       amount: String(l.amount),
-      price_with_tax: String(l.priceWithTax),
-      tax: l.tax,
+      ...(l.priceWithTax != null ? { price_with_tax: String(l.priceWithTax) } : { price: String(l.price ?? 0) }),
+      ...mkLineTax(l),
     })),
   };
   if (notes) body.notes = notes;

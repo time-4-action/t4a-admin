@@ -6,6 +6,27 @@
 // MongoDB documents that back them live in models/preorder-campaign.ts and
 // models/preorder-submission.ts; keep the field names aligned. Framework-agnostic on
 // purpose (imported client & server).
+//
+// All money math lives in lib/pricing.ts (integer cents, VAT rules); the engine
+// functions below are thin wrappers kept under their historical names.
+
+import {
+  priceOrder,
+  unitPriceFor,
+  sumTabTotals as sumTabTotalsImpl,
+  type CustomerKind,
+  type PricingContext,
+  type PriceBasis,
+  type PricedOrder,
+  type PreorderTabTotal,
+  type VatMode,
+  type VatOverride,
+  type VatPolicy,
+  type VatSource,
+} from "@/lib/pricing";
+
+export { activeTiers, tierForAmount, nextTierAfter, VAT_SOURCE_LABELS, VAT_MODE_LABELS, VAT_MODES, CUSTOMER_KIND_LABELS } from "@/lib/pricing";
+export type { CustomerKind, PricingContext, PriceBasis, PricedOrder, PreorderTabTotal, VatMode, VatOverride, VatPolicy, VatSource } from "@/lib/pricing";
 
 export type CampaignStatus = "draft" | "open" | "closed";
 export type SubmissionStatus = "draft" | "submitted" | "confirmed" | "closed";
@@ -28,9 +49,9 @@ export type PreorderRow = {
   variantLabel?: string | null; // "fin / model / size" column
   size?: string | null;
   tag?: RowTag;
-  rrp?: number | null; // RRP inc. VAT
-  partnerPrice?: number | null; // partner price excl. VAT
-  discountedPrice?: number | null; // discounted partner price
+  rrp?: number | null; // RRP — GROSS, VAT-inclusive (what an individual pays)
+  partnerPrice?: number | null; // partner price — NET, excl. VAT (what a company pays, zero-rated)
+  discountedPrice?: number | null; // discounted partner price (net)
   image?: string | null;
   order: number;
   // Not in the DEFAULT assortment: visible only where a market / customer rule
@@ -41,6 +62,9 @@ export type PreorderRow = {
   taxCode?: string | null;
   // Where the effective unit price came from. Set by the resolver only — never stored.
   priceSource?: "sheet" | "manual" | "book" | "fallback";
+  // No price for THIS customer (an individual and the row has no RRP): shown, but
+  // cannot be ordered. Set by the resolver only — never stored.
+  unpriced?: boolean;
 };
 
 export type PreorderGroup = {
@@ -57,8 +81,9 @@ export type PreorderGroup = {
 // A volume-discount tier on a tab: reach `minAmount` of ordered value INSIDE that tab
 // and every line in it gets `discountPct` off. Tiers are per tab and never stack — the
 // single highest threshold the tab subtotal reaches is the one that applies. Thresholds
-// are compared against the subtotal exactly as the partner sees it (gross, incl. VAT,
-// in the campaign currency).
+// are compared against the subtotal exactly as the customer sees it, in their own price
+// basis: companies on partner prices excl. VAT, individuals on RRP incl. VAT (campaign
+// currency either way).
 export type PreorderTier = {
   id: string;
   name: string; // what the partner is told they reached, e.g. "Gold"
@@ -72,6 +97,7 @@ export type PreorderTab = {
   order: number;
   discountNote?: string | null; // free-text discount hint (mirrors the Terms families)
   tiers?: PreorderTier[]; // volume discount ladder for this tab
+  tiersLocked?: boolean; // "Copy to all tabs" from another tab leaves this ladder alone
   groups: PreorderGroup[];
 };
 
@@ -104,6 +130,10 @@ export type PreorderCampaign = {
   rrpPricelist?: string | null;
   partnerPricelist?: string | null;
   tabs: PreorderTab[];
+  // How THIS customer is priced (kind, basis, VAT). Set by the effective-campaign
+  // resolver and restored from a submission's snapshot — never stored on the campaign.
+  // Absent on the admin's raw sheet (builder), which prices on the partner basis.
+  pricing?: PricingContext | null;
   createdBy?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
@@ -124,6 +154,11 @@ export type CommercialConfig = {
   hiddenIds?: string[]; // tab / group / row ids removed from the assortment
   exposedIds?: string[]; // tab / group / row ids added back (incl. `restricted` rows)
   tiersByTab?: { tabId: string; tiers: PreorderTier[] }[];
+  // VAT policy of the layer (lib/pricing.ts VatPolicy): how consumers' VAT is found
+  // (country rates / exempt / one fixed rate) and whether companies are charged too.
+  vatMode?: VatMode | null; // null = country rates
+  vatRate?: number | null; // the rate for `fixed`
+  vatCompanies?: boolean | null; // true = charge VAT to companies (default: zero-rated)
 };
 
 export const COMMERCIAL_CONFIG_KEYS = [
@@ -135,6 +170,9 @@ export const COMMERCIAL_CONFIG_KEYS = [
   "hiddenIds",
   "exposedIds",
   "tiersByTab",
+  "vatMode",
+  "vatRate",
+  "vatCompanies",
 ] as const satisfies readonly (keyof CommercialConfig)[];
 
 export type MarketColor = "sky" | "violet" | "amber" | "rose" | "emerald" | "indigo" | "fuchsia" | "teal";
@@ -143,7 +181,7 @@ export const MARKET_COLOR_KEYS: MarketColor[] = ["sky", "violet", "amber", "rose
 // A named geographic market inside ONE campaign: a set of countries + a config layer.
 // Who a market is for. A partner is a "business" when Metakocka carries a tax id
 // for it, otherwise a "person" (lib/mk-customers.ts customerKind).
-export type MarketKind = "business" | "person";
+export type MarketKind = CustomerKind;
 export const MARKET_KINDS: readonly MarketKind[] = ["business", "person"];
 
 // A market matches a partner when its countries (if any) contain the partner's
@@ -181,9 +219,9 @@ export type CustomerRule = {
   updatedBy?: string | null;
 };
 
-// Gross partner prices of the sheet's products in ONE non-default MK price list,
+// NET partner prices of the sheet's products in ONE non-default MK price list,
 // refreshed on demand (an array, not a map — product codes can contain ".").
-export type PriceBookEntry = { code: string; gross: number | null; taxCode?: string | null };
+export type PriceBookEntry = { code: string; net: number | null; taxCode?: string | null };
 export type PriceBook = {
   pricelist: string;
   currency?: string | null;
@@ -198,6 +236,8 @@ export type PreorderCampaignAdmin = PreorderCampaign & {
   markets: PreorderMarket[];
   customerRules: CustomerRule[];
   priceBooks: PriceBook[];
+  // Per-country VAT rates that beat the global settings for THIS campaign only.
+  vatOverrides: VatOverride[];
 };
 
 // ── Effective campaign (what ONE partner is allowed to see / order) ──
@@ -207,6 +247,7 @@ export type EffectiveSources = {
   deadline: ConfigSource;
   note: ConfigSource;
   minOrderAmount: ConfigSource;
+  vat: ConfigSource; // which layer set the VAT policy
   tiers: Record<string, ConfigSource>; // per tabId
 };
 
@@ -226,8 +267,8 @@ export type EffectiveMeta = {
     restrictedExposed: number;
     hiddenBy: Partial<Record<ConfigSource, number>>;
   };
-  pricing: { pricelist: string | null; fromBook: number; fallback: number; manual: number };
-  warnings: string[]; // e.g. "price-book-missing:VIP 2027", "currency-mismatch:CHF vs EUR"
+  pricing: { pricelist: string | null; fromBook: number; fallback: number; manual: number; ctx: PricingContext; vatPolicy: VatPolicy };
+  warnings: string[]; // e.g. "price-book-missing:VIP 2027", "currency-mismatch:CHF vs EUR", "vat-missing:DE"
 };
 
 // Structurally a PreorderCampaign (tabs filtered, prices/tiers overlaid) so the
@@ -259,9 +300,11 @@ export type SubmissionLine = {
   lineStatus?: LineStatus;
 };
 
-// `amount` is the gross line sum; `discount` is the Σ of the per-tab volume discounts
-// earned; `net` is what the partner actually pays. Both are absent on submissions saved
-// before volume discounts existed — read them through totalsNet()/totalsDiscount().
+// `amount` is the line sum in the customer's price basis (company: partner net,
+// individual: RRP gross); `discount` is the Σ of the per-tab volume discounts earned;
+// `net` is what the customer actually pays in that basis — it is NOT the VAT-net (that
+// lives in the snapshot's `pricing.totals`). Both are absent on submissions saved before
+// volume discounts existed — read them through totalsNet()/totalsDiscount().
 export type PreorderSubmissionTotals = {
   qty: number;
   amount: number;
@@ -329,10 +372,35 @@ export type SnapshotLine = {
   groupId: string;
   groupName: string;
   qty: number;
-  unitPrice: number; // gross, what the partner pays per unit before volume discounts
-  rrp?: number | null;
-  taxCode?: string | null;
+  unitPrice: number; // the USED unit price in the customer's basis, before volume discounts
+  rrp?: number | null; // gross RRP as shown
+  partnerPrice?: number | null; // net partner price as shown
+  taxCode?: string | null; // legacy MK tax code; lines now carry tax_factor
   priceSource: NonNullable<PreorderRow["priceSource"]>;
+  // Frozen VAT arithmetic of the line (lib/pricing.ts priceLine). Absent on snapshots
+  // taken before VAT support.
+  tierPct?: number | null;
+  unitNet?: number | null;
+  unitVat?: number | null;
+  unitGross?: number | null;
+  lineNet?: number | null;
+  lineVat?: number | null;
+  lineGross?: number | null;
+};
+
+// How the customer was priced at submit — customer type, country, the VAT rate and
+// where it came from, and the order's net / VAT / gross. Frozen: later VAT or price
+// changes never touch it.
+export type SnapshotPricing = {
+  kind: CustomerKind;
+  basis: PriceBasis;
+  countryIso: string | null;
+  vatRate: number;
+  vatSource: VatSource;
+  // Metakocka tax code for the rate at submit time (VAT settings → tax codes); null
+  // when none was configured — registration then looks the settings up again.
+  mkTaxCode?: string | null;
+  totals: { net: number; vat: number; gross: number };
 };
 
 export type CommercialSnapshot = {
@@ -347,6 +415,7 @@ export type CommercialSnapshot = {
   sources: EffectiveSources;
   tabs: { tabId: string; tabName: string; tiers: PreorderTier[] }[]; // only tabs with lines
   lines: SnapshotLine[]; // only qty > 0
+  pricing: SnapshotPricing | null; // null only on snapshots taken before VAT support
 };
 
 // ── Allocation: the live MK order compared to the request ──
@@ -554,9 +623,14 @@ export function parseCampaignStatus(v?: string | null): CampaignStatus | null {
   }
 }
 
-// The price a partner orders at (falls back through the price snapshot).
-export function rowUnitPrice(row: Pick<PreorderRow, "discountedPrice" | "partnerPrice" | "rrp">): number {
-  return row.discountedPrice ?? row.partnerPrice ?? row.rrp ?? 0;
+// The unit price a customer orders a row at, in their price basis (lib/pricing.ts).
+export function rowUnitPrice(row: Pick<PreorderRow, "discountedPrice" | "partnerPrice" | "rrp">, basis: PriceBasis = "partner"): number {
+  return unitPriceFor(row, basis);
+}
+
+// The basis a campaign object prices in (its resolver-set context, else partner).
+export function campaignBasis(campaign: Pick<PreorderCampaign, "pricing"> | null | undefined): PriceBasis {
+  return campaign?.pricing?.basis ?? "partner";
 }
 
 // Flatten every row of a campaign, keeping its tab/group context. Used for totals,
@@ -573,151 +647,57 @@ export function flattenRows(
   return out;
 }
 
-// ── Volume discount tiers ────────────────────────────────────────────────────
-// A tab's tiers turn its subtotal into a discount: order enough within the tab and
-// every line in it drops by the tier's percentage. Tiers never stack — exactly one
-// (the highest threshold reached) applies.
+// ── Volume discount tiers & totals ───────────────────────────────────────────
+// The tier helpers (activeTiers / tierForAmount / nextTierAfter) and PreorderTabTotal
+// are re-exported from lib/pricing.ts above; the engine below wraps priceOrder().
 
 export function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
-// The usable tiers of a tab, cleaned and sorted by threshold ascending. A tier with a
-// non-positive percentage is inert (it would discount nothing) and is dropped here so
-// every consumer sees the same list.
-export function activeTiers(tiers?: PreorderTier[] | null): PreorderTier[] {
-  return (tiers ?? [])
-    .filter(
-      (t) =>
-        Number.isFinite(t?.minAmount) &&
-        t.minAmount >= 0 &&
-        Number.isFinite(t?.discountPct) &&
-        t.discountPct > 0,
-    )
-    .slice()
-    .sort((a, b) => a.minAmount - b.minAmount || a.discountPct - b.discountPct);
-}
-
-// The tier an amount qualifies for: the highest threshold it reaches (on a tie, the
-// better percentage). Null when it reaches none.
-export function tierForAmount(tiers: PreorderTier[] | null | undefined, amount: number): PreorderTier | null {
-  let hit: PreorderTier | null = null;
-  for (const t of activeTiers(tiers)) {
-    if (amount + 1e-9 >= t.minAmount) hit = t;
-  }
-  return hit;
-}
-
-// The next tier still out of reach (what the partner is working towards), or null.
-export function nextTierAfter(tiers: PreorderTier[] | null | undefined, amount: number): PreorderTier | null {
-  for (const t of activeTiers(tiers)) {
-    if (amount + 1e-9 < t.minAmount) return t;
-  }
-  return null;
-}
-
-// A tab's contribution to an order, with its volume discount resolved.
-export type PreorderTabTotal = {
-  tabId: string;
-  tabName: string;
-  qty: number;
-  amount: number; // gross, before the tab's volume discount
-  tier: PreorderTier | null; // the tier this tab reached
-  discountPct: number; // 0 when no tier applies
-  discount: number; // amount × pct
-  net: number; // amount − discount (what is actually payable)
-  nextTier: PreorderTier | null; // the tier just out of reach
-  toNextTier: number; // how much more this tab needs to reach it
-};
-
-// Shared engine behind every total: `qtyOf` decides which quantity a row contributes
-// (as ordered, or only the admin-confirmed part).
-function tabTotalsWith(
-  campaign: Pick<PreorderCampaign, "tabs">,
-  qtyOf: (row: PreorderRow) => number,
-): PreorderTabTotal[] {
-  return campaign.tabs.map((tab) => {
-    let qty = 0;
-    let amount = 0;
-    for (const group of tab.groups) {
-      for (const row of group.rows) {
-        const q = qtyOf(row);
-        if (q <= 0) continue;
-        qty += q;
-        amount += q * rowUnitPrice(row);
-      }
-    }
-    amount = round2(amount);
-    const tier = tierForAmount(tab.tiers, amount);
-    const discountPct = tier?.discountPct ?? 0;
-    const discount = round2((amount * discountPct) / 100);
-    const next = nextTierAfter(tab.tiers, amount);
-    return {
-      tabId: tab.id,
-      tabName: tab.name,
-      qty,
-      amount,
-      tier,
-      discountPct,
-      discount,
-      net: round2(amount - discount),
-      nextTier: next,
-      toNextTier: next ? round2(Math.max(0, next.minAmount - amount)) : 0,
-    };
-  });
-}
+type PricedCampaign = Pick<PreorderCampaign, "tabs" | "pricing">;
 
 // Per-tab totals (summary panel, tier banners, review modal).
-export function computeTabTotals(
-  campaign: Pick<PreorderCampaign, "tabs">,
-  quantities: Record<string, number>,
-): PreorderTabTotal[] {
-  return tabTotalsWith(campaign, (row) => quantities[row.id] || 0);
+export function computeTabTotals(campaign: PricedCampaign, quantities: Record<string, number>): PreorderTabTotal[] {
+  return priceOrder(campaign, (row) => quantities[row.id] || 0).tabs;
+}
+
+// The full priced order — per-tab totals, per-line VAT arithmetic and the order's
+// net / VAT / gross — for a quantity map ({ rowId: qty }).
+export function computePricedOrder(campaign: PricedCampaign, quantities: Record<string, number>): PricedOrder {
+  return priceOrder(campaign, (row) => quantities[row.id] || 0);
 }
 
 // Per-tab totals over the lines an admin has CONFIRMED — the tier is re-evaluated on
 // what is actually being ordered, so a cancelled line can drop the tab out of a tier.
 export function computeConfirmedTabTotals(
-  campaign: Pick<PreorderCampaign, "tabs">,
+  campaign: PricedCampaign,
   quantities: Record<string, number>,
   confirmed: Record<string, { confirmedQty: number | null; lineStatus: LineStatus }>,
 ): PreorderTabTotal[] {
-  return tabTotalsWith(campaign, (row) => {
+  return priceOrder(campaign, (row) => {
     const info = confirmed[row.id];
     if (!info || info.lineStatus !== "confirmed") return 0;
     return info.confirmedQty ?? quantities[row.id] ?? 0;
-  });
+  }).tabs;
 }
 
 export function sumTabTotals(rows: PreorderTabTotal[]): PreorderSubmissionTotals {
-  let qty = 0;
-  let amount = 0;
-  let discount = 0;
-  for (const t of rows) {
-    qty += t.qty;
-    amount += t.amount;
-    discount += t.discount;
-  }
-  amount = round2(amount);
-  discount = round2(discount);
-  return { qty, amount, discount, net: round2(amount - discount) };
+  return sumTabTotalsImpl(rows);
 }
 
 // Σ qty, Σ qty×price and the tab volume discounts over a quantity map ({ rowId: qty }).
 // The single shared total computation used client-side (live summary) and server-side
-// (snapshot). `amount` stays the gross line sum; `net` is what the partner pays.
-export function computeTotals(
-  campaign: Pick<PreorderCampaign, "tabs">,
-  quantities: Record<string, number>,
-): PreorderSubmissionTotals {
-  return sumTabTotals(computeTabTotals(campaign, quantities));
+// (snapshot). `amount` is the line sum in the customer's basis; `net` is what they pay.
+export function computeTotals(campaign: PricedCampaign, quantities: Record<string, number>): PreorderSubmissionTotals {
+  return computePricedOrder(campaign, quantities).totals;
 }
 
 // Value/qty of the lines an admin has CONFIRMED. `confirmed` maps rowId → its confirmed
 // state ({ confirmedQty, lineStatus }); only lineStatus === "confirmed" lines count, using
 // confirmedQty (falling back to the ordered qty when the admin left it blank).
 export function computeConfirmedTotals(
-  campaign: Pick<PreorderCampaign, "tabs">,
+  campaign: PricedCampaign,
   quantities: Record<string, number>,
   confirmed: Record<string, { confirmedQty: number | null; lineStatus: LineStatus }>,
 ): PreorderSubmissionTotals {
@@ -737,15 +717,16 @@ export function totalsDiscount(t?: PreorderSubmissionTotals | null): number {
 
 // Does this campaign use volume discounts at all? Gates the tier UI everywhere.
 export function campaignHasTiers(campaign: Pick<PreorderCampaign, "tabs">): boolean {
-  return campaign.tabs.some((t) => activeTiers(t.tiers).length > 0);
+  return campaign.tabs.some((t) => (t.tiers ?? []).some((x) => Number.isFinite(x?.discountPct) && x.discountPct > 0 && Number.isFinite(x?.minAmount) && x.minAmount >= 0));
 }
 
 // ── Frozen submissions ────────────────────────────────────────────────────────
 // Rebuild a PreorderCampaign-shaped object from a commercial snapshot: only the
 // ordered rows, at the snapshot's prices, with the snapshot's tier ladders. Lets the
 // grid / summary components render a submitted preorder exactly as agreed, even after
-// the live sheet changed. Row prices are placed in `partnerPrice` (with
-// discountedPrice cleared) so rowUnitPrice() yields the snapshot price.
+// the live sheet changed. The used unit price goes into the slot of the snapshot's
+// basis (partner net → `partnerPrice`, RRP gross → `rrp`) and the pricing context is
+// restored, so rowUnitPrice(row, basis) / priceOrder() yield the snapshot figures.
 export function campaignFromSnapshot(
   base: Pick<PreorderCampaign, "id" | "title" | "season" | "status">,
   snap: CommercialSnapshot,
@@ -753,6 +734,7 @@ export function campaignFromSnapshot(
   const tabsById = new Map<string, PreorderTab>();
   const tabOrder: string[] = [];
   const tierByTab = new Map(snap.tabs.map((t) => [t.tabId, t]));
+  const basis: PriceBasis = snap.pricing?.basis ?? "partner";
   for (const line of snap.lines) {
     let tab = tabsById.get(line.tabId);
     if (!tab) {
@@ -779,8 +761,8 @@ export function campaignFromSnapshot(
       name: line.name,
       variantLabel: line.variantLabel ?? null,
       image: line.image ?? null,
-      rrp: line.rrp ?? null,
-      partnerPrice: line.unitPrice,
+      rrp: basis === "rrp" ? line.unitPrice : (line.rrp ?? null),
+      partnerPrice: basis === "partner" ? line.unitPrice : (line.partnerPrice ?? null),
       discountedPrice: null,
       taxCode: line.taxCode ?? null,
       priceSource: line.priceSource,
@@ -797,6 +779,14 @@ export function campaignFromSnapshot(
     partnerPricelist: snap.partnerPricelist,
     rrpPricelist: null,
     tabs: tabOrder.map((id) => tabsById.get(id)!),
+    pricing: snap.pricing
+      ? {
+          kind: snap.pricing.kind,
+          basis: snap.pricing.basis,
+          countryIso: snap.pricing.countryIso,
+          vat: { rate: snap.pricing.vatRate, source: snap.pricing.vatSource },
+        }
+      : null,
   };
 }
 

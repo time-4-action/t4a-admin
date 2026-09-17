@@ -150,3 +150,81 @@ export function MarketChip({
     </span>
   );
 }
+
+// ── Resolver warnings, in plain English ──────────────────────────────────────
+// lib/preorder-effective.ts reports machine codes ("vat-missing:DE",
+// "rrp-missing:<sku>", …). Group the per-product ones and spell every code out so
+// an admin reads a sentence, not a log line.
+export function describeWarnings(codes: string[]): string[] {
+  const out: string[] = [];
+  const grouped: Record<string, string[]> = {};
+  let extra: Record<string, number> = {};
+  for (const w of codes) {
+    const i = w.indexOf(":");
+    const kind = i === -1 ? w : w.slice(0, i);
+    const arg = i === -1 ? "" : w.slice(i + 1);
+    if (kind === "price-missing" || kind === "rrp-missing" || kind === "stale-assortment-id") {
+      const more = /^\+(\d+) more$/.exec(arg);
+      if (more) extra = { ...extra, [kind]: Number(more[1]) };
+      else (grouped[kind] ??= []).push(arg);
+      continue;
+    }
+    switch (kind) {
+      case "vat-missing":
+        out.push(
+          arg === "no-country"
+            ? "No VAT rate: the customer's country is unknown and no fallback rate is set — an individual cannot submit."
+            : `No VAT rate configured for ${arg} (and no fallback) — individuals there cannot submit. Set it under Preorder → VAT rates or override it on the campaign.`,
+        );
+        break;
+      case "kind-unknown":
+        out.push("Company or individual is unknown for this customer — priced as a company (partner price, 0% VAT).");
+        break;
+      case "market-missing":
+        out.push("The market pinned on this customer's rule no longer exists — matched by country instead.");
+        break;
+      case "price-book-missing":
+        out.push(`No price book for the "${arg}" price list — sheet prices are used. Refresh the price books.`);
+        break;
+      case "currency-mismatch":
+        out.push(`Price book currency differs from the effective currency (${arg}) — no conversion is applied.`);
+        break;
+      default:
+        out.push(w);
+    }
+  }
+  const list = (kind: string) => {
+    const items = grouped[kind] ?? [];
+    const n = items.length + (extra[kind] ?? 0);
+    const shown = items.slice(0, 5).join(", ");
+    return { n, tail: shown + (n > 5 ? `, … (+${n - 5} more)` : "") };
+  };
+  if (grouped["rrp-missing"]) {
+    const { n, tail } = list("rrp-missing");
+    out.push(`${n} product${n === 1 ? " has" : "s have"} no RRP and ${n === 1 ? "is" : "are"} hidden from this individual — fill the RRP on the sheet to offer ${n === 1 ? "it" : "them"}: ${tail}.`);
+  }
+  if (grouped["price-missing"]) {
+    const { n, tail } = list("price-missing");
+    out.push(`${n} product${n === 1 ? " is" : "s are"} not in the price book — sheet price used: ${tail}.`);
+  }
+  if (grouped["stale-assortment-id"]) {
+    const { n } = list("stale-assortment-id");
+    out.push(`${n} assortment rule${n === 1 ? "" : "s"} point${n === 1 ? "s" : ""} at rows that no longer exist.`);
+  }
+  return out;
+}
+
+export function WarningList({ codes, className }: { codes: string[]; className?: string }) {
+  const lines = describeWarnings(codes);
+  if (lines.length === 0) return null;
+  return (
+    <ul className={cn("space-y-1", className)}>
+      {lines.map((l, i) => (
+        <li key={i} className="flex items-start gap-1.5">
+          <span className="mt-[7px] size-1 rounded-full bg-current shrink-0" />
+          <span>{l}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}

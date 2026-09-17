@@ -11,10 +11,12 @@
 // Pipeline: find the customer rule → determine the market (manual assignment, else the
 // market that lists the partner's country) → scalar settings → assortment (hidden /
 // exposed ids, layer by layer) → prices (price book of the effective list) → tiers per
-// tab. The output is a PreorderCampaign (same shape) plus `effective` provenance, so the
-// existing pricing engine (computeTotals & co.) and the fill components work unchanged.
+// tab → pricing context (customer kind ⇒ price basis, country ⇒ VAT rate). The output
+// is a PreorderCampaign (same shape) plus `effective` provenance, so the existing pricing
+// engine (computeTotals & co.) and the fill components work unchanged.
 // Campaign defaults are the safe fallback everywhere (unknown country, deleted market,
-// missing price book entry).
+// missing price book entry) — EXCEPT the VAT rate, which is never guessed: a consumer
+// whose country has no rate gets `vat-missing` and cannot submit.
 
 import {
   activeTiers,
@@ -34,6 +36,7 @@ import {
   marketMatches,
   type MarketKind,
 } from "@/types/preorder";
+import { basisFor, resolveVatRate, EMPTY_VAT_CONFIG, type PricingContext, type VatConfig, type VatPolicy } from "@/lib/pricing";
 
 export type PartnerContext = {
   partnerMkId: string;
@@ -125,6 +128,26 @@ function pickScalar<K extends keyof CommercialConfig>(
   if (has(layers.rule?.config, key)) return { value: layers.rule!.config[key], source: "customer" };
   if (has(layers.market?.config, key)) return { value: layers.market!.config[key], source: "market" };
   return { value: campaignDefault, source: "campaign" };
+}
+
+// The VAT policy of the layer a customer falls in. Each of the three keys inherits
+// on its own; `source` is the most specific layer that set any of them (for the
+// provenance badge).
+export function vatPolicyFor(layers: ConfigLayers): { policy: VatPolicy; source: ConfigSource } {
+  const mode = pickScalar("vatMode", layers, null);
+  const rate = pickScalar("vatRate", layers, null);
+  const companies = pickScalar("vatCompanies", layers, null);
+  const rank: Record<ConfigSource, number> = { campaign: 0, market: 1, customer: 2 };
+  const source = [mode.source, rate.source, companies.source].sort((a, b) => rank[b] - rank[a])[0];
+  return {
+    policy: {
+      mode: mode.value ?? "country",
+      fixedRate: rate.value ?? null,
+      chargeCompanies: !!companies.value,
+      source: mode.source,
+    },
+    source,
+  };
 }
 
 // ── assortment ────────────────────────────────────────────────────────────────
@@ -234,9 +257,22 @@ export function findPriceBook(
   return campaign.priceBooks.find((b) => samePricelist(b.pricelist, pricelist)) ?? null;
 }
 
-export function resolveEffectiveCampaign(campaign: PreorderCampaignAdmin, ctx: PartnerContext): EffectiveCampaign {
+export function resolveEffectiveCampaign(
+  campaign: PreorderCampaignAdmin,
+  ctx: PartnerContext,
+  vat: VatConfig = EMPTY_VAT_CONFIG,
+): EffectiveCampaign {
   const layers = effectiveConfigLayers(campaign, ctx);
   const warnings = [...layers.warnings];
+
+  // Pricing context: the customer's kind decides the price basis (company → partner
+  // net, individual → RRP gross) and, with the country, the VAT rate.
+  const kind = ctx.kind ?? "business";
+  if (!ctx.kind) warnings.push("kind-unknown");
+  const vatPolicy = vatPolicyFor(layers);
+  const vatRes = resolveVatRate({ kind, countryIso: ctx.countryIso, campaignOverrides: campaign.vatOverrides, global: vat, policy: vatPolicy.policy });
+  if (vatRes.rate == null) warnings.push(`vat-missing:${ctx.countryIso ?? "no-country"}`);
+  const pricingCtx: PricingContext = { kind, basis: basisFor(kind), countryIso: ctx.countryIso, vat: vatRes };
 
   const pricelist = pickScalar("partnerPricelist", layers, campaign.partnerPricelist ?? null);
   const currency = pickScalar("currency", layers, campaign.currency);
@@ -260,9 +296,10 @@ export function resolveEffectiveCampaign(campaign: PreorderCampaignAdmin, ctx: P
   const assort = applyAssortment(campaign, layers);
   for (const id of assort.staleIds) warnings.push(`stale-assortment-id:${id}`);
 
-  const pricing = { pricelist: effectivePricelist, fromBook: 0, fallback: 0, manual: 0 };
+  const pricing = { pricelist: effectivePricelist, fromBook: 0, fallback: 0, manual: 0, ctx: pricingCtx, vatPolicy: vatPolicy.policy };
   const tierSources: Record<string, ConfigSource> = {};
   const missingCodes: string[] = [];
+  const missingRrp: string[] = [];
 
   const tabs: PreorderTab[] = [];
   for (const tab of campaign.tabs) {
@@ -274,10 +311,10 @@ export function resolveEffectiveCampaign(campaign: PreorderCampaignAdmin, ctx: P
         let out: PreorderRow;
         if (usesBook) {
           const entry = bookByCode.get(row.code);
-          if (entry && entry.gross != null) {
+          if (entry && entry.net != null) {
             out = {
               ...row,
-              partnerPrice: entry.gross,
+              partnerPrice: entry.net,
               discountedPrice: null,
               taxCode: entry.taxCode ?? row.taxCode ?? null,
               priceSource: "book",
@@ -293,6 +330,12 @@ export function resolveEffectiveCampaign(campaign: PreorderCampaignAdmin, ctx: P
           out = { ...row, priceSource: manual ? "manual" : "sheet" };
           if (manual) pricing.manual += 1;
         }
+        // An individual orders at the RRP: a row without one has no price for them —
+        // still listed (so a saved quantity is not silently lost) but not orderable.
+        if (pricingCtx.basis === "rrp" && out.rrp == null) {
+          missingRrp.push(out.code);
+          out = { ...out, unpriced: true };
+        }
         rows.push(out);
       }
       if (rows.length) groups.push({ ...group, rows });
@@ -306,6 +349,10 @@ export function resolveEffectiveCampaign(campaign: PreorderCampaignAdmin, ctx: P
     for (const code of missingCodes.slice(0, 20)) warnings.push(`price-missing:${code}`);
     if (missingCodes.length > 20) warnings.push(`price-missing:+${missingCodes.length - 20} more`);
   }
+  if (missingRrp.length) {
+    for (const code of missingRrp.slice(0, 20)) warnings.push(`rrp-missing:${code}`);
+    if (missingRrp.length > 20) warnings.push(`rrp-missing:+${missingRrp.length - 20} more`);
+  }
 
   const sources: EffectiveSources = {
     pricelist: pricelist.source,
@@ -313,6 +360,7 @@ export function resolveEffectiveCampaign(campaign: PreorderCampaignAdmin, ctx: P
     deadline: deadline.source,
     note: note.source,
     minOrderAmount: minOrder.source,
+    vat: vatPolicy.source,
     tiers: tierSources,
   };
 
@@ -342,6 +390,7 @@ export function resolveEffectiveCampaign(campaign: PreorderCampaignAdmin, ctx: P
     deadline: deadline.value ?? null,
     partnerPricelist: effectivePricelist,
     tabs,
+    pricing: pricingCtx,
     effective,
   };
 }
@@ -373,6 +422,7 @@ export function resolveProvenanceOnly(
       deadline: deadline.source,
       note: note.source,
       minOrderAmount: minOrder.source,
+      vat: vatPolicyFor(layers).source,
       tiers: {},
     },
     warnings: layers.warnings,
@@ -380,7 +430,7 @@ export function resolveProvenanceOnly(
       pricing: has(cfg, "partnerPricelist"),
       assortment: has(cfg, "hiddenIds") || has(cfg, "exposedIds"),
       tiers: has(cfg, "tiersByTab"),
-      commercial: has(cfg, "currency") || has(cfg, "deadline") || has(cfg, "note") || has(cfg, "minOrderAmount"),
+      commercial: has(cfg, "currency") || has(cfg, "deadline") || has(cfg, "note") || has(cfg, "minOrderAmount") || has(cfg, "vatMode") || has(cfg, "vatRate") || has(cfg, "vatCompanies"),
     },
   };
 }

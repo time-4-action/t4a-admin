@@ -67,7 +67,7 @@ export async function GET(_req: Request, { params }: RouteParams) {
   // Keep the customer directory warm (cheap, throttled inside).
   void upsertMkCustomer(partner, { throttleMs: 24 * 60 * 60 * 1000 }).catch(() => undefined);
 
-  const effective = loadEffectiveCampaignForPartner(campaignDoc, { mkId: partner.mkId, mk: partner });
+  const effective = await loadEffectiveCampaignForPartner(campaignDoc, { mkId: partner.mkId, mk: partner });
 
   const submission: PortalSubmission = subDoc
     ? toPortalSubmissionView(subDoc)
