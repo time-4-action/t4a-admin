@@ -57,29 +57,6 @@ export function CustomerKindBadge({ kind, taxId, compact }: { kind: CustomerKind
   );
 }
 
-export function KindSegment({ value, onChange, counts }: { value: CustomerKind | "all"; onChange: (k: CustomerKind | "all") => void; counts?: { business: number; person: number } }) {
-  const items: { key: CustomerKind | "all"; label: string; icon?: React.ElementType; n?: number }[] = [
-    { key: "all", label: "All", n: counts ? counts.business + counts.person : undefined },
-    { key: "business", label: "Companies", icon: Building2, n: counts?.business },
-    { key: "person", label: "Individuals", icon: User, n: counts?.person },
-  ];
-  return (
-    <div className="flex items-center gap-0.5 rounded-lg border border-border p-0.5 bg-background">
-      {items.map(({ key, label, icon: Icon, n }) => (
-        <button
-          key={key}
-          type="button"
-          onClick={() => onChange(key)}
-          className={cn("flex items-center gap-1 rounded-md px-2 h-7 text-[12px] whitespace-nowrap", value === key ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:text-foreground")}
-        >
-          {Icon && <Icon className="w-3.5 h-3.5" />} {label}
-          {n !== undefined && <span className="text-[10px] tabular-nums opacity-70">{num.format(n)}</span>}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 // ── markets panel ─────────────────────────────────────────────────────────────
 
 export function MarketsPanel({
@@ -504,7 +481,6 @@ export function CustomersTable({
           <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} placeholder="Name, email, VAT id, city…" className="h-8 w-64 pl-8 text-[12px]" />
         </div>
-        <KindSegment value={filters.kind} onChange={(kind) => setFilters({ ...filters, kind })} counts={kinds} />
         {(activeFilters > 0 || filters.kind !== "all" || filters.q) && (
           <button type="button" onClick={reset} className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground ml-1">
             <X className="w-3 h-3" /> Reset filters
@@ -521,7 +497,17 @@ export function CustomersTable({
         <TableHeader>
           <TableRow className="hover:bg-transparent border-b border-border">
             <TableHead className={cn(th, "pl-5")}>Customer</TableHead>
-            <TableHead className={th}>Type</TableHead>
+            <TableHead className={th}>
+              <HeaderFilter
+                label="Type"
+                value={filters.kind}
+                onChange={(v) => setFilters({ ...filters, kind: v as CustomerFilters["kind"] })}
+                options={[
+                  { value: "business", label: <span className="inline-flex items-center gap-1.5"><Building2 className="w-3 h-3" /> Company</span>, count: kinds.business },
+                  { value: "person", label: <span className="inline-flex items-center gap-1.5"><User className="w-3 h-3" /> Individual</span>, count: kinds.person },
+                ]}
+              />
+            </TableHead>
             <TableHead className={th}>
               <HeaderFilter
                 label="Country"
