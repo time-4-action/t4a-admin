@@ -243,7 +243,7 @@ export function DocumentList({
 
   return (
     <div className="space-y-4">
-      {isBill && <BillSummary kind={kind} items={state.items} />}
+      {isBill ? <BillSummary kind={kind} items={state.items} /> : <OrderSummaryStrip items={state.items} />}
       <div className="rounded-2xl border border-border bg-surface overflow-hidden">
         <DocumentFilterBar kind={kind} items={state.items} filters={filters} shown={filtered.length} />
 
@@ -711,6 +711,36 @@ function Pager({ total, paging, noun }: { total: number; paging: Paging; noun: s
 // shares one currency; otherwise counts are shown to avoid summing across
 // currencies. Credit notes are the mirror image — the amount credited, how
 // much of it has been refunded, and what is still open.
+// The orders' twin of BillSummary: how many, how many items, how much.
+function OrderSummaryStrip({ items }: { items: DocSummary[] }) {
+  if (items.length === 0) return null;
+  const currencies = Array.from(new Set(items.map((d) => d.currency).filter(Boolean)));
+  const singleCurrency = currencies.length === 1 ? (currencies[0] as string) : undefined;
+  const value = items.reduce((n, d) => n + amt(d.sumAll), 0);
+  const lines = items.reduce((n, d) => n + (d.itemCount ?? 0), 0);
+  const invoiced = items.filter((d) => (d.statusDesc ?? "").toLowerCase().includes("invoic") || (d.statusDesc ?? "").toLowerCase().includes("račun")).length;
+  const money = (n: number) => (singleCurrency ? fmtMoney(n.toFixed(2), singleCurrency) : `${n.toFixed(2)}`);
+  return (
+    <div className="grid grid-cols-3 rounded-2xl border border-border bg-surface overflow-hidden divide-x divide-border/60">
+      <div className="px-4 py-3">
+        <p className="text-[11px] text-muted-foreground">Orders</p>
+        <p className="text-[15px] font-bold text-foreground tabular-nums mt-0.5">{items.length}</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5">{invoiced} invoiced</p>
+      </div>
+      <div className="px-4 py-3">
+        <p className="text-[11px] text-muted-foreground">Items</p>
+        <p className="text-[15px] font-bold text-foreground tabular-nums mt-0.5">{lines}</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5">product lines</p>
+      </div>
+      <div className="px-4 py-3">
+        <p className="text-[11px] text-muted-foreground">Ordered value</p>
+        <p className="text-[15px] font-bold text-foreground tabular-nums mt-0.5">{money(value)}</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5">{singleCurrency ?? "mixed currencies"}</p>
+      </div>
+    </div>
+  );
+}
+
 function BillSummary({ kind, items }: { kind: DocKind; items: DocSummary[] }) {
   if (items.length === 0) return null;
   const credit = kind === "credit-note";

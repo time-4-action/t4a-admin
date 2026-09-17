@@ -1,5 +1,5 @@
 "use client";
-import { Building2, Mail, Phone, ReceiptText, MapPin } from "lucide-react";
+import { Building2, Mail, Phone, ReceiptText, MapPin, User } from "lucide-react";
 import CustomerSelect from "./customer-select";
 import { ViewAsCustomerButton } from "@/components/view-as-customer-button";
 import type { MkPartner } from "@/types/documents";
@@ -46,13 +46,25 @@ export function CustomerInfoStrip({ customer }: { customer: MkPartner }) {
         .join(", ")
     : customer.city || "";
 
+  const business = !!customer.businessEntity || !!customer.taxId;
+  const initials = (() => {
+    const parts = customer.name.trim().split(/\s+/).filter(Boolean);
+    return ((parts[0]?.[0] ?? "?") + (parts[1]?.[0] ?? "")).toUpperCase();
+  })();
   return (
     <div className="rounded-2xl border border-border bg-surface px-4 py-3 flex items-start gap-3">
-      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-500/10 shrink-0">
-        <Building2 className="h-4 w-4 text-teal-500" />
+      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-foreground text-background font-display text-[13px] font-semibold tracking-tight shrink-0">
+        {initials}
       </span>
       <div className="min-w-0">
-        <p className="text-[14px] font-semibold text-foreground truncate">{customer.name}</p>
+        <p className="text-[14px] font-semibold text-foreground truncate">
+          {customer.name}
+          <span className="ml-2 inline-flex items-center gap-1 text-[11px] font-normal text-muted-foreground align-middle">
+            {business ? <Building2 className="h-3 w-3" /> : <User className="h-3 w-3" />}
+            {business ? "Company" : "Individual"}
+            {customer.countCode && <span className="font-mono text-[10px] text-muted-foreground/70">· {customer.countCode}</span>}
+          </span>
+        </p>
         <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-muted-foreground">
           {customer.emails?.[0] && (
             <a
@@ -87,9 +99,7 @@ export function CustomerInfoStrip({ customer }: { customer: MkPartner }) {
 export function CustomerInfoStripSkeleton() {
   return (
     <div className="rounded-2xl border border-border bg-surface px-4 py-3 flex items-start gap-3">
-      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-500/10 shrink-0">
-        <Building2 className="h-4 w-4 text-teal-500" />
-      </span>
+      <Skeleton className="h-10 w-10 rounded-xl shrink-0" />
       <div className="min-w-0">
         {/* text-[14px] → 21px; details row text-[12px] → 18px */}
         <SkeletonLine lh="h-[21px]" h="h-3.5" w="w-48" />
