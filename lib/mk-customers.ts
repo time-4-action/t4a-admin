@@ -22,6 +22,28 @@ import type { MkPartner } from "@/types/documents";
 // the filter, the badges and the counters.
 export type CustomerKind = "business" | "person";
 
+// A directory record as the MkPartner shape the portal works with — the stand-in
+// when Metakocka cannot return the partner by id right now.
+export function partnerFromDirectory(c: IMkCustomer): MkPartner {
+  return {
+    mkId: c.partnerMkId,
+    countCode: c.countCode ?? undefined,
+    name: c.name,
+    taxId: c.taxId ?? undefined,
+    emails: c.emails ?? [],
+    phone: c.phone ?? undefined,
+    city: c.address?.city ?? undefined,
+    address: {
+      street: c.address?.street ?? undefined,
+      postNumber: c.address?.postNumber ?? undefined,
+      city: c.address?.city ?? undefined,
+      country: c.address?.countryRaw ?? undefined,
+    },
+    businessEntity: c.businessEntity ?? undefined,
+    foreignCountry: c.foreignCountry ?? undefined,
+  };
+}
+
 export function customerKind(c: { taxId?: string | null }): CustomerKind {
   return c.taxId && c.taxId.trim() ? "business" : "person";
 }

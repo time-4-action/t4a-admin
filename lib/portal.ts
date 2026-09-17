@@ -9,6 +9,7 @@ import { auth0 } from "@/lib/auth";
 import { getPartnerById, resolvePartnerByEmail } from "@/lib/metakocka";
 import { readImpersonation } from "@/lib/portal-impersonation";
 import { cached } from "@/lib/auth0-cache";
+import { getMkCustomer, partnerFromDirectory } from "@/lib/mk-customers";
 import type { DocKind, MkPartner } from "@/types/documents";
 
 // The document families a customer may see in the portal. Offers are internal
@@ -36,7 +37,14 @@ export type PortalViewer = {
 export async function getPortalViewer(): Promise<PortalViewer> {
   const imp = await readImpersonation();
   if (imp) {
-    const partner = await cached(`portal-as:${imp.partnerMkId}`, 60_000, () => getPartnerById(imp.partnerMkId));
+    // Live Metakocka partner, else the directory record (MK unreachable / partner not
+    // returned by id) — an admin viewing as a customer must not land on "no account".
+    const partner = await cached(`portal-as:${imp.partnerMkId}`, 60_000, async () => {
+      const live = await getPartnerById(imp.partnerMkId).catch(() => null);
+      if (live) return live;
+      const dir = await getMkCustomer(imp.partnerMkId);
+      return dir ? partnerFromDirectory(dir) : null;
+    });
     return {
       partner,
       impersonating: { partnerMkId: imp.partnerMkId, partnerName: partner?.name ?? imp.partnerName, adminEmail: imp.adminEmail, returnTo: imp.returnTo },
