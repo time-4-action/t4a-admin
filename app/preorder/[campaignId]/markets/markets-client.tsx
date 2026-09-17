@@ -287,22 +287,40 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
             <Button size="sm" className="h-8" onClick={() => openMarket(null)}><Plus className="w-3.5 h-3.5" /> New market</Button>
           </>
         }
-        navExtra={
-          <div className="flex items-center gap-0.5 rounded-lg border border-border p-0.5">
-            {(
-              [
-                ["customers", Users, "Customers"],
-                ["markets", Layers, "Markets"],
-                ["countries", Globe2, "Countries"],
-              ] as const
-            ).map(([v, Icon, label]) => (
-              <button key={v} onClick={() => switchView(v)} className={cn("flex items-center gap-1 rounded-md px-2 py-0.5 text-[12px]", view === v ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:text-foreground")}>
-                <Icon className="w-3.5 h-3.5" /> <span className="hidden sm:inline">{label}</span>
-              </button>
-            ))}
-          </div>
-        }
       />
+
+      {/* View strip: the three things this page is about, as real tabs with counts. */}
+      <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6">
+        <div className="flex items-end gap-1 -mb-px overflow-x-auto">
+          {(
+            [
+              ["customers", Users, "Customers", geo.totalCustomers, "everyone in the directory"],
+              ["markets", Layers, "Markets", markets.length, "groups that share prices and terms"],
+              ["countries", Globe2, "Countries", countriesWithCustomers.length, "assign each country to a market"],
+            ] as const
+          ).map(([v, Icon, label, count, hint]) => {
+            const active = view === v;
+            return (
+              <button
+                key={v}
+                type="button"
+                onClick={() => switchView(v)}
+                title={hint}
+                className={cn(
+                  "inline-flex items-center gap-2 border-b-2 px-3 h-12 text-[13px] whitespace-nowrap transition-colors",
+                  active ? "border-lime-500 text-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon className="w-4 h-4" />
+                {label}
+                <span className={cn("rounded-full px-1.5 text-[11px] tabular-nums", active ? "bg-lime-500/15 text-lime-700 dark:text-lime-400" : "bg-muted text-muted-foreground")}>
+                  {num.format(count)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4">
         {flash && <div className="rounded-lg border border-lime-300/60 bg-lime-50 dark:bg-lime-950/30 px-3 py-2 text-[12px] text-lime-800 dark:text-lime-200">{flash}</div>}
