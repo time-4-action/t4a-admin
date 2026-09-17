@@ -3,7 +3,7 @@ import { auth0 } from "@/lib/auth";
 import { connectDB, PreorderCampaign, toCampaignAdminView, toObjectId, loadEffectiveCampaignForPartner } from "@/lib/preorder";
 import { deleteCustomerRule, upsertCustomerRule } from "@/lib/preorder-markets";
 import { getCampaignCustomer } from "@/lib/preorder-customers";
-import { getMkCustomer, effectiveCountryIso } from "@/lib/mk-customers";
+import { getMkCustomer, effectiveCountryIso, customerKind } from "@/lib/mk-customers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,10 +27,11 @@ export async function GET(_req: Request, { params }: RouteParams) {
   const admin = toCampaignAdminView(doc);
   const rule = admin.customerRules.find((r) => r.partnerMkId === pid) ?? null;
   const directory = await getMkCustomer(pid);
-  const effective = loadEffectiveCampaignForPartner(doc, {
+  const effective = await loadEffectiveCampaignForPartner(doc, {
     mkId: pid,
     countryIso: directory ? effectiveCountryIso(directory) : null,
     countrySource: directory?.countryIsoManual ? "manual" : directory?.countrySource ?? null,
+    kind: directory ? customerKind(directory) : null,
   });
   return NextResponse.json({ customer: row, rule, effective: effective.effective, effectiveTabs: effective.tabs.map((t) => ({ id: t.id, name: t.name, rows: t.groups.reduce((n, g) => n + g.rows.length, 0), tiers: t.tiers ?? [] })) });
 }

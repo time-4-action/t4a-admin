@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   BarChart3,
   Settings,
+  Percent,
   Wrench,
   Mail,
   Folder,
@@ -25,6 +26,7 @@ import {
   SlidersHorizontal,
   FileText,
   ReceiptText,
+  FileMinus,
   ClipboardList,
   Building2,
   ShoppingCart,
@@ -36,7 +38,7 @@ export const sections: {
   icon: React.ElementType;
   color: string;
   bg: string;
-  cards: { href: string; icon: React.ElementType; title: string; desc: string }[];
+  cards: { href: string; icon: React.ElementType; title: string; desc: string; section?: SectionKey }[];
 }[] = [
   {
     label: "General",
@@ -45,18 +47,9 @@ export const sections: {
     color: "text-sky-500",
     bg: "bg-sky-500/10",
     cards: [
-      { href: "/users", icon: Users, title: "Users", desc: "Manage accounts and profiles" },
-    ],
-  },
-  {
-    label: "Access",
-    section: "access",
-    icon: KeyRound,
-    color: "text-violet-500",
-    bg: "bg-violet-500/10",
-    cards: [
-      { href: "/roles",        icon: ShieldCheck, title: "Access Types",  desc: "Configure permission roles" },
-      { href: "/roles/assign", icon: UserCog,     title: "Assign Access", desc: "Grant access to users" },
+      { href: "/users",        icon: Users,       title: "Users",         desc: "Manage accounts and profiles" },
+      { href: "/roles",        icon: ShieldCheck, title: "Access Types",  desc: "Configure permission roles", section: "access" },
+      { href: "/roles/assign", icon: UserCog,     title: "Assign Access", desc: "Grant access to users", section: "access" },
     ],
   },
   {
@@ -125,6 +118,7 @@ export const sections: {
     cards: [
       { href: "/documents/customer", icon: Building2,      title: "Customer", desc: "Customer details and account" },
       { href: "/documents/invoices", icon: ReceiptText,    title: "Invoices", desc: "Browse any customer's invoices" },
+      { href: "/documents/credit-notes", icon: FileMinus,  title: "Credit notes", desc: "Browse any customer's credit notes" },
       { href: "/documents/offers",   icon: FileText,       title: "Offers",   desc: "Browse any customer's offers" },
       { href: "/documents/orders",   icon: ClipboardList,  title: "Orders",   desc: "Browse any customer's orders" },
     ],
@@ -137,6 +131,17 @@ export const sections: {
     bg: "bg-lime-600/10",
     cards: [
       { href: "/preorder", icon: ClipboardList, title: "Campaigns", desc: "Build order sheets and review preorders" },
+      { href: "/preorder/vat-rates", icon: Percent, title: "VAT rates", desc: "VAT rate per country for consumer preorders" },
+    ],
+  },
+  {
+    label: "Customers",
+    section: "customers",
+    icon: Users,
+    color: "text-cyan-600 dark:text-cyan-500",
+    bg: "bg-cyan-600/10",
+    cards: [
+      { href: "/customers", icon: Users, title: "All customers", desc: "Every Metakocka customer, their preorders, and the portal as they see it" },
     ],
   },
   {

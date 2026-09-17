@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
-// GET /api/admin/preorder/campaigns/[id]/customers?q=&country=&market=&access=&stage=&override=&page=
+// GET /api/admin/preorder/campaigns/[id]/customers?q=&kind=&country=&market=&access=&stage=&override=&page=
 // The Customers view: directory rows joined with this campaign's access / submission /
 // rule state and the resolved market. Mongo only.
 export async function GET(req: NextRequest, { params }: RouteParams) {
@@ -20,6 +20,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   const sp = req.nextUrl.searchParams;
   const query: CustomersQuery = {
     q: sp.get("q") ?? undefined,
+    kind: sp.get("kind") === "business" || sp.get("kind") === "person" ? (sp.get("kind") as "business" | "person") : null,
     countryIso: sp.get("country") || null,
     marketId: sp.get("market") || null,
     access: (sp.get("access") as CustomersQuery["access"]) ?? "all",

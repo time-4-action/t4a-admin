@@ -2,13 +2,13 @@ import "server-only";
 
 // lib/preorder-pricebooks.ts
 //
-// Price books: the gross partner prices of a campaign's products in every NON-default
+// Price books: the NET partner prices of a campaign's products in every NON-default
 // Metakocka price list that a market or customer rule refers to. Refreshed on an admin
 // action (or alongside the builder's Reprice) — never on a portal load — with the same
 // bounded MK fan-out as today's Reprice (one json/product_list call per code,
 // concurrency 10). Row tax codes are captured by products/resolve + reprice instead.
 
-import { getMkProductPrices, pickMkListGrossPrice, productTaxCode, listSalesPricelists } from "@/lib/metakocka";
+import { getMkProductPrices, pickMkListNetPrice, productTaxCode, listSalesPricelists } from "@/lib/metakocka";
 import { referencedPricelists } from "@/lib/preorder-effective";
 import { PreorderCampaign, toCampaignAdminView } from "@/lib/preorder";
 import type { IPreorderCampaign } from "@/models/preorder-campaign";
@@ -45,9 +45,9 @@ export async function refreshPriceBooks(doc: IPreorderCampaign, pricelists?: str
     let missing = 0;
     const entries = codes.map((code) => {
       const list: MkProductPrice[] | undefined = mk[code];
-      const gross = pickMkListGrossPrice(list, pricelist, { untaxedIsNet: true });
-      if (gross == null) missing += 1;
-      return { code, gross, taxCode: list?.length ? productTaxCode(list) : null };
+      const net = pickMkListNetPrice(list, pricelist);
+      if (net == null) missing += 1;
+      return { code, net, taxCode: list?.length ? productTaxCode(list) : null };
     });
     const fromEntries = codes.map((c) => mk[c]?.find((e) => e.title.trim().toLowerCase() === pricelist.toLowerCase())?.currency).find(Boolean) ?? null;
     return { pricelist, currency: fromEntries ?? currencyOf(pricelist), fetchedAt: new Date(), entries, missing };

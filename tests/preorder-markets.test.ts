@@ -3,7 +3,7 @@ import { startMongo, stopMongo, clearMongo } from "./helpers/mongo";
 import { baseCampaign } from "./helpers/fixtures";
 import { PreorderCampaign, type IPreorderCampaign } from "@/models/preorder-campaign";
 import { MkCustomer } from "@/models/mk-customer";
-import { assignCountries, deleteCustomerRule, deleteMarket, replaceMarkets, upsertCustomerRule, upsertMarket } from "@/lib/preorder-markets";
+import { assignCountries, deleteCustomerRule, deleteMarket, reorderMarkets, replaceMarkets, upsertCustomerRule, upsertMarket } from "@/lib/preorder-markets";
 import { toCampaignAdminView } from "@/lib/preorder";
 import { updateMkCustomerManual, upsertMkCustomer, effectiveCountryIso } from "@/lib/mk-customers";
 import { resolveEffectiveCampaign } from "@/lib/preorder-effective";
@@ -18,18 +18,41 @@ afterAll(stopMongo);
 beforeEach(clearMongo);
 
 describe("markets configuration", () => {
-  it("rejects a country in two markets", async () => {
+  it("allows a country in several markets — priority (order) decides", async () => {
     const doc = await makeCampaign();
     const res = await replaceMarkets(doc, [
       { name: "DACH", countries: ["de", "AT"], config: {} },
       { name: "Alpine", countries: ["AT", "CH"], config: {} },
     ]);
-    expect(Array.isArray(res)).toBe(false);
-    if (!Array.isArray(res)) expect(res.conflicts).toEqual([{ iso: "AT", markets: ["DACH", "Alpine"] }]);
-    const one = await upsertMarket(doc, { name: "DACH", countries: ["DE", "AT"] });
-    expect("error" in one).toBe(false);
-    const two = await upsertMarket(doc, { name: "Alpine", countries: ["AT"] });
-    expect("error" in two && two.status).toBe(400);
+    expect(Array.isArray(res)).toBe(true);
+    const view = toCampaignAdminView((await PreorderCampaign.findById(doc._id).exec())!);
+    expect(view.markets.map((m) => m.name)).toEqual(["DACH", "Alpine"]);
+    const at = resolveEffectiveCampaign(view, { partnerMkId: "p", countryIso: "AT", countrySource: "mk" });
+    expect(at.effective.market?.name).toBe("DACH");
+    const ok = await reorderMarkets(doc, [view.markets[1].id, view.markets[0].id]);
+    expect(ok).toBe(true);
+    const view2 = toCampaignAdminView((await PreorderCampaign.findById(doc._id).exec())!);
+    expect(resolveEffectiveCampaign(view2, { partnerMkId: "p", countryIso: "AT", countrySource: "mk" }).effective.market?.name).toBe("Alpine");
+    const bad = await reorderMarkets(doc, [view.markets[0].id]);
+    expect(bad !== true && bad.status).toBe(400);
+  });
+
+  it("a market can target companies or individuals, with or without countries", async () => {
+    const doc = await makeCampaign();
+    await replaceMarkets(doc, [
+      { name: "SI companies", countries: ["SI"], kinds: ["business"], config: { currency: "EUR" } },
+      { name: "Individuals", countries: [], kinds: ["person"], config: { currency: "CHF" } },
+    ]);
+    const view = toCampaignAdminView((await PreorderCampaign.findById(doc._id).exec())!);
+    expect(view.markets[0].kinds).toEqual(["business"]);
+    const company = resolveEffectiveCampaign(view, { partnerMkId: "c", countryIso: "SI", countrySource: "mk", kind: "business" });
+    expect(company.effective.market?.name).toBe("SI companies");
+    const personSI = resolveEffectiveCampaign(view, { partnerMkId: "p", countryIso: "SI", countrySource: "mk", kind: "person" });
+    expect(personSI.effective.market?.name).toBe("Individuals");
+    const personDE = resolveEffectiveCampaign(view, { partnerMkId: "p2", countryIso: "DE", countrySource: "mk", kind: "person" });
+    expect(personDE.effective.market?.name).toBe("Individuals");
+    const unknownKind = resolveEffectiveCampaign(view, { partnerMkId: "u", countryIso: "SI", countrySource: "mk" });
+    expect(unknownKind.effective.market).toBeNull();
   });
 
   it("round-trips inherit vs override on the config layer", async () => {

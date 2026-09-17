@@ -3,10 +3,13 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { CampaignNav } from "@/app/preorder/[campaignId]/campaign-nav";
+import { CampaignHeader } from "@/app/preorder/[campaignId]/campaign-nav";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -23,6 +26,7 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
+  AlertTriangle,
   ChevronsDownUp,
   ChevronsUpDown,
   Loader2,
@@ -31,17 +35,19 @@ import {
   Package,
   PencilLine,
   Layers,
+  Info,
+  Settings2,
   Rocket,
   Eye,
   EyeOff,
   Upload,
   FileSpreadsheet,
-  LayoutDashboard,
-  Tag,
   RefreshCw,
   GripVertical,
   Percent,
   Copy,
+  Lock,
+  LockOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
@@ -73,6 +79,8 @@ import {
   type CampaignStatus,
 } from "@/types/preorder";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
+import { VatModal } from "./vat-modal";
+import type { VatOverride } from "@/lib/pricing";
 import type { MkPricelist } from "@/types/documents";
 
 type RowDraft = Omit<PreorderRow, "id" | "order">;
@@ -117,13 +125,44 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
-  const [productPickerTab, setProductPickerTab] = useState<string | null>(null);
+  // The product picker either adds a NEW group to a tab, or appends a product's
+  // variants to an EXISTING group ("Add from catalogue" in the group footer).
+  const [picker, setPicker] = useState<{ tabId: string; groupId?: string } | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [deleteTabId, setDeleteTabId] = useState<string | null>(null); // confirm before a tab goes
+  const [vatOpen, setVatOpen] = useState(false);
+  // Campaign-level VAT overrides + the countries its markets mention (the VAT modal
+  // lists those first). Saved by the modal itself, never by the autosave.
+  const [vatOverrides, setVatOverrides] = useState<VatOverride[]>([]);
+  const [marketCountries, setMarketCountries] = useState<string[]>([]);
   const [csvTab, setCsvTab] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [pricelists, setPricelists] = useState<MkPricelist[]>([]);
   const [repricing, setRepricing] = useState(false);
   const [repricedAt, setRepricedAt] = useState<number | null>(null);
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
+
+  // Rows a customer could not be priced for: no RRP (hidden from individuals) / no
+  // partner price (companies would fall back to the RRP). Per tab for the summary.
+  const unpriced = useMemo(() => {
+    const rrp: string[] = [];
+    const partner: string[] = [];
+    const rrpTabs = new Set<string>();
+    const partnerTabs = new Set<string>();
+    for (const t of campaign?.tabs ?? [])
+      for (const g of t.groups)
+        for (const r of g.rows) {
+          if (r.rrp == null) {
+            rrp.push(r.code);
+            rrpTabs.add(t.name || "Untitled");
+          }
+          if (r.partnerPrice == null && r.discountedPrice == null) {
+            partner.push(r.code);
+            partnerTabs.add(t.name || "Untitled");
+          }
+        }
+    return { rrp, partner, rrpTabs: Array.from(rrpTabs), partnerTabs: Array.from(partnerTabs) };
+  }, [campaign]);
 
   const sensors = useSensors(
     // A small drag threshold so plain clicks (select / double-click rename) still register.
@@ -146,6 +185,8 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
         if (!r.ok) throw new Error(data?.error ?? "Not found");
         setCampaign(data.campaign);
         setActiveTabId(data.campaign.tabs[0]?.id ?? null);
+        setVatOverrides(data.campaign.vatOverrides ?? []);
+        setMarketCountries(((data.campaign.markets ?? []) as { countries?: string[] }[]).flatMap((m) => m.countries ?? []));
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Error"))
       .finally(() => setLoading(false));
@@ -218,6 +259,14 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   }
 
   // ── Rows ──
+  // Append a product's variants to an existing group, skipping SKUs already in it.
+  function appendRows(tabId: string, groupId: string, drafts: RowDraft[]) {
+    mutateGroup(tabId, groupId, (g) => {
+      const have = new Set(g.rows.map((r) => r.code));
+      const fresh = drafts.filter((r) => !r.code || !have.has(r.code));
+      return { ...g, rows: [...g.rows, ...fresh.map((r, i) => ({ ...r, id: uid(), order: g.rows.length + i }))] };
+    });
+  }
   function addManualRow(tabId: string, groupId: string) {
     mutateGroup(tabId, groupId, (g) => ({
       ...g,
@@ -372,8 +421,13 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
     () => campaign?.tabs.find((t) => t.id === activeTabId) ?? null,
     [campaign, activeTabId],
   );
+  // The group the variant picker is open for (live, so "In group" ticks update as rows land).
+  const pickerGroup = useMemo(
+    () => (picker?.groupId ? campaign?.tabs.find((t) => t.id === picker.tabId)?.groups.find((g) => g.id === picker.groupId) ?? null : null),
+    [campaign, picker],
+  );
 
-  if (loading) return <BuilderSkeleton />;
+  if (loading) return <BuilderSkeleton campaignId={campaignId} />;
   if (error && !campaign) {
     return (
       <div className="p-8">
@@ -388,98 +442,130 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
 
   return (
     <div className="flex flex-col h-full">
-      <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-20">
-        <div className="flex items-center gap-3 px-4 md:px-6 h-14">
-          <Link href="/preorder" className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back to campaigns">
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
-          <Input
-            value={campaign.title}
-            onChange={(e) => mutate((c) => ({ ...c, title: e.target.value }))}
-            className="h-8 w-48 md:w-72 text-sm font-medium bg-background"
-            aria-label="Campaign title"
-          />
-          <span className={cn(
-            "hidden sm:inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium shrink-0",
-            campaign.status === "open" ? "bg-lime-100 text-lime-700 dark:bg-lime-900/50 dark:text-lime-300"
-              : campaign.status === "closed" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300"
-              : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
-          )}>
-            {campaign.status}
-          </span>
-          <div className="flex-1" />
-          <span
-            className="text-[11px] text-muted-foreground inline-flex items-center gap-1 min-w-[70px] justify-end"
-            title="Changes save automatically"
-          >
-            {saving ? (
-              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</>
-            ) : dirty ? (
-              <><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Unsaved</>
-            ) : savedAt ? (
-              <><Check className="w-3.5 h-3.5 text-lime-600" /> Saved</>
-            ) : null}
-          </span>
-          <Link href={`/preorder/${campaignId}/preview`} className="hidden md:inline-flex" title="Preview as partner">
-            <Button variant="ghost" size="sm" className="h-8"><Eye className="w-3.5 h-3.5" /> Preview</Button>
-          </Link>
-          <Link href={`/preorder/${campaignId}`} className="hidden lg:inline-flex" title="Campaign overview">
-            <Button variant="ghost" size="sm" className="h-8"><LayoutDashboard className="w-3.5 h-3.5" /> Overview</Button>
-          </Link>
-          {campaign.status === "open" ? (
-            <Button variant="outline" size="sm" onClick={() => save("draft")} disabled={saving} className="h-8"><EyeOff className="w-3.5 h-3.5" /> Unpublish</Button>
-          ) : (
-            <Button size="sm" onClick={() => save("open")} disabled={saving} className="h-8"><Rocket className="w-3.5 h-3.5" /> Publish</Button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 md:px-6 pb-2.5 text-[12px]">
-          <CampaignNav campaignId={campaignId} active="sheet" compact className="mr-2" />
-          <label className="flex items-center gap-1.5 text-muted-foreground">
-            Season
-            <Input value={campaign.season ?? ""} onChange={(e) => mutate((c) => ({ ...c, season: e.target.value }))} className="h-7 w-32 text-xs bg-background" placeholder="—" />
-          </label>
-          <label className="flex items-center gap-1.5 text-muted-foreground">
-            Deadline
-            <DatePicker
-              value={campaign.deadline ?? null}
-              withTime
-              placeholder="Set deadline"
-              onChange={(iso) => mutate((c) => ({ ...c, deadline: iso }))}
+      <CampaignHeader
+        campaignId={campaignId}
+        active="sheet"
+        title={
+          <div className="flex items-center gap-2">
+            <Input
+              value={campaign.title}
+              onChange={(e) => mutate((c) => ({ ...c, title: e.target.value }))}
+              className="h-8 w-48 md:w-72 text-sm font-medium bg-background"
+              aria-label="Campaign title"
             />
-          </label>
-          <div className="flex items-center gap-1.5 text-muted-foreground">
-            <Tag className="w-3.5 h-3.5 opacity-60" />
+            <span className={cn(
+              "hidden sm:inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium shrink-0",
+              campaign.status === "open" ? "bg-lime-100 text-lime-700 dark:bg-lime-900/50 dark:text-lime-300"
+                : campaign.status === "closed" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300"
+                : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+            )}>
+              {campaign.status}
+            </span>
+          </div>
+        }
+        beforeActions={
+            <span
+              className={cn("text-[11px] text-muted-foreground inline-flex items-center gap-1 justify-end", !saving && !dirty && !savedAt && "hidden")}
+              title="Changes save automatically"
+            >
+              {saving ? (
+                <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</>
+              ) : dirty ? (
+                <><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Unsaved</>
+              ) : savedAt ? (
+                <><Check className="w-3.5 h-3.5 text-lime-600" /> Saved</>
+              ) : null}
+            </span>
+        }
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)} className="h-8" title="Season, deadline">
+              <Settings2 className="w-3.5 h-3.5" /> Settings
+            </Button>
+            {campaign.status === "open" ? (
+              <Button variant="outline" size="sm" onClick={() => save("draft")} disabled={saving} className="h-8"><EyeOff className="w-3.5 h-3.5" /> Unpublish</Button>
+            ) : (
+              <Button size="sm" onClick={() => save("open")} disabled={saving} className="h-8"><Rocket className="w-3.5 h-3.5" /> Publish</Button>
+            )}
+          </>
+        }
+      />
+      {/* Campaign-wide: where the RRP / Partner numbers on EVERY tab come from, and how
+          VAT applies. Sits above the tab rail on purpose — not a property of the selected tab. */}
+      <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6 py-2.5">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="min-w-0">
+            <div className="text-[13px] font-semibold text-foreground">Pricing &amp; VAT</div>
+            <div className="text-[11px] text-muted-foreground">
+              RRP (incl. VAT) and partner price (excl. VAT) on every tab come from these two Metakocka lists. Companies pay the partner price at 0% VAT; individuals pay the RRP with their country&rsquo;s VAT inside it.
+            </div>
+          </div>
+          <div className="flex-1" />
+          <InlineField label="RRP" hint="Recommended retail price list (incl. VAT) — what individuals pay; shown to companies for reference">
             <PricelistSelect
               label="RRP list"
               value={campaign.rrpPricelist ?? null}
               pricelists={pricelists}
               onChange={(v) => mutate((c) => ({ ...c, rrpPricelist: v }))}
+              className={inlineSelect}
             />
+          </InlineField>
+          <InlineField label="Partner" hint="The price list the sheet's partner prices come from (excl. VAT) — what companies pay, zero-rated">
             <PricelistSelect
               label="Partner list"
               value={campaign.partnerPricelist ?? null}
               pricelists={pricelists}
               onChange={(v) => mutate((c) => ({ ...c, partnerPricelist: v }))}
+              className={inlineSelect}
             />
-            <Button
-              variant="ghost"
-              size="xs"
-              className="h-7 text-muted-foreground"
-              onClick={reprice}
-              disabled={repricing}
-              title="Re-apply the selected price lists to every catalogue row on the sheet"
-            >
-              {repricing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-              Re-price
-            </Button>
-            {repricedAt && !repricing && (
-              <span className="text-[11px] text-lime-600 dark:text-lime-400 inline-flex items-center gap-1">
-                <Check className="w-3 h-3" /> Repriced
+          </InlineField>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 bg-background"
+            onClick={reprice}
+            disabled={repricing}
+            title="Re-read both lists from Metakocka and refresh every catalogue row on every tab"
+          >
+            {repricing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            {repricedAt && !repricing ? "Repriced ✓" : "Re-price all tabs"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 bg-background"
+            onClick={() => setVatOpen(true)}
+            title="Per-country VAT rates: inherit the global table or override a country for this campaign"
+          >
+            <Percent className="w-3.5 h-3.5" />
+            VAT rates
+            {vatOverrides.length > 0 && (
+              <span className="ml-1 inline-flex items-center rounded-full bg-lime-100 text-lime-700 dark:bg-lime-900/40 dark:text-lime-300 px-1.5 text-[10px] font-semibold tabular-nums">
+                {vatOverrides.length} override{vatOverrides.length === 1 ? "" : "s"}
               </span>
             )}
-          </div>
+          </Button>
         </div>
-      </header>
+      </div>
+      <VatModal open={vatOpen} onOpenChange={setVatOpen} campaignId={campaignId} overrides={vatOverrides} marketCountries={marketCountries} onSaved={setVatOverrides} />
+      {(unpriced.rrp.length > 0 || unpriced.partner.length > 0) && (
+        <div className="shrink-0 border-b border-amber-300/60 dark:border-amber-800/60 bg-amber-50/80 dark:bg-amber-950/30 px-4 md:px-6 py-2 text-[12px] text-amber-800 dark:text-amber-300 flex flex-wrap items-center gap-x-4 gap-y-1">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          {unpriced.rrp.length > 0 && (
+            <span>
+              <span className="font-semibold">{unpriced.rrp.length} product{unpriced.rrp.length === 1 ? "" : "s"} without an RRP</span> — hidden from individuals until priced
+              {unpriced.rrpTabs.length > 0 && <span className="text-amber-700/80 dark:text-amber-300/70"> ({unpriced.rrpTabs.join(", ")})</span>}
+            </span>
+          )}
+          {unpriced.partner.length > 0 && (
+            <span>
+              <span className="font-semibold">{unpriced.partner.length} without a partner price</span> — companies would pay the RRP
+              {unpriced.partnerTabs.length > 0 && <span className="text-amber-700/80 dark:text-amber-300/70"> ({unpriced.partnerTabs.join(", ")})</span>}
+            </span>
+          )}
+          <span className="text-amber-700/80 dark:text-amber-300/70">Highlighted cells below · Re-price reads the lists again.</span>
+        </div>
+      )}
 
       <div className="flex-1 min-h-0 flex">
         {/* Tab rail */}
@@ -522,10 +608,29 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <Input value={activeTab.name} onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, name: e.target.value }))} className="h-9 max-w-xs text-sm font-semibold bg-background" aria-label="Tab name" />
-                <Input value={activeTab.discountNote ?? ""} onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, discountNote: e.target.value }))} className="h-9 max-w-xs text-xs bg-background" placeholder="Discount note (optional)" />
-                <div className="flex-1" />
+              {/* The tab reads like a document: an editable title, a subtitle partners
+                  see, then the discount ladder as one line. No card around it. */}
+              <div className="flex flex-wrap items-start gap-x-4 gap-y-2 px-1">
+                <div className="min-w-0 flex-1 flex flex-col">
+                  <div className="-ml-2 max-w-[560px]">
+                    <input
+                      value={activeTab.name}
+                      onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, name: e.target.value }))}
+                      className="block h-10 w-full rounded-md border border-transparent bg-transparent px-2 font-display text-[22px] font-semibold tracking-tight text-foreground hover:border-border focus:border-ring focus:bg-background focus:outline-none placeholder:text-muted-foreground/50"
+                      placeholder="Tab name"
+                      aria-label="Tab name"
+                    />
+                  </div>
+                  <div className="-ml-2 mt-0.5 max-w-[640px]">
+                    <input
+                      value={activeTab.discountNote ?? ""}
+                      onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, discountNote: e.target.value }))}
+                      className="block h-8 w-full rounded-md border border-transparent bg-transparent px-2 text-[13px] text-muted-foreground hover:border-border focus:border-ring focus:bg-background focus:text-foreground focus:outline-none placeholder:text-muted-foreground/50"
+                      placeholder="Note partners see under this tab — e.g. free shipping over €5,000"
+                      aria-label="Note to partners"
+                    />
+                  </div>
+                </div>
                 {activeTab.groups.length > 0 && (() => {
                   const allCollapsed = activeTab.groups.every((g) => collapsed.has(g.id));
                   const ids = activeTab.groups.map((g) => g.id);
@@ -545,7 +650,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                     </Button>
                   );
                 })()}
-                <Button variant="ghost" size="sm" onClick={() => deleteTab(activeTab.id)} className="h-8 text-destructive hover:text-destructive">
+                <Button variant="ghost" size="sm" onClick={() => setDeleteTabId(activeTab.id)} className="h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
                   <Trash2 className="w-3.5 h-3.5" /> Delete tab
                 </Button>
               </div>
@@ -559,29 +664,34 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                 onApplyToAllTabs={() =>
                   mutate((c) => ({
                     ...c,
+                    // Locked tabs keep their own ladder.
                     tabs: c.tabs.map((t) =>
-                      t.id === activeTab.id
+                      t.id === activeTab.id || t.tiersLocked
                         ? t
                         : { ...t, tiers: (activeTab.tiers ?? []).map((x) => ({ ...x, id: uid() })) },
                     ),
                   }))
                 }
+                onToggleLock={() => mutateTab(activeTab.id, (t) => ({ ...t, tiersLocked: !t.tiersLocked }))}
+                otherTabs={campaign.tabs.filter((t) => t.id !== activeTab.id).map((t) => ({ name: t.name, locked: !!t.tiersLocked, tiers: (t.tiers ?? []).length }))}
               />
 
-              {/* Primary add actions — a group is a parent product */}
-              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-border bg-muted/20 px-3 py-2.5">
-                <Button size="sm" onClick={() => setProductPickerTab(activeTab.id)}>
-                  <Search className="w-3.5 h-3.5" /> Add product
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setCsvTab(activeTab.id)}>
-                  <Upload className="w-3.5 h-3.5" /> Import SKUs
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => addBlankGroup(activeTab.id)} className="text-muted-foreground">
+              {/* Products on this tab: the sheet itself starts here. */}
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
+                <span className="text-[13px] font-semibold text-foreground mr-1">Products</span>
+                <span className="text-[12px] text-muted-foreground tabular-nums mr-2">
+                  {activeTab.groups.length} product{activeTab.groups.length === 1 ? "" : "s"} · {activeTab.groups.reduce((n, g) => n + g.rows.length, 0)} variants
+                </span>
+                <div className="flex-1" />
+                <Button variant="ghost" size="sm" onClick={() => addBlankGroup(activeTab.id)} className="h-8 text-muted-foreground">
                   <Plus className="w-3.5 h-3.5" /> Blank group
                 </Button>
-                <span className="text-[11px] text-muted-foreground ml-auto hidden sm:block">
-                  Each product becomes a group of its variants — delete any you don&rsquo;t want.
-                </span>
+                <Button variant="outline" size="sm" onClick={() => setCsvTab(activeTab.id)} className="h-8">
+                  <Upload className="w-3.5 h-3.5" /> Import SKUs
+                </Button>
+                <Button size="sm" onClick={() => setPicker({ tabId: activeTab.id })} className="h-8">
+                  <Search className="w-3.5 h-3.5" /> Add product
+                </Button>
               </div>
 
               <DndContext
@@ -604,6 +714,8 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                         onRenameGroup={(name) => mutateGroup(activeTab.id, g.id, (gr) => ({ ...gr, name }))}
                         onDeleteGroup={() => deleteGroup(activeTab.id, g.id)}
                         onAddRow={() => addManualRow(activeTab.id, g.id)}
+                        onAddFromCatalogue={() => setPicker({ tabId: activeTab.id, groupId: g.id })}
+                        pricing={{ rrp: campaign.rrpPricelist ?? null, partner: campaign.partnerPricelist ?? null, currency: campaign.currency }}
                         onUpdateRow={(rowId, patch) => updateRow(activeTab.id, g.id, rowId, patch)}
                         onDeleteRow={(rowId) => deleteRow(activeTab.id, g.id, rowId)}
                         onReorderRows={(a, o) => reorderRows(activeTab.id, g.id, a, o)}
@@ -614,9 +726,14 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
               </DndContext>
 
               {activeTab.groups.length === 0 && (
-                <div className="text-center text-[13px] text-muted-foreground py-14 rounded-xl border border-dashed border-border">
-                  <FileSpreadsheet className="w-6 h-6 mx-auto mb-2 text-muted-foreground/40" />
-                  No products yet. Use <strong className="text-foreground">Add product</strong> or <strong className="text-foreground">Import SKUs</strong> above.
+                <div className="rounded-xl border border-dashed border-border py-14 text-center">
+                  <FileSpreadsheet className="w-6 h-6 mx-auto mb-3 text-muted-foreground/40" />
+                  <p className="text-[13px] font-medium text-foreground">This tab has no products yet</p>
+                  <p className="mt-1 text-[12px] text-muted-foreground">Add a product from the catalogue and it arrives with all its variants — remove the ones you don&rsquo;t sell.</p>
+                  <div className="mt-4 flex justify-center gap-2">
+                    <Button size="sm" onClick={() => setPicker({ tabId: activeTab.id })}><Search className="w-3.5 h-3.5" /> Add product</Button>
+                    <Button variant="outline" size="sm" onClick={() => setCsvTab(activeTab.id)}><Upload className="w-3.5 h-3.5" /> Import SKUs</Button>
+                  </div>
                 </div>
               )}
             </div>
@@ -628,12 +745,89 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
         <div className="fixed bottom-4 right-4 z-30 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive shadow">{error}</div>
       )}
 
-      {productPickerTab && (
+      {deleteTabId && (() => {
+        const t = campaign.tabs.find((x) => x.id === deleteTabId);
+        const rows = t ? t.groups.reduce((n, g) => n + g.rows.length, 0) : 0;
+        return (
+          <Dialog open onOpenChange={(o) => !o && setDeleteTabId(null)}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-destructive" /> Delete tab “{t?.name || "Untitled"}”?</DialogTitle>
+                <DialogDescription>
+                  {rows > 0
+                    ? `Its ${t?.groups.length ?? 0} group${(t?.groups.length ?? 0) === 1 ? "" : "s"} and ${rows} product${rows === 1 ? "" : "s"} go with it, and quantities customers already saved for them are dropped.`
+                    : "The tab is empty."}{" "}
+                  This cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" size="sm" onClick={() => setDeleteTabId(null)}>Keep tab</Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => {
+                    deleteTab(deleteTabId);
+                    setDeleteTabId(null);
+                  }}
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Delete tab
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
+
+      {settingsOpen && (
+        <Dialog open onOpenChange={(o) => !o && setSettingsOpen(false)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><Settings2 className="w-4 h-4 text-lime-600" /> Campaign settings</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[12px] font-medium text-foreground">Season</label>
+                <Input
+                  value={campaign.season ?? ""}
+                  onChange={(e) => mutate((c) => ({ ...c, season: e.target.value }))}
+                  className="mt-1.5 h-9 text-[13px]"
+                  placeholder="e.g. 2026"
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">A label for your team — shown in the campaign list.</p>
+              </div>
+              <div>
+                <label className="text-[12px] font-medium text-foreground">Deadline</label>
+                <div className="mt-1.5">
+                  <DatePicker
+                    value={campaign.deadline ?? null}
+                    withTime
+                    placeholder="No deadline"
+                    onChange={(iso) => mutate((c) => ({ ...c, deadline: iso }))}
+                    triggerClassName="h-9 text-[13px]"
+                  />
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground">Shown to customers on their preorder page. Display only — it does not lock the sheet.</p>
+              </div>
+            </div>
+            <div className="flex justify-end pt-1"><Button size="sm" onClick={() => setSettingsOpen(false)}>Done</Button></div>
+          </DialogContent>
+        </Dialog>
+      )}
+      {picker && !picker.groupId && (
         <ProductPickerDialog
           rrpPricelist={campaign.rrpPricelist ?? null}
           partnerPricelist={campaign.partnerPricelist ?? null}
-          onClose={() => setProductPickerTab(null)}
-          onAddGroup={(g) => addGroups(productPickerTab, [g])}
+          onClose={() => setPicker(null)}
+          onAddGroup={(g) => addGroups(picker.tabId, [g])}
+        />
+      )}
+      {picker?.groupId && pickerGroup && (
+        <VariantPickerDialog
+          group={pickerGroup}
+          rrpPricelist={campaign.rrpPricelist ?? null}
+          partnerPricelist={campaign.partnerPricelist ?? null}
+          onClose={() => setPicker(null)}
+          onAddRows={(rows) => appendRows(picker.tabId, picker.groupId!, rows)}
         />
       )}
       {csvTab && (
@@ -655,7 +849,45 @@ function numOrNull(v: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 function priceStr(n?: number | null): string {
-  return n === null || n === undefined ? "" : String(n);
+  return n === null || n === undefined ? "" : n.toFixed(2);
+}
+
+// A price cell: shows two decimals, edits as a plain number, commits on blur /
+// Enter (so typing never fights a formatter), and re-syncs when the row's value
+// changes underneath it (re-price).
+function PriceInput({ value, onCommit, placeholder = "—", warn }: { value?: number | null; onCommit: (n: number | null) => void; placeholder?: string; warn?: string }) {
+  const [text, setText] = useState(() => priceStr(value));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setText(priceStr(value));
+  }, [value, focused]);
+  const commit = () => {
+    const n = numOrNull(text);
+    onCommit(n);
+    setText(priceStr(n));
+  };
+  return (
+    <input
+      className={cn(
+        "h-8 w-full rounded-md border border-transparent bg-transparent px-2 text-[12.5px] text-right tabular-nums text-foreground",
+        "hover:border-border focus:border-ring focus:bg-background focus:outline-none placeholder:text-muted-foreground/50",
+        warn && value == null && "border-amber-400/70 bg-amber-50/60 dark:bg-amber-950/20 placeholder:text-amber-600/70",
+      )}
+      title={warn && value == null ? warn : undefined}
+      value={text}
+      placeholder={placeholder}
+      inputMode="decimal"
+      onFocus={() => setFocused(true)}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => {
+        setFocused(false);
+        commit();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+      }}
+    />
+  );
 }
 
 const RowEditor = memo(function RowEditor({
@@ -671,19 +903,32 @@ const RowEditor = memo(function RowEditor({
     transition,
     ...(isDragging ? { position: "relative" as const, zIndex: 10, opacity: 0.9 } : {}),
   };
-  const cell = "px-2 py-1 border-b border-border/40";
-  const inp = "h-7 w-full rounded border border-transparent bg-transparent px-1.5 text-[12px] hover:border-border focus:border-ring focus:bg-background focus:outline-none";
+  const cell = "px-1.5 py-1 border-b border-border/40 align-middle";
+  const inp = "h-8 w-full rounded-md border border-transparent bg-transparent px-2 text-[12.5px] text-foreground hover:border-border focus:border-ring focus:bg-background focus:outline-none placeholder:text-muted-foreground/50";
   return (
-    <tr ref={setNodeRef} style={style} className={cn("hover:bg-muted/20", isDragging && "bg-surface shadow-lg")} {...attributes}>
-      <td className={cn(cell, "pl-3")}>
-        <div className="flex items-center gap-1.5">
+    <tr ref={setNodeRef} style={style} className={cn("group/row hover:bg-muted/25", isDragging && "bg-surface shadow-lg", row.restricted && "bg-amber-50/40 dark:bg-amber-950/10")} {...attributes}>
+      {/* drag handle */}
+      <td className={cn(cell, "pl-2 pr-0 w-7")}>
+        <button
+          type="button"
+          {...listeners}
+          className="flex h-8 w-5 items-center justify-center rounded cursor-grab active:cursor-grabbing touch-none text-muted-foreground/40 hover:text-foreground"
+          aria-label="Drag to reorder variant"
+          title="Drag to reorder"
+        >
+          <GripVertical className="w-3.5 h-3.5" />
+        </button>
+      </td>
+      {/* variant */}
+      <td className={cell}>
+        <div className="flex items-center gap-2 min-w-0">
           {row.image ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={row.image} alt="" className="w-6 h-6 rounded object-cover ring-1 ring-border shrink-0" />
+            <img src={row.image} alt="" className="w-8 h-8 rounded-md object-cover ring-1 ring-border shrink-0" />
           ) : (
-            <span className="w-6 h-6 rounded bg-muted flex items-center justify-center shrink-0"><Package className="w-3 h-3 text-muted-foreground" /></span>
+            <span className="w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0"><Package className="w-3.5 h-3.5 text-muted-foreground" /></span>
           )}
-          <input className={inp} value={row.name} placeholder="Variant name" onChange={(e) => onChange({ name: e.target.value })} />
+          <input className={cn(inp, "font-medium")} value={row.name} placeholder="Variant name" onChange={(e) => onChange({ name: e.target.value })} />
           {row.tag && (
             <span className="text-[9px] font-bold uppercase text-lime-700 bg-lime-100 dark:bg-lime-900/50 dark:text-lime-300 rounded px-1 shrink-0">
               {row.tag === "NEW" ? "NEW" : "PRE"}
@@ -691,32 +936,37 @@ const RowEditor = memo(function RowEditor({
           )}
         </div>
       </td>
-      <td className={cell}><input className={cn(inp, "font-mono text-[11px]")} value={row.code} placeholder="SKU" onChange={(e) => onChange({ code: e.target.value })} /></td>
+      <td className={cell}><input className={cn(inp, "font-mono text-[11.5px] text-muted-foreground focus:text-foreground")} value={row.code} placeholder="SKU" onChange={(e) => onChange({ code: e.target.value })} /></td>
       <td className={cell}><input className={inp} value={row.variantLabel ?? row.size ?? ""} placeholder="size / label" onChange={(e) => onChange({ variantLabel: e.target.value || null })} /></td>
-      <td className={cell}><input className={cn(inp, "text-right tabular-nums")} value={priceStr(row.rrp)} inputMode="decimal" onChange={(e) => onChange({ rrp: numOrNull(e.target.value) })} /></td>
-      <td className={cell}><input className={cn(inp, "text-right tabular-nums")} value={priceStr(row.partnerPrice)} inputMode="decimal" onChange={(e) => onChange({ partnerPrice: numOrNull(e.target.value) })} /></td>
-      <td className={cell}><input className={cn(inp, "text-right tabular-nums")} value={priceStr(row.discountedPrice)} inputMode="decimal" onChange={(e) => onChange({ discountedPrice: numOrNull(e.target.value) })} /></td>
-      <td className={cn(cell, "whitespace-nowrap")}>
+      <td className={cn(cell, "border-l border-l-border/40")}><PriceInput value={row.rrp} onCommit={(n) => onChange({ rrp: n })} warn="No RRP — hidden from individuals until priced" /></td>
+      <td className={cell}><PriceInput value={row.partnerPrice} onCommit={(n) => onChange({ partnerPrice: n })} warn="No partner price — companies would pay the RRP" /></td>
+      <td className={cell}><PriceInput value={row.discountedPrice} onCommit={(n) => onChange({ discountedPrice: n })} /></td>
+      {/* actions */}
+      <td className={cn(cell, "pr-2 whitespace-nowrap")}>
         <div className="flex items-center justify-end gap-0.5">
           <button
             type="button"
-            {...listeners}
-            className="p-0.5 cursor-grab active:cursor-grabbing touch-none text-muted-foreground hover:text-foreground"
-            aria-label="Drag to reorder variant"
-            title="Drag to reorder"
-          >
-            <GripVertical className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
             onClick={() => onChange({ restricted: !row.restricted })}
-            className={cn("p-0.5", row.restricted ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground/50 hover:text-foreground")}
+            className={cn(
+              "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+              row.restricted
+                ? "text-amber-600 dark:text-amber-400 bg-amber-100/70 dark:bg-amber-900/30"
+                : "text-muted-foreground/40 hover:text-foreground hover:bg-muted opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100",
+            )}
             aria-label={row.restricted ? "Restricted — shown only where a market or customer exposes it" : "In the default assortment"}
             title={row.restricted ? "Restricted: not in the default assortment (only markets / customers that expose it see it)" : "In the default assortment — click to restrict"}
           >
-            {row.restricted ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+            {row.restricted ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           </button>
-          <button onClick={onDelete} className="p-0.5 text-muted-foreground hover:text-destructive" aria-label="Delete variant"><Trash2 className="w-3 h-3" /></button>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 transition-colors"
+            aria-label="Delete variant"
+            title="Delete variant"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
         </div>
       </td>
     </tr>
@@ -796,7 +1046,7 @@ function SortableTab({
 
 // ── Sortable group (a parent product): header + variant table, drag via grip ──
 function GroupSection({
-  group, collapsed, sensors, onToggleCollapse, onRenameGroup, onDeleteGroup, onAddRow, onUpdateRow, onDeleteRow, onReorderRows,
+  group, collapsed, sensors, onToggleCollapse, onRenameGroup, onDeleteGroup, onAddRow, onAddFromCatalogue, onUpdateRow, onDeleteRow, onReorderRows, pricing,
 }: {
   group: PreorderGroup;
   collapsed: boolean;
@@ -805,9 +1055,11 @@ function GroupSection({
   onRenameGroup: (name: string) => void;
   onDeleteGroup: () => void;
   onAddRow: () => void;
+  onAddFromCatalogue: () => void;
   onUpdateRow: (rowId: string, patch: Partial<PreorderRow>) => void;
   onDeleteRow: (rowId: string) => void;
   onReorderRows: (activeId: string, overId: string) => void;
+  pricing: PricingLabels;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: group.id });
   const style = {
@@ -821,12 +1073,12 @@ function GroupSection({
       style={style}
       className={cn("rounded-xl border border-border bg-surface overflow-hidden", isDragging && "shadow-xl opacity-95")}
     >
-      <div className={cn("flex items-center gap-2 px-3 py-2 bg-muted/40", !collapsed && "border-b border-border")}>
+      <div className={cn("group/g flex items-center gap-1.5 pl-2 pr-3 py-2", !collapsed && "border-b border-border")}>
         <button
           type="button"
           {...attributes}
           {...listeners}
-          className="p-0.5 rounded cursor-grab active:cursor-grabbing touch-none text-muted-foreground/70 hover:text-foreground shrink-0"
+          className="flex h-7 w-5 items-center justify-center rounded cursor-grab active:cursor-grabbing touch-none text-muted-foreground/40 hover:text-foreground shrink-0"
           aria-label="Drag to reorder group"
           title="Drag to reorder"
         >
@@ -835,21 +1087,43 @@ function GroupSection({
         <button
           type="button"
           onClick={onToggleCollapse}
-          className="p-0.5 rounded hover:bg-muted text-muted-foreground shrink-0"
+          className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-muted text-muted-foreground shrink-0"
           aria-label={collapsed ? "Expand group" : "Collapse group"}
           title={collapsed ? "Expand" : "Collapse"}
         >
-          {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
-        <Input value={group.name} onChange={(e) => onRenameGroup(e.target.value)} className="h-7 max-w-[280px] text-[13px] font-medium bg-background" aria-label="Group name" />
-        <span className="text-[11px] text-muted-foreground tabular-nums">{group.rows.length} variant{group.rows.length === 1 ? "" : "s"}</span>
+        <input
+          value={group.name}
+          onChange={(e) => onRenameGroup(e.target.value)}
+          className="h-8 w-full max-w-[360px] rounded-md border border-transparent bg-transparent px-2 text-[14px] font-semibold text-foreground hover:border-border focus:border-ring focus:bg-background focus:outline-none placeholder:text-muted-foreground/50"
+          placeholder="Group name"
+          aria-label="Group name"
+        />
+        <span className="text-[12px] text-muted-foreground tabular-nums shrink-0">
+          {group.rows.length} variant{group.rows.length === 1 ? "" : "s"}
+        </span>
         <div className="flex-1" />
-        <button onClick={onDeleteGroup} className="p-1 rounded hover:bg-muted text-destructive" aria-label="Delete group"><Trash2 className="w-3.5 h-3.5" /></button>
+        {collapsed && (
+          <Button variant="ghost" size="xs" onClick={onToggleCollapse} className="text-muted-foreground">
+            Show variants
+          </Button>
+        )}
+        <button
+          type="button"
+          onClick={onDeleteGroup}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
+          aria-label="Delete group"
+          title="Delete group"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {!collapsed && group.rows.length > 0 && (
         <VariantTable
           rows={group.rows}
+          pricing={pricing}
           sensors={sensors}
           onReorderRows={onReorderRows}
           onUpdateRow={onUpdateRow}
@@ -858,10 +1132,15 @@ function GroupSection({
       )}
 
       {!collapsed && (
-        <div className="flex items-center gap-2 px-3 py-2 border-t border-border/60">
-          <Button variant="ghost" size="xs" onClick={onAddRow}>
-            <PencilLine className="w-3 h-3" /> Add variant manually
+        <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5 bg-muted/20">
+          <Button variant="ghost" size="xs" onClick={onAddFromCatalogue} className="text-muted-foreground hover:text-foreground">
+            <Search className="w-3 h-3" /> Add variants from catalogue
           </Button>
+          <span className="text-muted-foreground/40 text-[11px]">·</span>
+          <Button variant="ghost" size="xs" onClick={onAddRow} className="text-muted-foreground hover:text-foreground">
+            <PencilLine className="w-3 h-3" /> Add a variant manually
+          </Button>
+          {group.rows.length === 0 && <span className="ml-2 text-[11px] text-muted-foreground">This group is empty.</span>}
         </div>
       )}
     </section>
@@ -870,10 +1149,13 @@ function GroupSection({
 
 // ── Variant table: memoized so a group being dragged/reordered doesn't force
 // every *other* group to re-render its whole rows table on each drag frame. ──
+type PricingLabels = { rrp: string | null; partner: string | null; currency: string };
+
 const VariantTable = memo(function VariantTable({
-  rows, sensors, onReorderRows, onUpdateRow, onDeleteRow,
+  rows, pricing, sensors, onReorderRows, onUpdateRow, onDeleteRow,
 }: {
   rows: PreorderRow[];
+  pricing: PricingLabels;
   sensors: ReturnType<typeof useSensors>;
   onReorderRows: (activeId: string, overId: string) => void;
   onUpdateRow: (rowId: string, patch: Partial<PreorderRow>) => void;
@@ -889,16 +1171,36 @@ const VariantTable = memo(function VariantTable({
       }}
     >
       <div className="overflow-x-auto">
-        <table className="w-full text-[12px]">
+        <table className="w-full text-[12px] table-fixed min-w-[900px]">
+          <colgroup>
+            <col className="w-7" />
+            <col className="w-[38%]" />
+            <col className="w-[16%]" />
+            <col className="w-[22%]" />
+            <col className="w-[110px]" />
+            <col className="w-[110px]" />
+            <col className="w-[110px]" />
+            <col className="w-[76px]" />
+          </colgroup>
           <thead>
-            <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60">
-              <th className="text-left font-semibold px-3 py-1.5 min-w-[200px]">Variant</th>
-              <th className="text-left font-semibold px-2 py-1.5">SKU</th>
-              <th className="text-left font-semibold px-2 py-1.5">Size / label</th>
-              <th className="text-right font-semibold px-2 py-1.5 w-20">RRP</th>
-              <th className="text-right font-semibold px-2 py-1.5 w-20">Partner</th>
-              <th className="text-right font-semibold px-2 py-1.5 w-20">Disc.</th>
-              <th className="px-2 py-1.5 w-14" />
+            <tr className="text-[11px] text-muted-foreground border-b border-border/60 bg-muted/20">
+              <th className="py-2" />
+              <th className="text-left font-medium px-3 py-2">Variant</th>
+              <th className="text-left font-medium px-3 py-2">SKU</th>
+              <th className="text-left font-medium px-3 py-2">Size / label</th>
+              <th className="text-right font-medium px-3 py-2 border-l border-l-border/40 whitespace-nowrap min-w-[112px] align-bottom" title={pricing.rrp ? `From the “${pricing.rrp}” price list — what individuals pay` : "Recommended retail price — what individuals pay"}>
+                <div>RRP</div>
+                <div className="text-[10px] font-normal text-muted-foreground/70">{pricing.currency} · incl. VAT</div>
+              </th>
+              <th className="text-right font-medium px-3 py-2 whitespace-nowrap min-w-[112px] align-bottom" title={pricing.partner ? `From the “${pricing.partner}” price list — what companies pay` : "Partner price — what companies pay"}>
+                <div>Partner</div>
+                <div className="text-[10px] font-normal text-muted-foreground/70">{pricing.currency} · excl. VAT</div>
+              </th>
+              <th className="text-right font-medium px-3 py-2 whitespace-nowrap min-w-[112px] align-bottom" title="Optional discounted partner price (a price, not a percentage) — replaces the partner price for companies when set">
+                <div>Discounted</div>
+                <div className="text-[10px] font-normal text-muted-foreground/70">{pricing.currency} · excl. VAT · optional</div>
+              </th>
+              <th className="py-2" />
             </tr>
           </thead>
           <SortableContext items={rows.map((r) => r.id)} strategy={verticalListSortingStrategy}>
@@ -928,17 +1230,23 @@ function TierEditor({
   currency,
   onChange,
   onApplyToAllTabs,
+  onToggleLock,
+  otherTabs,
   otherTabCount,
 }: {
   tab: PreorderTab;
   currency: string;
   onChange: (tiers: PreorderTier[]) => void;
   onApplyToAllTabs: () => void;
+  onToggleLock: () => void;
+  otherTabs: { name: string; locked: boolean; tiers: number }[];
   otherTabCount: number;
 }) {
   const tiers = useMemo(() => tab.tiers ?? [], [tab.tiers]);
-  const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [confirmCopy, setConfirmCopy] = useState(false);
+  const copyTargets = otherTabs.filter((t) => !t.locked);
+  const overwritten = copyTargets.filter((t) => t.tiers > 0);
 
   // The ladder as every reader (partner sheet, review, sales order) will see it.
   const ladder = useMemo(() => activeTiers(tiers), [tiers]);
@@ -966,187 +1274,266 @@ function TierEditor({
   const update = (id: string, patch: Partial<PreorderTier>) =>
     onChange(tiers.map((t) => (t.id === id ? { ...t, ...patch } : t)));
 
+  // Which tier row is in edit mode (inline inputs); every other row is read-only.
+  const [editing, setEditing] = useState<string | null>(null);
+
   function addTier() {
     const last = ladder[ladder.length - 1];
+    const id = uid();
     onChange([
       ...tiers,
       {
-        id: uid(),
+        id,
         name: `Tier ${tiers.length + 1}`,
         minAmount: last ? last.minAmount * 2 : 10000,
         discountPct: last ? Math.min(100, last.discountPct + 5) : 5,
       },
     ]);
-    setOpen(true);
+    setEditing(id);
   }
 
+  const best = ladder[ladder.length - 1];
+
   return (
-    <div className="rounded-xl border border-border bg-surface">
-      <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          className="flex items-center gap-1.5 text-[13px] font-medium text-foreground hover:text-lime-600 transition-colors shrink-0"
-        >
-          {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-          <Percent className="w-3.5 h-3.5 text-lime-600" />
-          Volume discounts
-        </button>
-        {ladder.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-1">
-            {ladder.map((t) => (
-              <span
-                key={t.id}
-                className="inline-flex items-center gap-1 rounded-full bg-lime-100 dark:bg-lime-900/40 px-2 py-0.5 text-[11px] font-medium text-lime-700 dark:text-lime-300"
-                title={`${t.name || "Tier"}: −${t.discountPct}% from ${fmtMoney(t.minAmount, currency)}`}
-              >
-                {t.name || "Tier"} −{t.discountPct}%
-                <span className="text-lime-600/70 dark:text-lime-400/70 tabular-nums">
-                  {fmtMoney(t.minAmount, currency)}+
-                </span>
-              </span>
-            ))}
-          </div>
-        ) : (
-          <span className="text-[12px] text-muted-foreground">None — this tab is always at list price.</span>
-        )}
+    <section className="rounded-xl border border-border bg-surface overflow-hidden">
+      {/* header: title · info · summary · add */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 h-11">
+        <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
+          <Percent className="w-3.5 h-3.5 text-lime-700 dark:text-lime-400" /> Volume discounts
+        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button type="button" className="text-muted-foreground/60 hover:text-foreground" aria-label="How volume discounts work">
+              <Info className="w-3.5 h-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" align="start">
+            Spend enough inside <span className="font-medium">{tab.name || "this tab"}</span> and every line in it drops by that tier&rsquo;s
+            percentage. Only the highest tier reached applies; each tab counts on its own. Thresholds are compared with the customer's subtotal in their own price basis — companies on partner prices excl. VAT, individuals on RRP incl. VAT.
+          </TooltipContent>
+        </Tooltip>
+        <span className="text-[12px] text-muted-foreground tabular-nums">
+          {ladder.length === 0 ? "None — list price" : `${ladder.length} tier${ladder.length === 1 ? "" : "s"} · up to −${best.discountPct}% from ${fmtMoney(best.minAmount, currency)}`}
+        </span>
         <div className="flex-1" />
-        {warnings.length > 0 && (
-          <span className="text-[11px] text-amber-600 dark:text-amber-400" title={warnings.join("\n")}>
-            {warnings.length} note{warnings.length === 1 ? "" : "s"}
-          </span>
+        {otherTabCount > 0 && (
+          <Button
+            variant="ghost"
+            size="xs"
+            className={cn("h-7", tab.tiersLocked ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")}
+            onClick={onToggleLock}
+            title={tab.tiersLocked ? "Locked: “Copy to all tabs” from another tab leaves this ladder alone. Click to unlock." : "Lock this ladder so “Copy to all tabs” from another tab cannot overwrite it"}
+          >
+            {tab.tiersLocked ? <Lock className="w-3 h-3" /> : <LockOpen className="w-3 h-3" />}
+            {tab.tiersLocked ? "Locked" : "Lock"}
+          </Button>
         )}
-        <Button variant="ghost" size="xs" className="h-7 text-muted-foreground" onClick={addTier}>
-          <Plus className="w-3 h-3" /> Add tier
+        {otherTabCount > 0 && tiers.length > 0 && (
+          <Button
+            variant="ghost"
+            size="xs"
+            className="h-7 text-muted-foreground"
+            onClick={() => (copyTargets.length === 0 ? undefined : setConfirmCopy(true))}
+            disabled={copyTargets.length === 0}
+            title={copyTargets.length === 0 ? "Every other tab is locked" : `Copy this ladder onto the other ${copyTargets.length} tab${copyTargets.length === 1 ? "" : "s"}, replacing theirs`}
+          >
+            {copied ? <Check className="w-3 h-3 text-lime-600" /> : <Copy className="w-3 h-3" />}
+            {copied ? "Copied" : "Copy to all tabs"}
+          </Button>
+        )}
+        <Dialog open={confirmCopy} onOpenChange={setConfirmCopy}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-amber-500" /> Copy this ladder to all tabs?</DialogTitle>
+              <DialogDescription>
+                The volume discounts of <span className="font-medium text-foreground">{tab.name || "this tab"}</span> ({ladder.length} tier{ladder.length === 1 ? "" : "s"}) will replace the ladder on{" "}
+                {copyTargets.length} other tab{copyTargets.length === 1 ? "" : "s"}
+                {overwritten.length > 0 ? ` — ${overwritten.map((t) => t.name).join(", ")} already ${overwritten.length === 1 ? "has" : "have"} a ladder that will be overwritten.` : "."}
+                {otherTabs.some((t) => t.locked) && ` Locked tabs are left alone: ${otherTabs.filter((t) => t.locked).map((t) => t.name).join(", ")}.`}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" size="sm" onClick={() => setConfirmCopy(false)}>Cancel</Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  onApplyToAllTabs();
+                  setConfirmCopy(false);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+              >
+                <Copy className="w-3.5 h-3.5" /> Copy to {copyTargets.length} tab{copyTargets.length === 1 ? "" : "s"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <Button size="sm" variant="outline" className="h-8 bg-background" onClick={addTier}>
+          <Plus className="w-3.5 h-3.5" /> Add tier
         </Button>
       </div>
 
-      {open && (
-        <div className="border-t border-border px-3 py-3 space-y-2.5">
-          <p className="text-[11px] text-muted-foreground">
-            Reach a spend inside <span className="font-medium text-foreground">{tab.name || "this tab"}</span> and every
-            line in it drops by that tier&rsquo;s percentage. Tiers don&rsquo;t stack — only the highest one reached
-            applies, and every tab is counted on its own. Thresholds are the totals the partner sees (incl. VAT).
-          </p>
-
-          {tiers.length === 0 ? (
-            <button
-              type="button"
-              onClick={addTier}
-              className="w-full rounded-lg border border-dashed border-border py-3 text-[12px] text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+      {/* rows */}
+      <div className="border-t border-border/60 divide-y divide-border/50">
+        {tiers.length === 0 && (
+          <div className="px-4 py-2.5 text-[12px] text-muted-foreground">No tiers — partners pay list price on this tab.</div>
+        )}
+        {[...tiers].sort((a, b) => a.minAmount - b.minAmount).map((t, i) => {
+          const isEditing = editing === t.id;
+          return (
+            <div
+              key={t.id}
+              className={cn(
+                "group/tier grid items-center gap-3 px-4 min-h-10",
+                "grid-cols-[20px_minmax(0,1fr)_150px_96px_64px]",
+                isEditing && "bg-lime-50/40 dark:bg-lime-950/10",
+              )}
             >
-              <Plus className="w-3.5 h-3.5 inline mr-1" /> Add the first tier
-            </button>
-          ) : (
-            <div className="space-y-1.5">
-              <div className="hidden sm:grid grid-cols-[1fr_150px_110px_32px] gap-2 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-1">
-                <span>Tier name</span>
-                <span>Spend at least</span>
-                <span>Discount</span>
-                <span />
-              </div>
-              {tiers.map((t, i) => (
-                <div key={t.id} className="grid grid-cols-[1fr_150px_110px_32px] gap-2 items-center">
-                  <Input
+              <span className="flex size-5 items-center justify-center rounded-full bg-lime-500/12 text-[10px] font-semibold text-lime-700 dark:text-lime-400 tabular-nums">
+                {i + 1}
+              </span>
+              {isEditing ? (
+                <>
+                  <input
+                    autoFocus
                     value={t.name}
                     onChange={(e) => update(t.id, { name: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === "Escape") setEditing(null);
+                    }}
                     placeholder={`Tier ${i + 1}`}
-                    className="h-8 text-[12px] bg-background"
+                    className="h-8 min-w-0 rounded-md border border-border bg-background px-2 text-[12.5px] focus:border-ring focus:outline-none"
                     aria-label="Tier name"
                   />
                   <div className="relative">
-                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground pointer-events-none">
-                      {currency}
-                    </span>
-                    <Input
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground pointer-events-none">from</span>
+                    <input
                       type="number"
                       min={0}
                       step={100}
                       value={t.minAmount || ""}
                       onChange={(e) => update(t.id, { minAmount: Math.max(0, Number(e.target.value) || 0) })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === "Escape") setEditing(null);
+                      }}
                       placeholder="0"
-                      className="h-8 text-[12px] bg-background pl-9 text-right tabular-nums no-spinner"
-                      aria-label="Threshold"
+                      className="h-8 w-full rounded-md border border-border bg-background pl-10 pr-2 text-right text-[12.5px] tabular-nums no-spinner focus:border-ring focus:outline-none"
+                      aria-label="Order threshold"
                     />
                   </div>
                   <div className="relative">
-                    <Input
+                    <input
                       type="number"
                       min={0}
                       max={100}
                       step={0.5}
                       value={t.discountPct || ""}
-                      onChange={(e) =>
-                        update(t.id, { discountPct: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })
-                      }
+                      onChange={(e) => update(t.id, { discountPct: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === "Escape") setEditing(null);
+                      }}
                       placeholder="0"
-                      className="h-8 text-[12px] bg-background pr-6 text-right tabular-nums no-spinner"
+                      className="h-8 w-full rounded-md border border-border bg-background pl-2 pr-6 text-right text-[12.5px] tabular-nums no-spinner focus:border-ring focus:outline-none"
                       aria-label="Discount percent"
                     />
-                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground pointer-events-none">
-                      %
-                    </span>
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground pointer-events-none">%</span>
                   </div>
+                </>
+              ) : (
+                <>
+                  <span className={cn("text-[13px] truncate", t.name.trim() ? "text-foreground font-medium" : "text-muted-foreground italic")}>
+                    {t.name.trim() || "Unnamed tier"}
+                  </span>
+                  <span className="text-[12.5px] text-muted-foreground tabular-nums">
+                    from <span className="text-foreground">{fmtMoney(t.minAmount, currency)}</span>
+                  </span>
+                  <span className="text-[13px] font-semibold text-lime-700 dark:text-lime-400 tabular-nums text-right pr-1">−{t.discountPct}%</span>
+                </>
+              )}
+              <div className="flex items-center justify-end gap-0.5">
+                {isEditing ? (
                   <button
                     type="button"
-                    onClick={() => onChange(tiers.filter((x) => x.id !== t.id))}
-                    className="w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                    aria-label="Remove tier"
+                    onClick={() => setEditing(null)}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-lime-700 dark:text-lime-400 hover:bg-lime-500/12"
+                    aria-label="Done"
+                    title="Done"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Check className="w-3.5 h-3.5" />
                   </button>
-                </div>
-              ))}
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setEditing(t.id)}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-muted opacity-0 group-hover/tier:opacity-100 focus-visible:opacity-100 transition-opacity"
+                    aria-label="Edit tier"
+                    title="Edit"
+                  >
+                    <PencilLine className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange(tiers.filter((x) => x.id !== t.id));
+                    if (editing === t.id) setEditing(null);
+                  }}
+                  className={cn(
+                    "flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-opacity",
+                    !isEditing && "opacity-0 group-hover/tier:opacity-100 focus-visible:opacity-100",
+                  )}
+                  aria-label="Remove tier"
+                  title="Remove"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
-          )}
-
-          {warnings.length > 0 && (
-            <ul className="space-y-0.5">
-              {warnings.map((w) => (
-                <li key={w} className="text-[11px] text-amber-600 dark:text-amber-400">
-                  {w}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="flex items-center justify-between gap-2 pt-1">
-            <span className="text-[11px] text-muted-foreground">
-              {ladder.length > 0
-                ? `Best case: −${ladder[ladder.length - 1].discountPct}% on everything in this tab from ${fmtMoney(ladder[ladder.length - 1].minAmount, currency)}.`
-                : ""}
-            </span>
-            {otherTabCount > 0 && tiers.length > 0 && (
-              <Button
-                variant="ghost"
-                size="xs"
-                className="h-7 text-muted-foreground shrink-0"
-                onClick={() => {
-                  onApplyToAllTabs();
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                }}
-                title={`Copy this ladder onto the other ${otherTabCount} tab${otherTabCount === 1 ? "" : "s"}, replacing theirs`}
-              >
-                {copied ? <Check className="w-3 h-3 text-lime-600" /> : <Copy className="w-3 h-3" />}
-                {copied ? "Copied to all tabs" : `Copy to all ${otherTabCount + 1} tabs`}
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+          );
+        })}
+        {warnings.length > 0 && (
+          <ul className="px-4 py-2 space-y-0.5 bg-amber-50/60 dark:bg-amber-950/20">
+            {warnings.map((w) => (
+              <li key={w} className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> {w}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
   );
 }
 
 const PL_NONE = "__none__";
+/** A labelled control in the sheet settings toolbar: 10px caps label over the field. */
+// A compact labelled control: the label sits INSIDE the field on the left as a
+// muted prefix, the control fills the rest — one consistent 36px pill per setting,
+// so a row of them reads as one toolbar instead of a form.
+function InlineField({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div
+      className="inline-flex items-stretch h-9 rounded-lg border border-border bg-background overflow-hidden focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/30 transition-shadow"
+      title={hint}
+    >
+      <span className="flex items-center px-2.5 text-[11px] font-medium text-muted-foreground bg-muted/50 border-r border-border whitespace-nowrap select-none">
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
+const inlineInput = "h-full min-w-0 bg-transparent px-2.5 text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/60";
+const inlineSelect = "h-full w-[230px] rounded-none border-0 bg-transparent px-2.5 text-[12.5px] shadow-none focus-visible:ring-0 hover:bg-muted/40 dark:bg-transparent dark:hover:bg-muted/40";
+
 function PricelistSelect({
-  label, value, pricelists, onChange,
+  label, value, pricelists, onChange, className,
 }: {
   label: string;
   value: string | null;
   pricelists: MkPricelist[];
   onChange: (v: string | null) => void;
+  className?: string;
 }) {
   // Keep the current value selectable even if it's no longer in the MK list
   // (e.g. a renamed/removed price list) so it isn't silently dropped.
@@ -1156,7 +1543,7 @@ function PricelistSelect({
       value={value ?? PL_NONE}
       onValueChange={(v) => onChange(v === PL_NONE ? null : v)}
     >
-      <SelectTrigger size="sm" className="h-7 w-[150px] text-xs bg-background">
+      <SelectTrigger size="sm" className={cn("h-8 w-[220px] text-[12px] bg-background [&>span]:truncate", className)}>
         <SelectValue placeholder={label} />
       </SelectTrigger>
       <SelectContent>
@@ -1181,6 +1568,191 @@ function PricelistSelect({
 
 // ── Product picker: search catalogue, add the parent + all its variants as a group ──
 type Hit = { code: string; name: string; image?: string | null };
+
+// ── Variant picker for ONE group: lists the variants of the group's own product
+// (missing ones get an "Add", present ones a check) and lets you browse any
+// other catalogue product down to its single variants. ──
+function VariantPickerDialog({
+  group, rrpPricelist, partnerPricelist, onClose, onAddRows,
+}: {
+  group: PreorderGroup;
+  rrpPricelist: string | null;
+  partnerPricelist: string | null;
+  onClose: () => void;
+  onAddRows: (rows: RowDraft[]) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<Hit[]>([]);
+  const [searching, setSearching] = useState(false);
+  // The product whose variants are listed — the group's own parent by default.
+  const [source, setSource] = useState<{ code: string; name: string } | null>(
+    group.parentCode ? { code: group.parentCode, name: group.name } : null,
+  );
+  const [variants, setVariants] = useState<RowDraft[] | null>(null);
+  const [loadingVariants, setLoadingVariants] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inGroup = useMemo(() => new Set(group.rows.map((r) => r.code).filter(Boolean)), [group.rows]);
+
+  useEffect(() => {
+    if (!source) {
+      setVariants(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingVariants(true);
+    setError(null);
+    fetch(`/api/admin/preorder/products/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: source.code, rrpPricelist, partnerPricelist }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data.group) setVariants((data.group as GroupDraft).rows);
+        else setError(data.error ?? "Product not found in the catalogue.");
+      })
+      .catch(() => !cancelled && setError("Couldn't load the product."))
+      .finally(() => !cancelled && setLoadingVariants(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [source, rrpPricelist, partnerPricelist]);
+
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 2) {
+      setResults([]);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const t = setTimeout(() => {
+      fetch(`/api/admin/preorder/products/search?q=${encodeURIComponent(query)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (cancelled) return;
+          setResults((data.candidates ?? []).map((c: { code: string; name: string; image?: string | null }) => ({ code: c.code, name: c.name, image: c.image })));
+        })
+        .catch(() => !cancelled && setResults([]))
+        .finally(() => !cancelled && setSearching(false));
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [q]);
+
+  const missing = (variants ?? []).filter((v) => !inGroup.has(v.code));
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-lime-600" /> Add variants to <span className="truncate">{group.name || "this group"}</span>
+          </DialogTitle>
+        </DialogHeader>
+
+        {/* search: any product, then browse into its variants */}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <Input
+            autoFocus={!source}
+            placeholder={source ? "Or find another product…" : "Search by name, SKU or EAN…"}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            className="pl-8 h-9"
+          />
+        </div>
+        {q.trim().length >= 2 && (
+          <div className="max-h-48 overflow-y-auto -mx-1 rounded-lg border border-border/60 bg-muted/10">
+            {searching && <ProductRowsSkeleton />}
+            {!searching && results.length === 0 && <div className="text-[12px] text-muted-foreground px-3 py-3">No matches.</div>}
+            {results.map((c) => (
+              <button
+                key={c.code}
+                type="button"
+                onClick={() => {
+                  setSource({ code: c.code, name: c.name });
+                  setQ("");
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted/40"
+              >
+                {c.image ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={c.image} alt="" className="w-8 h-8 rounded object-cover ring-1 ring-border shrink-0" />
+                ) : (
+                  <span className="w-8 h-8 rounded bg-muted flex items-center justify-center shrink-0"><Package className="w-3.5 h-3.5 text-muted-foreground" /></span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-medium text-foreground truncate">{c.name}</div>
+                  <div className="text-[10px] text-muted-foreground font-mono truncate">{c.code}</div>
+                </div>
+                <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1">Browse variants <ChevronRight className="w-3 h-3" /></span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* the variants of the chosen product */}
+        {source ? (
+          <div className="rounded-lg border border-border overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 bg-muted/30 border-b border-border">
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px] font-semibold text-foreground truncate">{source.name}</div>
+                <div className="text-[10px] text-muted-foreground font-mono">{source.code}</div>
+              </div>
+              {variants && missing.length > 0 && (
+                <Button size="xs" onClick={() => onAddRows(missing)}>
+                  <Plus className="w-3 h-3" /> Add all missing ({missing.length})
+                </Button>
+              )}
+            </div>
+            <div className="max-h-72 overflow-y-auto">
+              {loadingVariants && <ProductRowsSkeleton />}
+              {error && <div className="text-[12px] text-destructive px-3 py-3">{error}</div>}
+              {variants && variants.length === 0 && <div className="text-[12px] text-muted-foreground px-3 py-3">This product has no variants.</div>}
+              {variants?.map((v) => {
+                const present = inGroup.has(v.code);
+                return (
+                  <div key={v.code} className={cn("flex items-center gap-2 px-3 py-1.5 border-b border-border/40 last:border-b-0", present && "opacity-60")}>
+                    {v.image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={v.image} alt="" className="w-8 h-8 rounded object-cover ring-1 ring-border shrink-0" />
+                    ) : (
+                      <span className="w-8 h-8 rounded bg-muted flex items-center justify-center shrink-0"><Package className="w-3.5 h-3.5 text-muted-foreground" /></span>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12px] font-medium text-foreground truncate">{v.variantLabel || v.name}</div>
+                      <div className="text-[10px] text-muted-foreground font-mono truncate">{v.code}</div>
+                    </div>
+                    {v.partnerPrice != null && <span className="text-[11px] tabular-nums text-muted-foreground shrink-0">{v.partnerPrice.toFixed(2)}</span>}
+                    {present ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground shrink-0 w-[68px] justify-end"><Check className="w-3 h-3" /> In group</span>
+                    ) : (
+                      <Button size="xs" variant="outline" onClick={() => onAddRows([v])} className="w-[68px]">
+                        <Plus className="w-3 h-3" /> Add
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+              {variants && variants.length > 0 && missing.length === 0 && (
+                <div className="text-[11px] text-muted-foreground px-3 py-2 bg-muted/20">Every variant of this product is already in the group.</div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="text-[11px] text-muted-foreground">
+            This group is not linked to a catalogue product — search above and browse a product&rsquo;s variants to add them here.
+          </p>
+        )}
+        <div className="flex justify-end pt-1"><Button size="sm" variant="outline" onClick={onClose}>Done</Button></div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function ProductPickerDialog({
   rrpPricelist, partnerPricelist, onClose, onAddGroup,
@@ -1392,41 +1964,37 @@ function ProductRowsSkeleton() {
  * the editor column with its name inputs, tier card, add-actions strip and a
  * couple of collapsed group cards.
  */
-function BuilderSkeleton() {
+function BuilderSkeleton({ campaignId }: { campaignId: string }) {
   return (
     <div className="flex flex-col h-full">
-      <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-20">
-        <div className="flex items-center gap-3 px-4 md:px-6 h-14">
-          <Link href="/preorder" className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back to campaigns">
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
-          <Skeleton className="h-8 w-48 md:w-72 rounded-md" />
-          <Skeleton className="hidden sm:block h-[20.5px] w-12 rounded-full" delay={40} />
-          <div className="flex-1" />
-          <span className="min-w-[70px]" />
-          <span className="hidden md:inline-flex"><Button variant="ghost" size="sm" className="h-8" disabled><Eye className="w-3.5 h-3.5" /> Preview</Button></span>
-          <span className="hidden lg:inline-flex"><Button variant="ghost" size="sm" className="h-8" disabled><LayoutDashboard className="w-3.5 h-3.5" /> Overview</Button></span>
-          <Skeleton className="h-8 w-[92px] rounded-md" delay={80} />
-        </div>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 md:px-6 pb-2.5 text-[12px]">
-          <label className="flex items-center gap-1.5 text-muted-foreground">
-            Season
-            <Skeleton className="h-7 w-32 rounded-md" delay={100} />
-          </label>
-          <label className="flex items-center gap-1.5 text-muted-foreground">
-            Deadline
-            <Skeleton className="h-7 w-40 rounded-md" delay={120} />
-          </label>
-          <div className="flex items-center gap-1.5 text-muted-foreground">
-            <Tag className="w-3.5 h-3.5 opacity-60" />
-            <Skeleton className="h-7 w-[150px] rounded-md" delay={140} />
-            <Skeleton className="h-7 w-[150px] rounded-md" delay={160} />
-            <Button variant="ghost" size="xs" className="h-7 text-muted-foreground" disabled>
-              <RefreshCw className="w-3 h-3" /> Re-price
-            </Button>
+      <CampaignHeader
+        campaignId={campaignId}
+        active="sheet"
+        title={
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-8 w-48 md:w-72 rounded-md" />
+            <Skeleton className="hidden sm:block h-[20.5px] w-12 rounded-full" delay={40} />
           </div>
+        }
+        actions={
+          <>
+            <span className="min-w-[70px]" />
+            <Button variant="outline" size="sm" className="h-8" disabled><Settings2 className="w-3.5 h-3.5" /> Settings</Button>
+            <Skeleton className="h-8 w-[92px] rounded-md" delay={80} />
+          </>
+        }
+      />
+
+      <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div>
+          <div className="text-[13px] font-semibold text-foreground">Price lists</div>
+          <div className="text-[11px] text-muted-foreground">Every RRP and partner price on every tab is read from these two Metakocka lists.</div>
         </div>
-      </header>
+        <div className="flex-1" />
+        <InlineField label="RRP"><Skeleton className="h-full w-[230px] rounded-none" delay={100} /></InlineField>
+        <InlineField label="Partner"><Skeleton className="h-full w-[230px] rounded-none" delay={120} /></InlineField>
+        <Button variant="outline" size="sm" className="h-9 bg-background" disabled><RefreshCw className="w-3.5 h-3.5" /> Re-price all tabs</Button>
+      </div>
 
       <div className="flex-1 min-h-0 flex">
         <aside className="w-44 md:w-52 shrink-0 border-r border-border overflow-y-auto p-2 space-y-1">
@@ -1443,19 +2011,23 @@ function BuilderSkeleton() {
 
         <main className="flex-1 min-w-0 overflow-y-auto p-4 md:p-6">
           <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Skeleton className="h-9 w-full max-w-xs rounded-md" />
-              <Skeleton className="h-9 w-full max-w-xs rounded-md" delay={40} />
-              <div className="flex-1" />
+            <div className="px-1">
+              <SkeletonLine lh="h-10" h="h-6" w="w-48" />
+              <SkeletonLine lh="h-8" h="h-3.5" w="w-80" delay={40} />
             </div>
             <div className="rounded-xl border border-border bg-surface">
-              <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-                <span className="flex items-center gap-1.5 text-[13px] font-medium text-foreground shrink-0">
-                  <ChevronRight className="w-3.5 h-3.5" />
-                  <Percent className="w-3.5 h-3.5 text-lime-600" />
-                  Volume discounts
+              <div className="flex items-center gap-3 px-4 py-3">
+                <span className="w-8 h-8 rounded-lg bg-lime-600/10 text-lime-700 dark:text-lime-300 flex items-center justify-center shrink-0">
+                  <Percent className="w-4 h-4" />
                 </span>
-                <SkeletonLine lh="h-[19.5px]" w="w-40" delay={60} />
+                <span className="min-w-0">
+                  <span className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
+                    Volume discounts <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                  </span>
+                  <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-48" delay={60} />
+                </span>
+                <div className="flex-1" />
+                <Button variant="outline" size="sm" className="h-8 bg-background" disabled><Plus className="w-3.5 h-3.5" /> Add tier</Button>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-border bg-muted/20 px-3 py-2.5">

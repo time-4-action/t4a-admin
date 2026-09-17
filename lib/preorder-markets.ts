@@ -3,8 +3,10 @@ import "server-only";
 // lib/preorder-markets.ts
 //
 // Mutations of a campaign's inheritance configuration (markets + customer rules).
-// Markets are embedded in the campaign document; every write validates that a
-// country belongs to at most ONE market and that assortment ids point at the sheet.
+// Markets are embedded in the campaign document, ORDERED BY PRIORITY (index 0 is
+// checked first; the first market matching a partner's country + kind wins), so a
+// country may sit in several markets. Every write checks that assortment ids
+// point at the sheet.
 
 import type { IPreorderCampaign } from "@/models/preorder-campaign";
 import { marketView, sanitizeCustomerRule, sanitizeMarket } from "@/lib/preorder";
@@ -12,7 +14,7 @@ import type { CommercialConfig, CustomerRule, PreorderMarket } from "@/types/pre
 
 export type MarketsError = { status: number; error: string; conflicts?: { iso: string; markets: string[] }[] };
 
-// Countries must be unique across markets.
+// Countries shared by several markets — informational (priority resolves them).
 export function findCountryConflicts(markets: PreorderMarket[]): { iso: string; markets: string[] }[] {
   const seen = new Map<string, string[]>();
   for (const m of markets) for (const iso of m.countries) seen.set(iso, [...(seen.get(iso) ?? []), m.name]);
@@ -51,8 +53,6 @@ function toDocConfig(cfg: CommercialConfig) {
 export async function replaceMarkets(doc: IPreorderCampaign, raw: unknown): Promise<PreorderMarket[] | MarketsError> {
   const list = Array.isArray(raw) ? raw : [];
   const markets = list.map((m, i) => sanitizeMarket(m, `mkt-${i}-${Date.now().toString(36)}`)).map((m) => ({ ...m, config: pruneConfig(doc, m.config) }));
-  const conflicts = findCountryConflicts(markets);
-  if (conflicts.length) return { status: 400, error: "A country can belong to only one market.", conflicts };
   doc.markets = markets.map((m) => ({ ...m, config: toDocConfig(m.config), updatedAt: new Date() })) as IPreorderCampaign["markets"];
   doc.markModified("markets");
   await doc.save();
@@ -72,14 +72,12 @@ export async function upsertMarket(doc: IPreorderCampaign, raw: unknown, marketI
       name: r.name ?? prev?.name,
       color: r.color ?? prev?.color,
       countries: r.countries ?? prev?.countries ?? [],
+      kinds: r.kinds ?? prev?.kinds ?? [],
       config: "config" in r ? r.config : prev?.config ?? {},
     },
     marketId,
   );
   merged.config = pruneConfig(doc, merged.config);
-  const next = doc.markets.filter((m) => m.id !== merged.id).map((m) => ({ ...m, countries: [...m.countries] }));
-  const conflicts = findCountryConflicts([...next.map((m) => ({ ...m, config: {} as CommercialConfig, updatedAt: null })), merged]);
-  if (conflicts.length) return { status: 400, error: "A country can belong to only one market.", conflicts };
   const stored = { ...merged, config: toDocConfig(merged.config), updatedAt: new Date() };
   if (existing) {
     const idx = doc.markets.findIndex((m) => m.id === merged.id);
@@ -92,7 +90,19 @@ export async function upsertMarket(doc: IPreorderCampaign, raw: unknown, marketI
   return merged;
 }
 
-// Move countries between markets in one go (used by the map's "add selected to market").
+// Reorder markets = set their priority. `ids` lists every market id, first = highest.
+export async function reorderMarkets(doc: IPreorderCampaign, ids: string[]): Promise<true | MarketsError> {
+  const byId = new Map(doc.markets.map((m) => [m.id, m]));
+  if (ids.length !== byId.size || ids.some((id) => !byId.has(id)) || new Set(ids).size !== ids.length) {
+    return { status: 400, error: "Order must list every market exactly once." };
+  }
+  doc.markets = ids.map((id) => byId.get(id)!) as IPreorderCampaign["markets"];
+  doc.markModified("markets");
+  await doc.save();
+  return true;
+}
+
+// Move countries between markets in one go (the countries table's assign).
 export async function assignCountries(doc: IPreorderCampaign, marketId: string | null, isos: string[]): Promise<true | MarketsError> {
   const set = new Set(isos.map((i) => i.toUpperCase()));
   if (marketId && !doc.markets.some((m) => m.id === marketId)) return { status: 404, error: "Market not found." };

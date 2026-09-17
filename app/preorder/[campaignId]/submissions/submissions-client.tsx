@@ -3,14 +3,16 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, ChevronRight, Users, LockOpen, Mail, Search, AlertTriangle, ExternalLink } from "lucide-react";
+import { HeaderFilter } from "@/components/ui/header-filter";
+import { ChevronRight, Users, LockOpen, Mail, Search, AlertTriangle, ExternalLink, X, Eye, EyeOff, Loader2, Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
 import { CampaignStatusBadge, SubmissionStageBadge, VisibilityBadge } from "@/app/preorder/preorder-badges";
-import { CampaignNav } from "@/app/preorder/[campaignId]/campaign-nav";
-import { flagEmoji } from "@/lib/countries-client";
+import { CampaignHeader } from "@/app/preorder/[campaignId]/campaign-nav";
+import { Flag } from "@/components/flag";
 import {
   SUBMISSION_STAGE_LABELS,
   totalsNet,
@@ -42,6 +44,17 @@ const STAGE_FILTERS: { value: StageFilter; label: string }[] = [
 
 // The preorders table — shared by the full Preorders page and the overview (which
 // shows the latest few with a "view all" link).
+// Column filters (Stage, Market) live in the headings when `filters` is given —
+// the full page passes them, the overview's short list does not.
+export type PreorderTableFilters = {
+  stage: StageFilter;
+  onStage: (s: StageFilter) => void;
+  market: string;
+  onMarket: (m: string) => void;
+  markets: string[];
+  failures: number;
+};
+
 export function PreordersTable({
   campaignId,
   currency,
@@ -49,6 +62,7 @@ export function PreordersTable({
   unlocked,
   limit,
   emptyHint,
+  filters,
 }: {
   campaignId: string;
   currency: string;
@@ -56,6 +70,7 @@ export function PreordersTable({
   unlocked: PreorderAccessSummary[];
   limit?: number;
   emptyHint?: string;
+  filters?: PreorderTableFilters;
 }) {
   const th = "text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9";
   const rows = limit ? subs.slice(0, limit) : subs;
@@ -65,8 +80,34 @@ export function PreordersTable({
       <TableHeader>
         <TableRow className="hover:bg-transparent border-b border-border">
           <TableHead className={cn(th, "pl-5")}>Partner</TableHead>
-          <TableHead className={th}>Market</TableHead>
-          <TableHead className={th}>Stage</TableHead>
+          <TableHead className={th}>
+            {filters ? (
+              <HeaderFilter
+                label="Market"
+                value={filters.market}
+                onChange={filters.onMarket}
+                options={[{ value: "none", label: "No market" }, ...filters.markets.map((m) => ({ value: m, label: m }))]}
+              />
+            ) : (
+              "Market"
+            )}
+          </TableHead>
+          <TableHead className={th}>
+            {filters ? (
+              <HeaderFilter
+                label="Stage"
+                value={filters.stage}
+                onChange={(v) => filters.onStage(v as StageFilter)}
+                options={STAGE_FILTERS.filter((f) => f.value !== "all").map((f) => ({
+                  value: f.value,
+                  label: f.value === "failures" ? <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400"><AlertTriangle className="w-3 h-3" /> {f.label}</span> : f.label,
+                  count: f.value === "failures" && filters.failures > 0 ? filters.failures : undefined,
+                }))}
+              />
+            ) : (
+              "Stage"
+            )}
+          </TableHead>
           <TableHead className={cn(th, "text-right")}>Requested</TableHead>
           <TableHead className={th}>Metakocka</TableHead>
           <TableHead className={th}>Visibility</TableHead>
@@ -84,7 +125,7 @@ export function PreordersTable({
               </Link>
             </TableCell>
             <TableCell className="text-[12px] whitespace-nowrap">
-              <span className="text-muted-foreground">{s.countryIso ? `${flagEmoji(s.countryIso)} ${s.countryIso}` : "—"}</span>
+              <span className="text-muted-foreground inline-flex items-center gap-1">{s.countryIso ? <><Flag iso={s.countryIso} /> {s.countryIso}</> : "—"}</span>
               {s.marketName && <span className="ml-1.5 text-foreground">{s.marketName}</span>}
             </TableCell>
             <TableCell>
@@ -106,7 +147,7 @@ export function PreordersTable({
             </TableCell>
             <TableCell className="text-[12px] whitespace-nowrap">
               {s.mkCountCode && s.mkId ? (
-                <Link href={`/documents/${encodeURIComponent(s.partnerMkId)}/order/${encodeURIComponent(s.mkId)}`} className="inline-flex items-center gap-1 font-mono text-foreground hover:text-lime-600">
+                <Link href={`/documents/orders/${encodeURIComponent(s.mkId)}`} className="inline-flex items-center gap-1 font-mono text-foreground hover:text-lime-600">
                   {s.mkCountCode} <ExternalLink className="w-3 h-3" />
                 </Link>
               ) : s.mkState === "failed" ? (
@@ -137,7 +178,7 @@ export function PreordersTable({
               <div className="text-[13px] font-medium text-foreground truncate">{u.partnerName}</div>
               {u.partnerEmail && <div className="text-[11px] text-muted-foreground truncate">{u.partnerEmail}</div>}
             </TableCell>
-            <TableCell className="text-[12px] text-muted-foreground">{u.countryIso ? `${flagEmoji(u.countryIso)} ${u.countryIso}` : "—"}</TableCell>
+            <TableCell className="text-[12px] text-muted-foreground">{u.countryIso ? <span className="inline-flex items-center gap-1"><Flag iso={u.countryIso} /> {u.countryIso}</span> : "—"}</TableCell>
             <TableCell>
               <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 px-2 py-0.5 text-[11px] font-medium">
                 <Mail className="w-2.5 h-2.5" /> Invited
@@ -200,14 +241,16 @@ export function PreordersTableSkeleton({ rows = 6 }: { rows?: number }) {
   );
 }
 
-export default function SubmissionsClient({ campaignId }: { campaignId: string }) {
+const STAGE_VALUES = new Set<string>(STAGE_FILTERS.map((f) => f.value));
+
+export default function SubmissionsClient({ campaignId, initialStage }: { campaignId: string; initialStage?: string }) {
   const [campaign, setCampaign] = useState<PreorderCampaign | null>(null);
   const [subs, setSubs] = useState<PreorderSubmissionSummary[]>([]);
   const [unlocked, setUnlocked] = useState<PreorderAccessSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
-  const [stage, setStage] = useState<StageFilter>("all");
+  const [stage, setStage] = useState<StageFilter>(initialStage && STAGE_VALUES.has(initialStage) ? (initialStage as StageFilter) : "all");
   const [market, setMarket] = useState<string>("all");
 
   useEffect(() => {
@@ -240,33 +283,97 @@ export default function SubmissionsClient({ campaignId }: { campaignId: string }
 
   const failures = subs.filter((s) => s.mkState === "failed").length;
 
+  // Campaign-wide "Show order to customer": every registered, still-hidden preorder.
+  const showable = useMemo(() => subs.filter((s) => s.stage === "registered" && !s.published), [subs]);
+  const shown = useMemo(() => subs.filter((s) => s.published), [subs]);
+  const [bulk, setBulk] = useState<null | { published: boolean }>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<null | { published: boolean; total: number; done: number; skipped: { partnerName: string; error?: string }[] }>(null);
+
+  const runBulk = async (published: boolean) => {
+    setBulkBusy(true);
+    try {
+      const r = await fetch(`/api/admin/preorder/campaigns/${campaignId}/submissions/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ published }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error ?? "Failed");
+      setBulkResult(j);
+      const s = await fetch(`/api/admin/preorder/campaigns/${campaignId}/submissions`).then((x) => x.json());
+      setSubs(s?.submissions ?? []);
+      setUnlocked(s?.unlocked ?? []);
+    } catch (e) {
+      setBulkResult({ published, total: 0, done: 0, skipped: [{ partnerName: "—", error: e instanceof Error ? e.message : "Failed" }] });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
-      <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="flex items-center gap-3 px-4 md:px-6 h-14">
-          <Link href="/preorder" className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back">
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
-          <div className="min-w-0">
-            {campaign ? (
-              <>
-                <h1 className="text-[15px] font-semibold text-foreground truncate leading-tight">{campaign.title}</h1>
-                <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><CampaignStatusBadge status={campaign.status} /> Preorders</div>
-              </>
+      <CampaignHeader
+        campaignId={campaignId}
+        active="preorders"
+        title={campaign ? campaign.title : <SkeletonLine lh="h-[19px]" h="h-3.5" w="w-48" />}
+        meta={campaign ? <><CampaignStatusBadge status={campaign.status} /> Preorders</> : <Skeleton className="h-2.5 w-24" delay={40} />}
+        actions={
+          !loading && !error ? (
+            <>
+              {shown.length > 0 && (
+                <Button variant="outline" size="sm" className="h-8" onClick={() => setBulk({ published: false })} title="Hide every shown order from its customer again">
+                  <EyeOff className="w-3.5 h-3.5" /> Hide all ({shown.length})
+                </Button>
+              )}
+              <Button size="sm" className="h-8 bg-lime-600 hover:bg-lime-700 text-white" onClick={() => setBulk({ published: true })} disabled={showable.length === 0} title={showable.length ? "Show every registered Metakocka order to its customer" : "No registered, still-hidden orders"}>
+                <Eye className="w-3.5 h-3.5" /> Show all orders to customers{showable.length ? ` (${showable.length})` : ""}
+              </Button>
+            </>
+          ) : undefined
+        }
+      />
+
+      <Dialog open={!!bulk} onOpenChange={(o) => { if (!o && !bulkBusy) { setBulk(null); setBulkResult(null); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {bulk?.published ? <Eye className="w-4 h-4 text-lime-600" /> : <EyeOff className="w-4 h-4" />}
+              {bulk?.published ? "Show all orders to customers" : "Hide all orders from customers"}
+            </DialogTitle>
+            <DialogDescription>
+              {bulk?.published
+                ? `${showable.length} registered preorder${showable.length === 1 ? "" : "s"} will show the current Metakocka order on the customer's preorder page and under their orders. Each order is re-read from Metakocka first; ones that no longer exist are skipped.`
+                : `${shown.length} customer${shown.length === 1 ? "" : "s"} will stop seeing their order until you show it again.`}
+            </DialogDescription>
+          </DialogHeader>
+          {bulkResult && (
+            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-[12px] space-y-1">
+              <div className="flex items-center gap-1.5 text-foreground font-medium"><Check className="w-3.5 h-3.5 text-lime-600" /> {bulkResult.done} of {bulkResult.total} {bulkResult.published ? "shown" : "hidden"}</div>
+              {bulkResult.skipped.length > 0 && (
+                <ul className="text-amber-700 dark:text-amber-300 space-y-0.5">
+                  {bulkResult.skipped.map((x, i) => (
+                    <li key={i}>{x.partnerName}: {x.error}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            {bulkResult ? (
+              <Button size="sm" onClick={() => { setBulk(null); setBulkResult(null); }}>Done</Button>
             ) : (
               <>
-                <SkeletonLine lh="h-[19px]" h="h-3.5" w="w-48" />
-                <SkeletonLine lh="h-[19.5px]" w="w-24" delay={40} />
+                <Button variant="outline" size="sm" onClick={() => setBulk(null)} disabled={bulkBusy}>Cancel</Button>
+                <Button size="sm" className={cn(bulk?.published && "bg-lime-600 hover:bg-lime-700 text-white")} onClick={() => bulk && runBulk(bulk.published)} disabled={bulkBusy}>
+                  {bulkBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : bulk?.published ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  {bulk?.published ? `Show ${showable.length}` : `Hide ${shown.length}`}
+                </Button>
               </>
             )}
-          </div>
-          <div className="flex-1" />
-          <CampaignNav campaignId={campaignId} active="preorders" compact className="hidden md:flex" />
-        </div>
-        <div className="px-4 md:px-6 pb-2 md:hidden">
-          <CampaignNav campaignId={campaignId} active="preorders" compact />
-        </div>
-      </header>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
         {error ? (
@@ -281,28 +388,17 @@ export default function SubmissionsClient({ campaignId }: { campaignId: string }
                 <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search partner…" className="h-8 w-56 pl-8 text-[12px]" />
               </div>
-              <Select value={stage} onValueChange={(v) => setStage(v as StageFilter)}>
-                <SelectTrigger size="sm" className="h-8 w-44 text-[12px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {STAGE_FILTERS.map((f) => (
-                    <SelectItem key={f.value} value={f.value} className="text-[12px]">
-                      {f.label}
-                      {f.value === "failures" && failures > 0 ? ` (${failures})` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {markets.length > 0 && (
-                <Select value={market} onValueChange={setMarket}>
-                  <SelectTrigger size="sm" className="h-8 w-40 text-[12px]"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" className="text-[12px]">All markets</SelectItem>
-                    <SelectItem value="none" className="text-[12px]">No market</SelectItem>
-                    {markets.map((m) => (
-                      <SelectItem key={m} value={m} className="text-[12px]">{m}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              {(stage !== "all" || market !== "all") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStage("all");
+                    setMarket("all");
+                  }}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-3 h-3" /> Reset filters
+                </button>
               )}
               {failures > 0 && stage !== "failures" && (
                 <button onClick={() => setStage("failures")} className="ml-auto inline-flex items-center gap-1 rounded-full bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300 px-2 py-0.5 text-[11px] font-medium">
@@ -318,6 +414,7 @@ export default function SubmissionsClient({ campaignId }: { campaignId: string }
                 currency={campaign?.currency ?? "EUR"}
                 subs={filtered.rows}
                 unlocked={filtered.invited}
+                filters={{ stage, onStage: setStage, market, onMarket: setMarket, markets, failures }}
                 emptyHint={subs.length === 0 && unlocked.length === 0 ? "No one has unlocked this preorder yet. Copy the invite link from the overview and share it." : `No preorders match ${stage !== "all" ? SUBMISSION_STAGE_LABELS[stage as SubmissionStage] ?? stage : "the search"}.`}
               />
             )}

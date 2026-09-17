@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getProduct } from "@/lib/product-api";
-import { getMkProductPrices, pickMkListGrossPrice, productTaxCode } from "@/lib/metakocka";
+import { getMkProductPrices, pickMkListGrossPrice, pickMkListNetPrice, productTaxCode } from "@/lib/metakocka";
 import type { CatalogueProduct } from "@/types/product";
 import type { PreorderRow } from "@/types/preorder";
 
@@ -98,9 +98,10 @@ function expand(
   };
 }
 
-// Override the RRP / partner price columns with the GROSS price (discount + VAT
-// included — the real price to show) read straight from Metakocka for the selected
-// lists (authoritative — the catalogue can't carry tier discounts). Catalogue-derived
+// Override the RRP / partner price columns straight from Metakocka for the selected
+// lists (authoritative — the catalogue can't carry tier discounts): RRP is the GROSS
+// consumer price (VAT included), the partner price is NET (VAT excluded — companies
+// are zero-rated and pay exactly this). Catalogue-derived
 // prices remain as the fallback when no list is selected or a product isn't priced in
 // the chosen list. Mutates rows in place.
 async function applyMkPrices(groups: ProductGroupDraft[], sel: PriceListSelection): Promise<void> {
@@ -122,7 +123,7 @@ async function applyMkPrices(groups: ProductGroupDraft[], sel: PriceListSelectio
         if (p != null) r.rrp = p;
       }
       if (sel.partnerPricelist) {
-        const p = pickMkListGrossPrice(entries, sel.partnerPricelist, { untaxedIsNet: true });
+        const p = pickMkListNetPrice(entries, sel.partnerPricelist);
         if (p != null) r.partnerPrice = p;
       }
     }

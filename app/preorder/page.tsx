@@ -76,8 +76,8 @@ export default function PreorderCampaignsPage() {
     try {
       const r = await fetch(`/api/admin/preorder/campaigns/${id}/invite`);
       const d = await r.json();
-      if (d?.path) {
-        await navigator.clipboard.writeText(`${window.location.origin}${d.path}`);
+      if (d?.url) {
+        await navigator.clipboard.writeText(d.url);
         setCopiedId(id);
         setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1800);
       }

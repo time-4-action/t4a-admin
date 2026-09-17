@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import "flag-icons/css/flag-icons.min.css";
 import "./globals.css";
 import AppShell from "@/components/app-shell";
 import { CurrencyProvider } from "@/lib/currency-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { auth0 } from "@/lib/auth";
+import { readImpersonation } from "@/lib/portal-impersonation";
 import { rolesFromIdToken } from "@/lib/access";
 
 const geistSans = Geist({
@@ -31,6 +33,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const session = await auth0.getSession();
   const user = session?.user;
   const roles = rolesFromIdToken(session?.tokenSet?.idToken);
+  // An admin viewing the portal as a customer (signed cookie + eligible role).
+  const imp = session ? await readImpersonation() : null;
+  const viewingAs = imp ? { partnerMkId: imp.partnerMkId, partnerName: imp.partnerName } : null;
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -42,7 +47,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       >
         <ThemeProvider>
           <CurrencyProvider>
-            <AppShell user={user} roles={roles}>
+            <AppShell user={user} roles={roles} viewingAs={viewingAs}>
               {children}
             </AppShell>
           </CurrencyProvider>

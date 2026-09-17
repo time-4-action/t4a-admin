@@ -25,6 +25,7 @@ export interface IMkCustomer extends Document {
   address: { street?: string | null; postNumber?: string | null; city?: string | null; countryRaw?: string | null };
   countryIso?: string | null; // resolved from MK
   countrySource?: "mk" | "home-fallback" | null;
+  countryResolverVersion?: number | null; // lib/countries COUNTRY_RESOLVER_VERSION at resolve time
   countryIsoManual?: string | null; // admin override
   manualGeo?: { lat: number; lng: number; setBy?: string | null; setAt: Date } | null;
   mkSyncedAt: Date;
@@ -52,6 +53,7 @@ const MkCustomerSchema = new Schema<IMkCustomer>(
     },
     countryIso: { type: String, default: null },
     countrySource: { type: String, default: null },
+    countryResolverVersion: { type: Number, default: null },
     countryIsoManual: { type: String, default: null },
     manualGeo: {
       type: new Schema(

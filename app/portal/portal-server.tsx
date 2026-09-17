@@ -4,7 +4,7 @@ import { getDocument, pdfSupported } from "@/lib/metakocka";
 import { customerMayViewDocument } from "@/lib/preorder-visibility";
 import { DocumentList, DocumentDetail } from "@/app/documents/documents-shared";
 import { CustomerInfoStrip } from "@/app/documents/customer-header";
-import { DOC_KIND_LABELS, type DocKind } from "@/types/documents";
+import { DOC_KIND_LABELS, DOC_KIND_SLUGS, type DocKind } from "@/types/documents";
 
 // Server building blocks for the customer portal so each route file is a one-liner.
 // Both resolve the partner from the session email and redirect unmatched users to
@@ -12,7 +12,7 @@ import { DOC_KIND_LABELS, type DocKind } from "@/types/documents";
 // full-width content, same list/detail components).
 
 function slugFor(kind: DocKind): string {
-  return DOC_KIND_LABELS[kind].plural.toLowerCase(); // invoices | orders
+  return DOC_KIND_SLUGS[kind]; // invoices | credit-notes | orders
 }
 
 export async function PortalListPage({ kind }: { kind: DocKind }) {
@@ -53,10 +53,11 @@ export async function PortalDetailPage({ kind, mkId }: { kind: DocKind; mkId: st
     ? `/api/portal/documents/pdf?kind=${kind}&mkId=${encodeURIComponent(mkId)}`
     : undefined;
 
-  // Related documents are internal (offers, delivery notes, …) — hidden from customers.
+  // Related documents: only the customer-facing families (invoice ↔ sales order,
+  // invoice ↔ credit note), linked inside the portal.
   return (
     <div className="h-full">
-      <DocumentDetail detail={detail} pdfHref={pdfHref} backHref={`/portal/${slugFor(kind)}`} showLinks={false} wide />
+      <DocumentDetail detail={detail} pdfHref={pdfHref} backHref={`/portal/${slugFor(kind)}`} links="customer" linkHrefBase="/portal" wide />
     </div>
   );
 }

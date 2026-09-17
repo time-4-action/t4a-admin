@@ -21,6 +21,9 @@ export const SECTION_ROLES = {
   builder: ["admin", "builder-admin"],
   documents: ["admin", "documents-admin"],
   preorder: ["admin", "preorder-admin"],
+  // The customer directory + "view the portal as a customer": preorder-admins have
+  // it implicitly, customers-admin grants it on its own.
+  customers: ["admin", "preorder-admin", "customers-admin"],
   system: ["admin"],
 } as const;
 
@@ -85,6 +88,7 @@ export const ROUTE_RULES: { prefix: string; section: SectionKey }[] = [
   { prefix: "/builder/access", section: "system" },
   { prefix: "/documents/access", section: "system" },
   { prefix: "/preorder/access", section: "system" },
+  { prefix: "/customers/access", section: "system" },
   // pages
   { prefix: "/warranty", section: "warranty" },
   { prefix: "/partners", section: "partners" },
@@ -92,6 +96,7 @@ export const ROUTE_RULES: { prefix: string; section: SectionKey }[] = [
   { prefix: "/builder", section: "builder" },
   { prefix: "/documents", section: "documents" },
   { prefix: "/preorder", section: "preorder" },
+  { prefix: "/customers", section: "customers" },
   { prefix: "/roles", section: "access" },
   { prefix: "/ai", section: "ai" },
   { prefix: "/users", section: "general" },
@@ -102,6 +107,10 @@ export const ROUTE_RULES: { prefix: string; section: SectionKey }[] = [
   { prefix: "/api/partners", section: "partners" },
   { prefix: "/api/automation", section: "automation" },
   { prefix: "/api/admin/documents", section: "documents" },
+  // The directory endpoints serve the Customers section too (before the broader
+  // /api/admin/preorder rule).
+  { prefix: "/api/admin/preorder/customers", section: "customers" },
+  { prefix: "/api/admin/portal", section: "customers" },
   { prefix: "/api/admin/preorder", section: "preorder" },
   { prefix: "/api/admin/roles", section: "access" },
   { prefix: "/api/admin/resource-servers", section: "access" },

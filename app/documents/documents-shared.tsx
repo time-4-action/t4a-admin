@@ -1,10 +1,10 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { HeaderFilter } from "@/components/ui/header-filter";
 import {
   Download,
   Search,
@@ -30,9 +30,12 @@ import {
 } from "lucide-react";
 import {
   DOC_KIND_LABELS,
+  DOC_KIND_SLUGS,
+  isBillKind,
   type DocDetail,
   type DocKind,
   type DocLine,
+  type DocLink,
   type DocSummary,
   type MkPartnerRef,
   type PaymentState,
@@ -44,8 +47,10 @@ import {
 
 // ── formatting ───────────────────────────────────────────────────────────────
 
+// A missing / empty amount is zero (Metakocka leaves sum fields out on a 0 document),
+// never a dash — a total is always a number.
 export function fmtMoney(amount?: string, currency?: string): string {
-  if (amount === undefined) return "—";
+  if (amount === undefined || amount.trim() === "") amount = "0";
   const n = parseFloat(amount.replace(",", "."));
   if (!Number.isFinite(n)) return amount;
   if (currency) {
@@ -79,6 +84,7 @@ export const KIND_ICON: Record<DocKind, React.ElementType> = {
   offer: FileText,
   order: ClipboardList,
   invoice: ReceiptText,
+  "credit-note": FileMinus,
 };
 
 // ── payment badge ────────────────────────────────────────────────────────────
@@ -204,7 +210,7 @@ export function DocumentList({
   hrefBase: string;
 }) {
   const state = useDocumentList(listUrl, kind);
-  const isInvoice = kind === "invoice";
+  const isBill = isBillKind(kind);
   const filters = useDocumentFilters(kind);
   const allItems = state.status === "ready" ? state.items : EMPTY_ITEMS;
   const sort = useDocumentSort(kind);
@@ -230,7 +236,7 @@ export function DocumentList({
     return (
       <div className="rounded-2xl border border-dashed border-border bg-surface px-4 py-12 text-center">
         <Icon className="mx-auto h-8 w-8 text-muted-foreground/40" />
-        <p className="mt-3 text-[13px] text-muted-foreground">No {kind}s yet.</p>
+        <p className="mt-3 text-[13px] text-muted-foreground">No {DOC_KIND_LABELS[kind].plural.toLowerCase()} yet.</p>
       </div>
     );
   }
@@ -239,7 +245,7 @@ export function DocumentList({
 
   return (
     <div className="space-y-4">
-      {isInvoice && <InvoiceSummary items={state.items} />}
+      {isBill ? <BillSummary kind={kind} items={state.items} /> : <OrderSummaryStrip items={state.items} />}
       <div className="rounded-2xl border border-border bg-surface overflow-hidden">
         <DocumentFilterBar kind={kind} items={state.items} filters={filters} shown={filtered.length} />
 
@@ -248,7 +254,7 @@ export function DocumentList({
         <div className={cn(gridCols(kind), "hidden md:grid px-4 h-9 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border/60 bg-muted/25")}>
           <SortHeader col="doc" sort={sort}>{DOC_KIND_LABELS[kind].singular}</SortHeader>
           <SortHeader col="issued" sort={sort}>Issued</SortHeader>
-          {isInvoice && <SortHeader col="due" sort={sort}>Due</SortHeader>}
+          {isBill && <SortHeader col="due" sort={sort}>Due</SortHeader>}
           <SortHeader col="items" sort={sort} align="center">Items</SortHeader>
           <StatusHeader kind={kind} items={state.items} filters={filters} />
           <SortHeader col="amount" sort={sort} align="right">Amount</SortHeader>
@@ -283,7 +289,7 @@ export function DocumentList({
 // a table at any width — no single column swallows the slack. Mobile collapses
 // to document + amount; the hidden columns fold into the document cell.
 function gridCols(kind: DocKind): string {
-  return kind === "invoice"
+  return isBillKind(kind)
     ? "grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.5fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-4"
     : "grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,0.5fr)_minmax(0,1.2fr)_minmax(0,1fr)] items-center gap-x-4";
 }
@@ -345,12 +351,12 @@ function DocumentRow({
   activeStatus: string;
   onStatus: (key: string) => void;
 }) {
-  const isInvoice = d.kind === "invoice";
+  const isBill = isBillKind(d.kind);
   const fresh = isNewOrder(d);
   const key = statusKey(d);
   const status = (
     <StatusFilterTrigger active={activeStatus === key} label={statusLabel(d.kind, key)} onClick={() => onStatus(key)}>
-      {isInvoice ? (
+      {isBill ? (
         <PaymentBadge state={d.payment} />
       ) : d.kind === "order" ? (
         <OrderStatusPill d={d} />
@@ -359,8 +365,8 @@ function DocumentRow({
       )}
     </StatusFilterTrigger>
   );
-  const remaining = isInvoice ? amt(d.sumAll) - amt(d.sumPaid) : 0;
-  const partial = isInvoice && d.payment === "partial" && remaining > 0.005;
+  const remaining = isBill ? amt(d.sumAll) - amt(d.sumPaid) : 0;
+  const partial = isBill && d.payment === "partial" && remaining > 0.005;
 
   return (
     <Link
@@ -382,13 +388,13 @@ function DocumentRow({
           {fmtDate(d.docDate)}
           {d.title ? ` · ${d.title}` : ""}
         </p>
-        {isInvoice && (
+        {isBill && (
           <p className="md:hidden text-[12px] mt-1">
             <DueCell d={d} compact />
           </p>
         )}
         <div className="md:hidden mt-1.5 flex items-center gap-1.5">
-          {!isInvoice && isOnlineOrder(d) && <OnlineBadge />}
+          {!isBill && isOnlineOrder(d) && <OnlineBadge />}
           {status}
         </div>
       </div>
@@ -396,8 +402,8 @@ function DocumentRow({
       {/* Issued */}
       <p className="hidden md:block text-[13px] text-muted-foreground tabular-nums truncate">{fmtDate(d.docDate)}</p>
 
-      {/* Due (invoices) */}
-      {isInvoice && (
+      {/* Due (bills) */}
+      {isBill && (
         <div className="hidden md:block">
           <DueCell d={d} />
         </div>
@@ -408,7 +414,7 @@ function DocumentRow({
 
       {/* Status */}
       <div className="hidden md:flex items-center gap-1.5 min-w-0">
-        {!isInvoice && isOnlineOrder(d) && <OnlineBadge />}
+        {!isBill && isOnlineOrder(d) && <OnlineBadge />}
         {status}
       </div>
 
@@ -489,12 +495,12 @@ type DocFiltersApi = ReturnType<typeof useDocumentFilters>;
 // The status key a document is filtered by: invoices by payment state, orders
 // by MK's fulfilment status, anything else by its raw status text.
 function statusKey(d: DocSummary): string {
-  if (d.kind === "invoice") return d.payment ?? "na";
+  if (isBillKind(d.kind)) return d.payment ?? "na";
   return (d.statusDesc || d.statusCode || "").toLowerCase() || "unknown";
 }
 
 function statusLabel(kind: DocKind, key: string): string {
-  if (kind === "invoice") return key === "na" ? "Nothing due" : (PAYMENT_META[key as PaymentState]?.label ?? key);
+  if (isBillKind(kind)) return key === "na" ? "Nothing due" : (PAYMENT_META[key as PaymentState]?.label ?? key);
   if (kind === "order" && ORDER_STATUS_META[key]) return ORDER_STATUS_META[key].label;
   const pretty = key.replace(/_/g, " ");
   return pretty.charAt(0).toUpperCase() + pretty.slice(1);
@@ -584,42 +590,22 @@ function SortHeader({
   );
 }
 
-// The "Status" heading doubles as the status filter: a borderless select in
-// the header row, listing only the statuses present (with counts).
+// The "Status" heading doubles as the status filter (shared HeaderFilter look),
+// listing only the statuses present, with counts.
 function StatusHeader({ kind, items, filters }: { kind: DocKind; items: DocSummary[]; filters: DocFiltersApi }) {
   const statuses = useMemo(() => {
     const seen = new Map<string, number>();
     for (const d of items) seen.set(statusKey(d), (seen.get(statusKey(d)) ?? 0) + 1);
     return Array.from(seen.entries()).sort((a, b) => b[1] - a[1]);
   }, [items]);
-  const active = filters.value.status !== "all";
   return (
     <div className="min-w-0 flex items-center">
-      <Select value={filters.value.status} onValueChange={(v) => filters.set("status", v)}>
-        <SelectTrigger
-          size="sm"
-          aria-label="Filter by status"
-          className={cn(
-            "h-6 max-w-full gap-1 rounded-md border-0 bg-transparent px-1.5 -ml-1.5 shadow-none text-[10px] font-semibold uppercase tracking-wide",
-            "hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring dark:bg-transparent dark:hover:bg-muted [&_svg]:size-3",
-            active ? "text-teal-600 dark:text-teal-400" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <SelectValue placeholder="Status" />
-        </SelectTrigger>
-        <SelectContent align="start">
-          <SelectItem value="all" className="text-xs">
-            <span className="uppercase tracking-wide font-semibold">Status</span>
-            <span className="ml-1 normal-case tracking-normal font-normal text-muted-foreground">all</span>
-          </SelectItem>
-          {statuses.map(([key, n]) => (
-            <SelectItem key={key} value={key} className="text-xs">
-              <span className="uppercase tracking-wide font-semibold">{statusLabel(kind, key)}</span>
-              <span className="ml-1 normal-case tracking-normal font-normal text-muted-foreground tabular-nums">{n}</span>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <HeaderFilter
+        label="Status"
+        value={filters.value.status}
+        onChange={(v) => filters.set("status", v)}
+        options={statuses.map(([key, n]) => ({ value: key, label: statusLabel(kind, key), count: n }))}
+      />
     </div>
   );
 }
@@ -648,34 +634,79 @@ function DocumentFilterBar({
   // Search + count only; the status filter sits in the table header.
   const f = filters.value;
   const noun = DOC_KIND_LABELS[kind].plural.toLowerCase();
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const field = "h-8 text-xs bg-background";
+  // "/" focuses the search from anywhere on the page; Esc clears it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+      if (e.key === "/" && !typing) {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const searching = f.q.trim().length > 0;
 
   return (
     <div className="px-3 py-2.5 border-b border-border/60 flex flex-wrap items-center gap-2">
-      <div className="relative w-full sm:w-56">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" aria-hidden />
+      <div className="relative w-full sm:w-96">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden />
         <Input
-          placeholder={`Search ${noun}…`}
+          ref={inputRef}
+          placeholder={`Search ${noun} by number, product or reference…`}
           value={f.q}
           onChange={(e) => filters.set("q", e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              filters.set("q", "");
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
           aria-label={`Search ${noun}`}
-          className={cn(field, "pl-8 w-full")}
+          className="h-9 w-full rounded-lg bg-background pl-9 pr-16 text-[13px] shadow-none focus-visible:ring-2"
         />
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+          {searching ? (
+            <button
+              type="button"
+              onClick={() => {
+                filters.set("q", "");
+                inputRef.current?.focus();
+              }}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label="Clear search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <kbd className="hidden sm:inline-flex h-5 items-center rounded border border-border bg-muted/60 px-1.5 font-mono text-[10px] text-muted-foreground" title="Press / to search">
+              /
+            </kbd>
+          )}
+        </div>
       </div>
 
-      {filters.active && (
+      {filters.active && !searching && (
         <button
           type="button"
           onClick={filters.reset}
           className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-[12px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <X className="h-3.5 w-3.5" /> Clear
+          <X className="h-3.5 w-3.5" /> Clear filters
         </button>
       )}
 
       <p className="ml-auto text-[12px] text-muted-foreground tabular-nums">
-        {filters.active ? (
+        {searching ? (
+          <>
+            <span className="font-semibold text-foreground">{shown}</span> {shown === 1 ? "result" : "results"} for <span className="text-foreground">&ldquo;{f.q.trim()}&rdquo;</span>
+          </>
+        ) : filters.active ? (
           <>
             <span className="font-semibold text-foreground">{shown}</span> of {items.length} {noun}
           </>
@@ -722,12 +753,44 @@ function Pager({ total, paging, noun }: { total: number; paging: Paging; noun: s
   );
 }
 
-// Overview strip above an invoice list: total invoiced, paid, and outstanding
-// (with unpaid / overdue counts). Money tiles only render when every invoice
+// Overview strip above a bill list: total invoiced, paid, and outstanding
+// (with unpaid / overdue counts). Money tiles only render when every bill
 // shares one currency; otherwise counts are shown to avoid summing across
-// currencies.
-function InvoiceSummary({ items }: { items: DocSummary[] }) {
+// currencies. Credit notes are the mirror image — the amount credited, how
+// much of it has been refunded, and what is still open.
+// The orders' twin of BillSummary: how many, how many items, how much.
+function OrderSummaryStrip({ items }: { items: DocSummary[] }) {
   if (items.length === 0) return null;
+  const currencies = Array.from(new Set(items.map((d) => d.currency).filter(Boolean)));
+  const singleCurrency = currencies.length === 1 ? (currencies[0] as string) : undefined;
+  const value = items.reduce((n, d) => n + amt(d.sumAll), 0);
+  const lines = items.reduce((n, d) => n + (d.itemCount ?? 0), 0);
+  const invoiced = items.filter((d) => (d.statusDesc ?? "").toLowerCase().includes("invoic") || (d.statusDesc ?? "").toLowerCase().includes("račun")).length;
+  const money = (n: number) => (singleCurrency ? fmtMoney(n.toFixed(2), singleCurrency) : `${n.toFixed(2)}`);
+  return (
+    <div className="grid grid-cols-3 rounded-2xl border border-border bg-surface overflow-hidden divide-x divide-border/60">
+      <div className="px-4 py-3">
+        <p className="text-[11px] text-muted-foreground">Orders</p>
+        <p className="text-[15px] font-bold text-foreground tabular-nums mt-0.5">{items.length}</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5">{invoiced} invoiced</p>
+      </div>
+      <div className="px-4 py-3">
+        <p className="text-[11px] text-muted-foreground">Items</p>
+        <p className="text-[15px] font-bold text-foreground tabular-nums mt-0.5">{lines}</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5">product lines</p>
+      </div>
+      <div className="px-4 py-3">
+        <p className="text-[11px] text-muted-foreground">Ordered value</p>
+        <p className="text-[15px] font-bold text-foreground tabular-nums mt-0.5">{money(value)}</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5">{singleCurrency ?? "mixed currencies"}</p>
+      </div>
+    </div>
+  );
+}
+
+function BillSummary({ kind, items }: { kind: DocKind; items: DocSummary[] }) {
+  if (items.length === 0) return null;
+  const credit = kind === "credit-note";
   const currencies = Array.from(new Set(items.map((d) => d.currency).filter(Boolean)));
   const singleCurrency = currencies.length === 1 ? (currencies[0] as string) : undefined;
 
@@ -752,17 +815,17 @@ function InvoiceSummary({ items }: { items: DocSummary[] }) {
   return (
     <div className="grid grid-cols-3 rounded-2xl border border-border bg-surface overflow-hidden divide-x divide-border/60">
       <div className="px-4 py-3">
-        <p className="text-[11px] text-muted-foreground">Invoiced</p>
+        <p className="text-[11px] text-muted-foreground">{credit ? "Credited" : "Invoiced"}</p>
         <p className="text-[15px] font-bold text-foreground tabular-nums mt-0.5">{money(invoiced)}</p>
         <p className="text-[10px] text-muted-foreground mt-0.5">{items.length} total</p>
       </div>
       <div className="px-4 py-3">
-        <p className="text-[11px] text-muted-foreground">Paid</p>
+        <p className="text-[11px] text-muted-foreground">{credit ? "Refunded" : "Paid"}</p>
         <p className="text-[15px] font-bold text-emerald-600 dark:text-emerald-400 tabular-nums mt-0.5">{money(paid)}</p>
         <p className="text-[10px] text-muted-foreground mt-0.5">{items.length - unpaidCount} settled</p>
       </div>
       <div className="px-4 py-3">
-        <p className="text-[11px] text-muted-foreground">Outstanding</p>
+        <p className="text-[11px] text-muted-foreground">{credit ? "Open" : "Outstanding"}</p>
         <p
           className={cn(
             "text-[15px] font-bold tabular-nums mt-0.5",
@@ -776,7 +839,7 @@ function InvoiceSummary({ items }: { items: DocSummary[] }) {
           {money(outstanding)}
         </p>
         <p className="text-[10px] text-muted-foreground mt-0.5">
-          {unpaidCount} unpaid{overdueCount > 0 ? ` · ${overdueCount} overdue` : ""}
+          {unpaidCount} {credit ? "open" : "unpaid"}{overdueCount > 0 ? ` · ${overdueCount} overdue` : ""}
         </p>
       </div>
     </div>
@@ -903,6 +966,83 @@ const DOC_TYPE_META: { test: RegExp; label: string; icon: React.ElementType }[] 
   { test: /order/, label: "Order", icon: ClipboardList },
 ];
 
+// The customer-facing document family of a linked MK document, or null for the
+// internal ones (delivery notes, work orders, …) that customers never see.
+function linkKind(docType: string): DocKind | null {
+  if (docType === "sales_offer") return "offer";
+  if (docType === "sales_order") return "order";
+  if (docType === "sales_bill_credit_note") return "credit-note";
+  if (docType === "sales_bill_domestic" || docType === "sales_bill_foreign") return "invoice";
+  return null;
+}
+
+// What a customer is shown as related: an invoice → its sales orders and credit
+// notes; a sales order → its invoices; a credit note → its invoices. Nothing else.
+const CUSTOMER_RELATED: Record<DocKind, DocKind[]> = {
+  invoice: ["order", "credit-note"],
+  order: ["invoice"],
+  "credit-note": ["invoice"],
+  offer: ["order"],
+};
+
+// Related documents as a row of the document: one line per family, the documents
+// as linked code chips. `scope` "customer" keeps only the families above and links
+// into the portal; "all" (admin) shows every typed link, internal ones unlinked.
+function RelatedDocuments({ detail, scope, hrefBase }: { detail: DocDetail; scope: "customer" | "all"; hrefBase: string }) {
+  const allowed = scope === "customer" ? CUSTOMER_RELATED[detail.kind] : null;
+  const groups = new Map<string, { label: string; Icon: React.ElementType; kind: DocKind | null; items: DocLink[] }>();
+  const seen = new Set<string>();
+  for (const l of detail.links) {
+    // MK lists a sales order in its own doc_link_list; never a related document.
+    if (l.mkId === detail.mkId || seen.has(l.mkId)) continue;
+    seen.add(l.mkId);
+    const kind = linkKind(l.docType);
+    if (allowed && (!kind || !allowed.includes(kind))) continue;
+    const key = kind ?? l.docType;
+    const meta = kind ? { label: DOC_KIND_LABELS[kind].plural, Icon: KIND_ICON[kind] } : { label: docTypeMeta(l.docType).label, Icon: docTypeMeta(l.docType).Icon };
+    const g = groups.get(key) ?? { ...meta, kind, items: [] };
+    g.items.push(l);
+    groups.set(key, g);
+  }
+  if (groups.size === 0) return null;
+  const rows = Array.from(groups.values()).flatMap((g) => g.items.map((l) => ({ ...l, kind: g.kind, label: g.kind ? DOC_KIND_LABELS[g.kind].singular : g.label, Icon: g.Icon })));
+  return (
+    <div>
+      <div className="px-4 py-2.5 flex items-center gap-2 bg-muted/20 border-b border-border/60">
+        <span className="text-[12px] font-semibold text-foreground">Related documents</span>
+        <span className="text-[11px] text-muted-foreground tabular-nums">{rows.length}</span>
+      </div>
+      <ul className="divide-y divide-border/50">
+        {rows.map((r) => {
+          const inner = (
+            <>
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted shrink-0">
+                <r.Icon className="h-4 w-4 text-muted-foreground" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[11px] text-muted-foreground leading-tight">{r.label}</span>
+                <span className="block text-[13px] font-semibold text-foreground leading-tight truncate">{r.countCode || r.mkId}</span>
+              </span>
+              {r.kind && <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-foreground group-hover:translate-x-0.5 transition-all shrink-0" />}
+            </>
+          );
+          return (
+            <li key={r.mkId}>
+              {r.kind ? (
+                <Link href={`${hrefBase}/${DOC_KIND_SLUGS[r.kind]}/${encodeURIComponent(r.mkId)}`} className="group flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors">
+                  {inner}
+                </Link>
+              ) : (
+                <div className="flex items-center gap-3 px-4 py-2.5 opacity-80">{inner}</div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function docTypeMeta(docType: string): { label: string; Icon: React.ElementType } {
   for (const m of DOC_TYPE_META) {
     if (m.test.test(docType)) return { label: m.label, Icon: m.icon };
@@ -923,22 +1063,26 @@ function TotalRow({ label, value, strong }: { label: string; value?: string | nu
   );
 }
 
-// Invoice payment breakdown: paid so far, remaining balance, and the due date
-// (or the settled date once fully paid).
+// Bill payment breakdown: paid so far, remaining balance, and the due date
+// (or the settled date once fully paid). On a credit note the "payment" is the
+// refund owed to the customer, so the labels flip accordingly.
 function PaymentPanel({ detail }: { detail: DocDetail }) {
+  const credit = detail.kind === "credit-note";
   const remaining = Math.max(0, amt(detail.sumAll) - amt(detail.sumPaid));
   const fully = remaining <= 0.005;
   const overdue = detail.payment === "overdue";
   const c = detail.currency;
+  // Rendered as one row of the framed document (the caller's divide-y draws
+  // the separators), not as a card of its own.
   return (
-    <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+    <div>
       <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
-        <span className="text-[12px] font-semibold text-foreground">Payment</span>
+        <span className="text-[12px] font-semibold text-foreground">{credit ? "Refund" : "Payment"}</span>
         <PaymentBadge state={detail.payment} />
       </div>
       <div className="grid grid-cols-3 divide-x divide-border/50">
         <div className="px-4 py-3">
-          <p className="text-[11px] text-muted-foreground">Paid</p>
+          <p className="text-[11px] text-muted-foreground">{credit ? "Refunded" : "Paid"}</p>
           <p className="text-[15px] font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums mt-0.5">
             {fmtMoney(detail.sumPaid ?? "0", c)}
           </p>
@@ -959,7 +1103,7 @@ function PaymentPanel({ detail }: { detail: DocDetail }) {
           </p>
         </div>
         <div className="px-4 py-3">
-          <p className="text-[11px] text-muted-foreground">{fully ? "Paid on" : "Due date"}</p>
+          <p className="text-[11px] text-muted-foreground">{fully ? (credit ? "Refunded on" : "Paid on") : "Due date"}</p>
           <p
             className={cn(
               "text-[13px] font-medium mt-1",
@@ -979,36 +1123,41 @@ export function DocumentDetail({
   pdfHref,
   backHref,
   showPartner = false,
-  showLinks = true,
+  links = "all",
+  linkHrefBase = "/documents",
   wide = false,
 }: {
   detail: DocDetail;
   pdfHref?: string;
   backHref?: string;
   showPartner?: boolean;
-  // Related documents (offers, delivery notes, …) are internal — the admin
-  // view shows them, the customer portal passes false.
-  showLinks?: boolean;
+  // Related documents: "all" for the admin (every typed link), "customer" for the
+  // portal (only the families a customer is meant to see, linked into the portal),
+  // "none" to hide the row.
+  links?: "all" | "customer" | "none";
+  linkHrefBase?: string;
   wide?: boolean;
 }) {
-  const isInvoice = detail.kind === "invoice";
+  const isBill = isBillKind(detail.kind);
   const isOrder = detail.kind === "order";
   const currency = detail.currency;
   const online = isOnlineOrder(detail);
   const KindIcon = online ? Globe : KIND_ICON[detail.kind];
-  const kindLabel = online ? "Online order" : detail.kind.charAt(0).toUpperCase() + detail.kind.slice(1);
+  const kindLabel = online ? "Online order" : DOC_KIND_LABELS[detail.kind].singular;
   const productCount = detail.lines.filter((l) => !l.isText).length;
 
   return (
-    <div className={cn("px-4 md:px-8 py-6 md:py-8 space-y-4 overflow-y-auto h-full", wide ? "" : "max-w-5xl mx-auto")}>
+    <div className={cn("px-4 md:px-8 py-6 md:py-8 space-y-3 overflow-y-auto h-full", wide ? "" : "max-w-5xl mx-auto")}>
       {backHref && (
         <Link href={backHref} className="inline-block text-[12px] text-muted-foreground hover:text-foreground">
           ← Back
         </Link>
       )}
+      {/* One framed document: hero · addresses · lines · totals · payment · notes, rows divided. */}
+      <div className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
 
       {/* Hero */}
-      <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+      <div className="overflow-hidden">
         <div className="px-5 py-4 flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1021,40 +1170,41 @@ export function DocumentDetail({
               <span className="inline-flex items-center gap-1">
                 <Calendar className="h-3.5 w-3.5" /> Issued {fmtDate(detail.docDate)}
               </span>
-              {isInvoice && detail.dueDate && <span>· Due {fmtDate(detail.dueDate)}</span>}
+              {isBill && detail.dueDate && <span>· Due {fmtDate(detail.dueDate)}</span>}
               {detail.kind === "offer" && detail.validTo && <span>· Valid to {fmtDate(detail.validTo)}</span>}
             </div>
           </div>
-          <div className="shrink-0">
-            {isInvoice ? (
+          {/* State + the one action, top right — the total row below stays a number. */}
+          <div className="shrink-0 flex flex-col items-end gap-2">
+            {isBill ? (
               <PaymentBadge state={detail.payment} />
             ) : detail.kind === "order" ? (
               <OrderStatusPill d={detail} />
             ) : (
               <StatusPill label={detail.statusDesc || detail.statusCode} />
             )}
+            {pdfHref && (
+              <a
+                href={pdfHref}
+                target="_blank"
+                rel="noopener"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1.5 text-[12px] font-medium text-foreground hover:border-foreground/40 hover:bg-muted/40 transition-colors"
+              >
+                <Download className="h-3.5 w-3.5 text-muted-foreground" /> PDF
+              </a>
+            )}
           </div>
         </div>
-        <div className="px-5 py-3 border-t border-border/60 bg-muted/20 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-[11px] text-muted-foreground">Total</p>
-            <p className="text-2xl font-bold text-foreground tabular-nums leading-none mt-0.5">
-              {fmtMoney(detail.sumAll, currency)}
-            </p>
-          </div>
-          {pdfHref && (
-            <a
-              href={pdfHref}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-teal-500 text-white px-3.5 py-2 text-[12px] font-semibold hover:bg-teal-600 transition-colors shrink-0"
-            >
-              <Download className="h-3.5 w-3.5" /> Download PDF
-            </a>
-          )}
+        <div className="px-5 py-3 border-t border-border/60 bg-muted/20 flex items-baseline justify-between gap-4">
+          <p className="text-[11px] text-muted-foreground">Total</p>
+          <p className="text-2xl font-bold text-foreground tabular-nums leading-none">
+            {fmtMoney(detail.sumAll, currency)}
+          </p>
         </div>
       </div>
 
       {showPartner && detail.partner && (
-        <div className="rounded-2xl border border-border bg-surface px-4 py-3 flex items-center gap-3">
+        <div className="px-4 py-3 flex items-center gap-3">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted shrink-0">
             <Building2 className="h-4 w-4 text-muted-foreground" />
           </span>
@@ -1066,12 +1216,12 @@ export function DocumentDetail({
         </div>
       )}
 
-      {/* Billing + delivery addresses (invoices and orders) */}
-      {(isInvoice || isOrder) && detail.partner && <AddressesCard detail={detail} />}
+      {/* Billing + delivery addresses (bills and orders) */}
+      {(isBill || isOrder) && detail.partner && <AddressesCard detail={detail} />}
 
       {/* Line items */}
       {detail.lines.length > 0 && (
-        <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+        <div className="overflow-hidden">
           <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
             <span className="text-[12px] font-semibold text-foreground">Products</span>
             <span className="text-[11px] font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full tabular-nums">
@@ -1149,7 +1299,7 @@ export function DocumentDetail({
       )}
 
       {/* Totals */}
-      <div className="rounded-2xl border border-border bg-surface px-4 py-3">
+      <div className="px-4 py-3">
         <TotalRow label="Subtotal" value={detail.sumBasic ? fmtMoney(detail.sumBasic, currency) : undefined} />
         <TotalRow
           label="Discount"
@@ -1164,42 +1314,20 @@ export function DocumentDetail({
         </div>
       </div>
 
-      {/* Payment (invoices) */}
-      {isInvoice && <PaymentPanel detail={detail} />}
+      {/* Payment (bills) */}
+      {isBill && <PaymentPanel detail={detail} />}
 
       {/* Additional instructions (MK notes_header; rendered HTML, sanitized server-side) */}
       {detail.notes && (
-        <div className="rounded-2xl border border-border bg-surface px-4 py-3.5">
+        <div className="px-4 py-3.5">
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">Additional instructions</p>
           <div className="doc-notes" dangerouslySetInnerHTML={{ __html: detail.notes }} />
         </div>
       )}
 
-      {/* Related documents — typed; team-only */}
-      {showLinks && detail.links.length > 0 && (
-        <div className="rounded-2xl border border-border bg-surface px-4 py-3.5">
-          <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">Related documents</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {detail.links.map((l) => {
-              const { label, Icon } = docTypeMeta(l.docType);
-              return (
-                <div
-                  key={l.mkId}
-                  className="flex items-center gap-2.5 rounded-xl border border-border bg-muted/20 px-3 py-2"
-                >
-                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-500/10 shrink-0">
-                    <Icon className="h-4 w-4 text-teal-500" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
-                    <p className="text-[12px] font-medium text-foreground truncate">{l.countCode || l.mkId}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Related documents */}
+      {links !== "none" && detail.links.length > 0 && <RelatedDocuments detail={detail} scope={links} hrefBase={linkHrefBase} />}
+      </div>
     </div>
   );
 }
@@ -1256,9 +1384,9 @@ function AddressesCard({ detail }: { detail: DocDetail }) {
   const delivery = detail.receiver ?? billing;
   const same = !detail.receiver;
   return (
-    <div className="rounded-2xl border border-border bg-surface overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center gap-2">
-        <MapPin className="h-3.5 w-3.5 text-teal-500" />
+    <div className="overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-border/60 bg-muted/20 flex items-center gap-2">
+        <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-[12px] font-semibold text-foreground">Addresses</span>
         {detail.deliveryType && (
           <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground">
@@ -1286,12 +1414,19 @@ function AddressesCard({ detail }: { detail: DocDetail }) {
 // shape between "loading" and "loaded".
 
 export function DocumentListSkeleton({ kind, rows = 8 }: { kind: DocKind; rows?: number }) {
-  const isInvoice = kind === "invoice";
+  const isBill = isBillKind(kind);
   return (
     <div className="space-y-4">
-      {isInvoice && (
+      {/* Summary strip — bills (Invoiced / Paid / Outstanding, refund wording on
+          credit notes) and orders (Orders / Items / Ordered value); offers have none. */}
+      {(isBill || kind === "order") && (
         <div className="grid grid-cols-3 rounded-2xl border border-border bg-surface overflow-hidden divide-x divide-border/60">
-          {["Invoiced", "Paid", "Outstanding"].map((label, i) => (
+          {(kind === "credit-note"
+            ? ["Credited", "Refunded", "Open"]
+            : kind === "order"
+              ? ["Orders", "Items", "Ordered value"]
+              : ["Invoiced", "Paid", "Outstanding"]
+          ).map((label, i) => (
             <div key={label} className="px-4 py-3">
               <p className="text-[11px] text-muted-foreground">{label}</p>
               {/* text-[15px] → 22.5px; text-[10px] → 15px */}
@@ -1310,7 +1445,7 @@ export function DocumentListSkeleton({ kind, rows = 8 }: { kind: DocKind; rows?:
         <div className={cn(gridCols(kind), "hidden md:grid px-4 h-9 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border/60 bg-muted/25")}>
           <span className="self-center">{DOC_KIND_LABELS[kind].singular}</span>
           <span className="self-center">Issued</span>
-          {isInvoice && <span className="self-center">Due</span>}
+          {isBill && <span className="self-center">Due</span>}
           <span className="self-center text-center">Items</span>
           <span className="self-center">Status</span>
           <span className="self-center text-right">Amount</span>
@@ -1325,7 +1460,7 @@ export function DocumentListSkeleton({ kind, rows = 8 }: { kind: DocKind; rows?:
                 <div className="md:hidden mt-1.5"><Skeleton className="h-[20.5px] w-16 rounded-full" delay={stagger(i, 80, 60)} /></div>
               </div>
               <div className="hidden md:block"><SkeletonLine lh="h-[19.5px]" h="h-3" w="w-24" delay={stagger(i, 80, 30)} /></div>
-              {isInvoice && (
+              {isBill && (
                 <div className="hidden md:block">
                   {/* text-[15px] leading-tight → 18px; text-[11px] → 14px */}
                   <SkeletonLine lh="h-[18px]" h="h-3.5" w="w-28" delay={stagger(i, 80, 40)} />
@@ -1354,16 +1489,19 @@ export function DocumentDetailSkeleton({
   wide?: boolean;
   lines?: number;
 }) {
-  const isInvoice = kind === "invoice";
+  const isBill = isBillKind(kind);
   const isOrder = kind === "order";
   const KindIcon = KIND_ICON[kind];
-  const kindLabel = kind.charAt(0).toUpperCase() + kind.slice(1);
+  const kindLabel = DOC_KIND_LABELS[kind].singular;
   return (
-    <div className={cn("px-4 md:px-8 py-6 md:py-8 space-y-4 overflow-y-auto h-full", wide ? "" : "max-w-5xl mx-auto")}>
+    <div className={cn("px-4 md:px-8 py-6 md:py-8 space-y-3 overflow-y-auto h-full", wide ? "" : "max-w-5xl mx-auto")}>
       <span className="inline-block text-[12px] text-muted-foreground">← Back</span>
 
+      {/* One framed document, rows divided — twin of DocumentDetail. */}
+      <div className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
+
       {/* Hero */}
-      <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+      <div className="overflow-hidden">
         <div className="px-5 py-4 flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1373,23 +1511,23 @@ export function DocumentDetailSkeleton({
             <SkeletonLine lh="h-7 md:h-8" h="h-5 md:h-6" w="w-40" className="mt-1" delay={40} />
             <div className="mt-2 flex items-center gap-x-3">
               <SkeletonLine lh="h-[18px]" w="w-32" delay={80} />
-              {isInvoice && <SkeletonLine lh="h-[18px]" w="w-24" delay={100} />}
+              {isBill && <SkeletonLine lh="h-[18px]" w="w-24" delay={100} />}
             </div>
           </div>
-          <Skeleton className="h-[20.5px] w-16 rounded-full shrink-0" delay={60} />
-        </div>
-        <div className="px-5 py-3 border-t border-border/60 bg-muted/20 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-[11px] text-muted-foreground">Total</p>
-            {/* text-2xl leading-none → 24px */}
-            <Skeleton className="h-6 w-28 mt-0.5 rounded-md" delay={120} />
+          <div className="shrink-0 flex flex-col items-end gap-2">
+            <Skeleton className="h-[20.5px] w-16 rounded-full" delay={60} />
+            <Skeleton className="h-[30px] w-[58px] rounded-lg" delay={80} />
           </div>
-          <Skeleton className="h-[34px] w-[130px] rounded-xl shrink-0" delay={140} />
+        </div>
+        <div className="px-5 py-3 border-t border-border/60 bg-muted/20 flex items-baseline justify-between gap-4">
+          <p className="text-[11px] text-muted-foreground">Total</p>
+          {/* text-2xl leading-none → 24px */}
+          <Skeleton className="h-6 w-28 rounded-md" delay={120} />
         </div>
       </div>
 
       {showPartner && (
-        <div className="rounded-2xl border border-border bg-surface px-4 py-3 flex items-center gap-3">
+        <div className="px-4 py-3 flex items-center gap-3">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted shrink-0">
             <Building2 className="h-4 w-4 text-muted-foreground" />
           </span>
@@ -1401,11 +1539,11 @@ export function DocumentDetailSkeleton({
         </div>
       )}
 
-      {/* Addresses (invoices and orders) */}
-      {(isInvoice || isOrder) && (
-        <div className="rounded-2xl border border-border bg-surface overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center gap-2">
-            <MapPin className="h-3.5 w-3.5 text-teal-500" />
+      {/* Addresses (bills and orders) */}
+      {(isBill || isOrder) && (
+        <div className="overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-border/60 bg-muted/20 flex items-center gap-2">
+            <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-[12px] font-semibold text-foreground">Addresses</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-border/60">
@@ -1423,7 +1561,7 @@ export function DocumentDetailSkeleton({
       )}
 
       {/* Line items */}
-      <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+      <div className="overflow-hidden">
         <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
           <span className="text-[12px] font-semibold text-foreground">Products</span>
           <Skeleton className="h-[20.5px] w-7 rounded-full" delay={200} />
@@ -1458,7 +1596,7 @@ export function DocumentDetailSkeleton({
       </div>
 
       {/* Totals */}
-      <div className="rounded-2xl border border-border bg-surface px-4 py-3">
+      <div className="px-4 py-3">
         {["Subtotal", "Tax"].map((label, i) => (
           <div key={label} className="flex items-baseline justify-between gap-4 py-1">
             <span className="text-[12px] text-muted-foreground">{label}</span>
@@ -1473,15 +1611,15 @@ export function DocumentDetailSkeleton({
         </div>
       </div>
 
-      {/* Payment (invoices) */}
-      {isInvoice && (
-        <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+      {/* Payment (bills) */}
+      {isBill && (
+        <div>
           <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
-            <span className="text-[12px] font-semibold text-foreground">Payment</span>
+            <span className="text-[12px] font-semibold text-foreground">{kind === "credit-note" ? "Refund" : "Payment"}</span>
             <Skeleton className="h-[20.5px] w-16 rounded-full" delay={540} />
           </div>
           <div className="grid grid-cols-3 divide-x divide-border/50">
-            {["Paid", "Remaining", "Due date"].map((label, i) => (
+            {[kind === "credit-note" ? "Refunded" : "Paid", "Remaining", "Due date"].map((label, i) => (
               <div key={label} className="px-4 py-3">
                 <p className="text-[11px] text-muted-foreground">{label}</p>
                 <SkeletonLine lh="h-[22.5px]" h="h-4" w="w-20" className="mt-0.5" delay={stagger(i, 60, 560)} />
@@ -1490,6 +1628,24 @@ export function DocumentDetailSkeleton({
           </div>
         </div>
       )}
+
+      {/* Related documents — bills and orders usually carry one */}
+      {kind !== "offer" && (
+        <div>
+          <div className="px-4 py-2.5 flex items-center gap-2 bg-muted/20 border-b border-border/60">
+            <span className="text-[12px] font-semibold text-foreground">Related documents</span>
+            <Skeleton className="h-3 w-3 rounded" delay={700} />
+          </div>
+          <div className="flex items-center gap-3 px-4 py-2.5">
+            <Skeleton className="h-9 w-9 rounded-lg shrink-0" delay={720} />
+            <div className="min-w-0 flex-1">
+              <SkeletonLine lh="h-[14px]" h="h-2.5" w="w-16" delay={740} />
+              <SkeletonLine lh="h-[16px]" h="h-3.5" w="w-20" delay={760} />
+            </div>
+          </div>
+        </div>
+      )}
+      </div>
     </div>
   );
 }

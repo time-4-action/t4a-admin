@@ -10,17 +10,50 @@ import "server-only";
 import { connectDB } from "@/lib/mongodb";
 import { MkCustomer, MkCustomerSyncState, MK_CUSTOMER_SYNC_ID, type IMkCustomer } from "@/models/mk-customer";
 import { callMetakocka, getPartnerById, mapPartnerRaw } from "@/lib/metakocka";
-import { countryIsoFromPartner, countryName } from "@/lib/countries";
+import { COUNTRY_RESOLVER_VERSION, countryIsoFromPartner, countryName } from "@/lib/countries";
 import { normalizeIso } from "@/lib/countries-client";
 import { cached } from "@/lib/auth0-cache";
 import type { MkPartner } from "@/types/documents";
 
 // ── wire shape ────────────────────────────────────────────────────────────────
 
+// A customer is a legal person ("business") when Metakocka carries a tax / VAT id
+// for it; everything else is a natural person. This is the ONE definition used by
+// the filter, the badges and the counters.
+export type CustomerKind = "business" | "person";
+
+// A directory record as the MkPartner shape the portal works with — the stand-in
+// when Metakocka cannot return the partner by id right now.
+export function partnerFromDirectory(c: IMkCustomer): MkPartner {
+  return {
+    mkId: c.partnerMkId,
+    countCode: c.countCode ?? undefined,
+    name: c.name,
+    taxId: c.taxId ?? undefined,
+    emails: c.emails ?? [],
+    phone: c.phone ?? undefined,
+    city: c.address?.city ?? undefined,
+    address: {
+      street: c.address?.street ?? undefined,
+      postNumber: c.address?.postNumber ?? undefined,
+      city: c.address?.city ?? undefined,
+      country: c.address?.countryRaw ?? undefined,
+    },
+    businessEntity: c.businessEntity ?? undefined,
+    foreignCountry: c.foreignCountry ?? undefined,
+  };
+}
+
+export function customerKind(c: { taxId?: string | null }): CustomerKind {
+  return c.taxId && c.taxId.trim() ? "business" : "person";
+}
+
 export type MkCustomerView = {
   partnerMkId: string;
   countCode: string | null;
   name: string;
+  kind: CustomerKind;
+  taxId: string | null;
   email: string | null;
   emails: string[];
   phone: string | null;
@@ -46,6 +79,8 @@ export function toMkCustomerView(c: IMkCustomer): MkCustomerView {
     partnerMkId: c.partnerMkId,
     countCode: c.countCode ?? null,
     name: c.name,
+    kind: customerKind(c),
+    taxId: c.taxId?.trim() || null,
     email: c.emails?.[0] ?? null,
     emails: c.emails ?? [],
     phone: c.phone ?? null,
@@ -82,6 +117,7 @@ function mkFields(p: MkPartner, now: Date) {
     },
     countryIso: country.iso,
     countrySource: country.source === "manual" ? null : country.source,
+    countryResolverVersion: COUNTRY_RESOLVER_VERSION,
     mkSyncedAt: now,
     lastSeenInMk: now,
     stale: false,
@@ -110,7 +146,65 @@ export async function refreshMkCustomer(partnerMkId: string): Promise<IMkCustome
 
 export async function getMkCustomer(partnerMkId: string): Promise<IMkCustomer | null> {
   await connectDB();
+  await ensureCountriesResolved();
   return MkCustomer.findOne({ partnerMkId }).exec();
+}
+
+// ── resolver self-heal ────────────────────────────────────────────────────────
+
+// Rows resolved by an older lib/countries (or never stamped) get their
+// countryIso recomputed from the stored raw name — the resolver learns new
+// spellings over time and the directory must not keep yesterday's answer.
+// Runs at most once per process (memoised promise); admin overrides untouched.
+declare global {
+  // eslint-disable-next-line no-var
+  var _mkCountryHeal: { version: number; promise: Promise<void> } | undefined;
+}
+
+export function ensureCountriesResolved(): Promise<void> {
+  if (global._mkCountryHeal?.version === COUNTRY_RESOLVER_VERSION) return global._mkCountryHeal.promise;
+  const promise = reResolveCountries().then(
+    (n) => {
+      if (n > 0) console.info(`[mk-customers] re-resolved countries on ${n} directory rows`);
+    },
+    (err) => {
+      console.error("[mk-customers] country re-resolve failed", err);
+      global._mkCountryHeal = undefined; // try again on the next read
+    },
+  );
+  global._mkCountryHeal = { version: COUNTRY_RESOLVER_VERSION, promise };
+  return promise;
+}
+
+export async function reResolveCountries(): Promise<number> {
+  await connectDB();
+  const rows = await MkCustomer.find(
+    { $or: [{ countryResolverVersion: { $ne: COUNTRY_RESOLVER_VERSION } }, { countryResolverVersion: null }] },
+    { partnerMkId: 1, address: 1, foreignCountry: 1, countryIso: 1, countrySource: 1 },
+  )
+    .lean()
+    .exec();
+  if (rows.length === 0) return 0;
+  const ops = rows.map((r) => {
+    const country = countryIsoFromPartner({
+      address: { country: r.address?.countryRaw ?? undefined },
+      foreignCountry: r.foreignCountry ?? undefined,
+    });
+    return {
+      updateOne: {
+        filter: { partnerMkId: r.partnerMkId },
+        update: {
+          $set: {
+            countryIso: country.iso,
+            countrySource: country.source === "manual" ? null : country.source,
+            countryResolverVersion: COUNTRY_RESOLVER_VERSION,
+          },
+        },
+      },
+    };
+  });
+  for (let i = 0; i < ops.length; i += 500) await MkCustomer.bulkWrite(ops.slice(i, i + 500), { ordered: false });
+  return ops.length;
 }
 
 // ── full sync ─────────────────────────────────────────────────────────────────
@@ -211,6 +305,7 @@ export async function startMkCustomerSync(): Promise<boolean> {
 export type CustomerListQuery = {
   q?: string;
   countryIso?: string | null; // "" = any, "none" = unresolved
+  kind?: CustomerKind | null; // business = has a tax id, person = no tax id
   partnerMkIds?: string[]; // restrict to these ids (campaign-scoped filters)
   includeStale?: boolean;
   page?: number;
@@ -219,6 +314,7 @@ export type CustomerListQuery = {
 
 export async function listMkCustomers(query: CustomerListQuery): Promise<{ items: IMkCustomer[]; total: number; page: number; pageSize: number }> {
   await connectDB();
+  await ensureCountriesResolved();
   const page = Math.max(1, query.page ?? 1);
   const pageSize = Math.min(200, Math.max(1, query.pageSize ?? 50));
   const filter: Record<string, unknown> = {};
@@ -230,10 +326,12 @@ export async function listMkCustomers(query: CustomerListQuery): Promise<{ items
     const iso = query.countryIso.toUpperCase();
     filter.$or = [{ countryIsoManual: iso }, { countryIsoManual: null, countryIso: iso }, { countryIsoManual: "", countryIso: iso }];
   }
+  if (query.kind === "business") filter.taxId = /\S/;
+  else if (query.kind === "person") filter.taxId = { $not: /\S/ };
   const q = query.q?.trim();
   if (q) {
     const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-    filter.$and = [...((filter.$and as unknown[]) ?? []), { $or: [{ name: re }, { emails: re }, { "address.city": re }, { countCode: re }, { partnerMkId: q }] }];
+    filter.$and = [...((filter.$and as unknown[]) ?? []), { $or: [{ name: re }, { emails: re }, { "address.city": re }, { countCode: re }, { taxId: re }, { partnerMkId: q }] }];
   }
   const [items, total] = await Promise.all([
     MkCustomer.find(filter).sort({ name: 1 }).skip((page - 1) * pageSize).limit(pageSize).exec(),
@@ -249,17 +347,25 @@ export async function getMkCustomersByIds(ids: string[]): Promise<Map<string, IM
   return new Map(docs.map((d) => [d.partnerMkId, d]));
 }
 
-// Customers per effective country (manual override wins). Cached 60 s.
-export function countMkCustomersByCountry(): Promise<Record<string, number>> {
+export type CountryKindCount = { customers: number; business: number; person: number };
+
+// Customers per effective country (manual override wins), split by kind. Cached 60 s.
+export function countMkCustomersByCountry(): Promise<Record<string, CountryKindCount>> {
   return cached("mk-customers:by-country", 60_000, async () => {
     await connectDB();
-    const rows = await MkCustomer.aggregate<{ _id: string | null; n: number }>([
+    await ensureCountriesResolved();
+    const rows = await MkCustomer.aggregate<{ _id: string | null; n: number; business: number }>([
       { $match: { stale: { $ne: true } } },
-      { $project: { iso: { $ifNull: [{ $cond: [{ $gt: ["$countryIsoManual", ""] }, "$countryIsoManual", null] }, "$countryIso"] } } },
-      { $group: { _id: "$iso", n: { $sum: 1 } } },
+      {
+        $project: {
+          iso: { $ifNull: [{ $cond: [{ $gt: ["$countryIsoManual", ""] }, "$countryIsoManual", null] }, "$countryIso"] },
+          business: { $cond: [{ $regexMatch: { input: { $ifNull: ["$taxId", ""] }, regex: /\S/ } }, 1, 0] },
+        },
+      },
+      { $group: { _id: "$iso", n: { $sum: 1 }, business: { $sum: "$business" } } },
     ]);
-    const out: Record<string, number> = {};
-    for (const r of rows) out[r._id ?? "none"] = r.n;
+    const out: Record<string, CountryKindCount> = {};
+    for (const r of rows) out[r._id ?? "none"] = { customers: r.n, business: r.business, person: r.n - r.business };
     return out;
   });
 }
@@ -267,15 +373,6 @@ export function countMkCustomersByCountry(): Promise<Record<string, number>> {
 export async function countMkCustomers(): Promise<number> {
   await connectDB();
   return MkCustomer.countDocuments({ stale: { $ne: true } }).exec();
-}
-
-// Every customer with a manual pin (small set — admins place these by hand).
-export async function listManualPins(): Promise<{ partnerMkId: string; name: string; lat: number; lng: number; countryIso: string | null }[]> {
-  await connectDB();
-  const docs = await MkCustomer.find({ manualGeo: { $ne: null }, stale: { $ne: true } }).limit(5000).exec();
-  return docs
-    .filter((d) => d.manualGeo)
-    .map((d) => ({ partnerMkId: d.partnerMkId, name: d.name, lat: d.manualGeo!.lat, lng: d.manualGeo!.lng, countryIso: effectiveCountryIso(d) }));
 }
 
 // Admin-owned fields on a directory record.

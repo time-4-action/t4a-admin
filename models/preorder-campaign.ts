@@ -55,6 +55,7 @@ export interface IPreorderTab {
   order: number;
   discountNote?: string | null;
   tiers?: IPreorderTier[];
+  tiersLocked?: boolean;
   groups: IPreorderGroup[];
 }
 
@@ -69,6 +70,9 @@ export interface ICommercialConfig {
   hiddenIds?: string[];
   exposedIds?: string[];
   tiersByTab?: { tabId: string; tiers: IPreorderTier[] }[];
+  vatMode?: "country" | "exempt" | "fixed" | null;
+  vatRate?: number | null;
+  vatCompanies?: boolean | null;
 }
 
 export interface IPreorderMarket {
@@ -76,6 +80,7 @@ export interface IPreorderMarket {
   name: string;
   color: MarketColor;
   countries: string[];
+  kinds?: ("business" | "person")[];
   config: ICommercialConfig;
   updatedAt?: Date | null;
 }
@@ -95,8 +100,14 @@ export interface IPriceBook {
   pricelist: string;
   currency?: string | null;
   fetchedAt?: Date | null;
-  entries: { code: string; gross: number | null; taxCode?: string | null }[];
+  entries: { code: string; net: number | null; taxCode?: string | null }[];
   missing: number;
+}
+
+// A per-country VAT rate that beats the global VAT settings for this campaign.
+export interface IVatOverride {
+  iso: string; // ISO 3166-1 alpha-2
+  rate: number; // percent
 }
 
 export interface IPreorderCampaign extends Document {
@@ -117,6 +128,7 @@ export interface IPreorderCampaign extends Document {
   markets: IPreorderMarket[];
   customerRules: ICustomerRule[];
   priceBooks: IPriceBook[];
+  vatOverrides: IVatOverride[];
   createdBy?: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -174,6 +186,7 @@ const TabSchema = new Schema<IPreorderTab>(
     order: { type: Number, default: 0 },
     discountNote: { type: String, default: null },
     tiers: { type: [TierSchema], default: [] },
+    tiersLocked: { type: Boolean, default: false },
     groups: { type: [GroupSchema], default: [] },
   },
   { _id: false },
@@ -199,6 +212,9 @@ const CommercialConfigSchema = new Schema<ICommercialConfig>(
     hiddenIds: { type: [String], default: undefined },
     exposedIds: { type: [String], default: undefined },
     tiersByTab: { type: [TiersByTabSchema], default: undefined },
+    vatMode: { type: String, enum: ["country", "exempt", "fixed", null], default: undefined },
+    vatRate: { type: Number, default: undefined },
+    vatCompanies: { type: Boolean, default: undefined },
   },
   { _id: false, minimize: false },
 );
@@ -213,6 +229,7 @@ const MarketSchema = new Schema<IPreorderMarket>(
       default: "sky",
     },
     countries: { type: [String], default: [] },
+    kinds: { type: [String], enum: ["business", "person"], default: [] },
     config: { type: CommercialConfigSchema, default: () => ({}) },
     updatedAt: { type: Date, default: null },
   },
@@ -243,7 +260,7 @@ const PriceBookSchema = new Schema<IPriceBook>(
         new Schema(
           {
             code: { type: String, required: true },
-            gross: { type: Number, default: null },
+            net: { type: Number, default: null },
             taxCode: { type: String, default: null },
           },
           { _id: false },
@@ -252,6 +269,14 @@ const PriceBookSchema = new Schema<IPriceBook>(
       default: [],
     },
     missing: { type: Number, default: 0 },
+  },
+  { _id: false },
+);
+
+const VatOverrideSchema = new Schema<IVatOverride>(
+  {
+    iso: { type: String, required: true },
+    rate: { type: Number, required: true, min: 0, max: 100 },
   },
   { _id: false },
 );
@@ -274,6 +299,7 @@ const PreorderCampaignSchema = new Schema<IPreorderCampaign>(
     markets: { type: [MarketSchema], default: [] },
     customerRules: { type: [CustomerRuleSchema], default: [] },
     priceBooks: { type: [PriceBookSchema], default: [] },
+    vatOverrides: { type: [VatOverrideSchema], default: [] },
     createdBy: { type: String, default: null },
   },
   { timestamps: true, minimize: false },

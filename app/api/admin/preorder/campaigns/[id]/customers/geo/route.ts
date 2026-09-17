@@ -9,7 +9,8 @@ export const dynamic = "force-dynamic";
 type RouteParams = { params: Promise<{ id: string }> };
 
 // GET /api/admin/preorder/campaigns/[id]/customers/geo — per-country customer counts
-// (directory + campaign-scoped), manual pins, and the directory sync status.
+// (directory + campaign-scoped, split by kind), country names, and the directory
+// sync status. Feeds the summary strip and the Countries table.
 export async function GET(_req: Request, { params }: RouteParams) {
   const { id } = await params;
   if (!toObjectId(id)) return NextResponse.json({ error: "not found" }, { status: 404 });

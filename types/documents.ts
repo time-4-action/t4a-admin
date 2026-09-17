@@ -5,11 +5,21 @@
 // (which return every value as a string). The mapping from raw MK JSON lives in
 // lib/metakocka.ts — keep the two in sync by hand, like types/warranty.ts.
 
-// The three customer-facing document families. Each maps to one or more raw
-// Metakocka `doc_type`s (see DOC_TYPES in lib/metakocka.ts).
-export type DocKind = "offer" | "order" | "invoice";
+// The customer-facing document families. Each maps to one or more raw
+// Metakocka `doc_type`s (see DOC_TYPES in lib/metakocka.ts). A credit note
+// ("dobropis", MK `sales_bill_credit_note`) is a bill that refunds / offsets an
+// invoice, so it shares the invoice's bill-shaped fields (due date, payment).
+export type DocKind = "offer" | "order" | "invoice" | "credit-note";
 
-// Payment state derived from sum_paid vs sum_all (invoices only).
+// The bill-shaped families: carry a due date, paid amount and payment state.
+export const BILL_KINDS: readonly DocKind[] = ["invoice", "credit-note"];
+
+export function isBillKind(kind: DocKind | null | undefined): boolean {
+  return !!kind && BILL_KINDS.includes(kind);
+}
+
+// Payment state derived from sum_paid vs sum_all (bills only — invoices and
+// credit notes; on a credit note "paid" means the refund has been settled).
 export type PaymentState = "paid" | "partial" | "unpaid" | "overdue" | "na";
 
 // The partner embedded in a document (`partner{…}` / `receiver{…}` in MK). The
@@ -82,12 +92,13 @@ export type MkPricelist = {
 export type MkProductPrice = {
   listCode: string; // the price list's count_code
   title: string; // the price list's name (matches campaign rrp/partnerPricelist)
-  price: number; // base price_def.price
+  price: number; // base list price as MK stores it (price_def.price, or price_def.price_with_tax backed out to net)
+  priceWithTax?: number; // price_def.price_with_tax when the list is defined gross
   discount?: number; // percentage off, if any
-  effective: number; // net price after discount
+  effective: number; // NET price after discount — the number to charge a company
   currency?: string;
   tax?: string; // MK tax code (e.g. "EX4") from price_def.tax, when present
-  taxRate?: number; // VAT % from price_def.tax_desc (e.g. 22), when present
+  taxRate?: number; // VAT % from price_def.tax_desc / tax_factor (e.g. 22), when present
   // Whether this list is priced NET (a tax was declared → add VAT for the gross
   // price). Lists without a tax are already gross (consumer/RRP prices).
   net: boolean;
@@ -138,7 +149,7 @@ export type DocSummary = {
   statusCode?: string;
   statusDesc?: string;
   itemCount?: number; // number of real product lines (excludes text lines)
-  // invoices only
+  // bills only (invoices, credit notes)
   dueDate?: string | null;
   payment?: PaymentState;
   sumPaid?: string; // amount paid so far (bills)
@@ -169,6 +180,15 @@ export const DOC_KIND_LABELS: Record<DocKind, { singular: string; plural: string
   offer: { singular: "Offer", plural: "Offers" },
   order: { singular: "Order", plural: "Orders" },
   invoice: { singular: "Invoice", plural: "Invoices" },
+  "credit-note": { singular: "Credit note", plural: "Credit notes" },
+};
+
+// The URL segment for a family's list page (`/portal/<slug>`, `/documents/<slug>`).
+export const DOC_KIND_SLUGS: Record<DocKind, string> = {
+  offer: "offers",
+  order: "orders",
+  invoice: "invoices",
+  "credit-note": "credit-notes",
 };
 
 // Parse a URL/query value into a DocKind (accepts singular or plural).
@@ -183,6 +203,12 @@ export function parseDocKind(v?: string | null): DocKind | null {
     case "invoice":
     case "invoices":
       return "invoice";
+    case "credit-note":
+    case "credit-notes":
+    case "credit_note":
+    case "creditnote":
+    case "creditnotes":
+      return "credit-note";
     default:
       return null;
   }

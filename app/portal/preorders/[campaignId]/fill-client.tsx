@@ -27,14 +27,16 @@ import {
   PackageCheck,
   ExternalLink,
   Info,
+  ChevronRight,
 } from "lucide-react";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
-import { computeConfirmedTotals } from "@/types/preorder";
+import { computeConfirmedTotals, flattenRows } from "@/types/preorder";
+import { vatIsMissing, vatLabel, toCents, fromCents, splitGross, addVat } from "@/lib/pricing";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   TabBar,
-  TabTierBanner,
+  SheetContextBar,
   PreorderGridTab,
   PreorderGuidedTab,
   OrderSummaryPanel,
@@ -52,6 +54,7 @@ import {
   type PortalSubmission,
   type PreorderTerms,
   type LineStatus,
+  type PricingContext,
 } from "@/types/preorder";
 
 type Mode = "grid" | "guided";
@@ -96,6 +99,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
   const [flash, setFlash] = useState<string | null>(null);
   const [status, setStatus] = useState<PortalSubmission["status"]>("draft");
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [showRequest, setShowRequest] = useState(false); // confirmed order: reveal the original request
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestNote, setRequestNote] = useState("");
   const [requestBusy, setRequestBusy] = useState(false);
@@ -170,6 +174,23 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
   // the live effective campaign.
   const sheet: PreorderCampaign | null = locked && frozen ? frozen : campaign;
   const currency = sheet?.currency ?? campaign?.currency ?? "EUR";
+  // No configured VAT rate for this customer's country: nothing can be submitted.
+  const vatMissing = vatIsMissing(campaign?.pricing);
+
+  // Rows this customer cannot order (no consumer price) that still carry a quantity —
+  // e.g. saved before the price was removed. They block submit until removed.
+  const unpricedFilled = useMemo(
+    () => (sheet ? flattenRows(sheet).filter(({ row }) => row.unpriced && (quantities[row.id] || 0) > 0) : []),
+    [sheet, quantities],
+  );
+  // Saved quantities on rows that are not on this customer's sheet any more (hidden by
+  // an admin, product removed). Kept in the draft; shown here so nothing vanishes
+  // silently — they are left out of a submit.
+  const orphanLines = useMemo(() => {
+    if (!sheet || locked) return [];
+    const known = new Set(flattenRows(sheet).map(({ row }) => row.id));
+    return (submission?.lines ?? []).filter((l) => !known.has(l.rowId) && (quantities[l.rowId] || 0) > 0);
+  }, [sheet, locked, submission, quantities]);
 
   // Legacy per-line admin fulfilment (submissions made before immediate registration).
   const lineInfo = useMemo(() => {
@@ -238,14 +259,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
         } else {
           setSubmission(data.submission);
           setStatus(data.submission.status);
-          if (dropped.length) {
-            setQuantities((prev) => {
-              const next = { ...prev };
-              for (const id of dropped) delete next[id];
-              return next;
-            });
-          }
-          setFlash(dropped.length ? `Draft saved · ${dropped.length} item${dropped.length === 1 ? "" : "s"} no longer available were removed` : "Draft saved");
+          setFlash(dropped.length ? `Draft saved · ${dropped.length} item${dropped.length === 1 ? "" : "s"} kept aside (no longer offered to you)` : "Draft saved");
         }
         setTimeout(() => setFlash(null), 4500);
       } catch (e) {
@@ -256,6 +270,51 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
     },
     [campaign, campaignId, quantities, terms, load, applyLoad],
   );
+
+  // Autosave the draft: every change after the first load is saved 1.2 s after the
+  // customer stops typing (never while another save / submit is in flight, never once
+  // the preorder is locked). Manual "Save draft" is gone — nothing to remember.
+  const dirtyRef = useRef(false);
+  const loadedRef = useRef(false);
+  const [autoState, setAutoState] = useState<"idle" | "pending" | "saving" | "saved" | "error">("idle");
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+  useEffect(() => {
+    if (!loadedRef.current) return;
+    if (locked) return;
+    dirtyRef.current = true;
+    setAutoState("pending");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quantities, terms]);
+  useEffect(() => {
+    if (!loading && campaign) loadedRef.current = true;
+  }, [loading, campaign]);
+  useEffect(() => {
+    if (autoState !== "pending" || locked) return;
+    const t = setTimeout(async () => {
+      if (busy !== null) return; // try again on the next change
+      dirtyRef.current = false;
+      setAutoState("saving");
+      try {
+        const r = await fetch(`/api/portal/preorder/submissions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ campaignId, quantities, terms, action: "save" }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data?.message ?? data?.error ?? "Autosave failed");
+        if (data.submission) {
+          setSubmission(data.submission);
+          setStatus(data.submission.status);
+        }
+        setSavedAt(new Date());
+        setAutoState(dirtyRef.current ? "pending" : "saved");
+      } catch {
+        setAutoState("error");
+      }
+    }, 1200);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoState, quantities, terms, locked, busy, campaignId]);
 
   const retryRegistration = useCallback(async () => {
     if (!submission?.id) return;
@@ -336,8 +395,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
               <OrderSummaryPanelSkeleton />
               <div className="rounded-xl border border-border bg-surface p-3 space-y-2">
                 <Button className="w-full" disabled><Eye className="w-4 h-4" /> Preview &amp; submit</Button>
-                <Button variant="outline" className="w-full" disabled><Check className="w-4 h-4" /> Save draft</Button>
-                <p className="text-[11px] text-muted-foreground text-center pt-0.5">Once submitted, your preorder is locked.</p>
+                <p className="text-[11px] text-muted-foreground text-center pt-0.5">Changes save automatically. Once submitted, your preorder is locked.</p>
               </div>
             </aside>
           </div>
@@ -366,6 +424,9 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
 
   const submitted = status === "submitted" || status === "confirmed";
   const published = !!submission?.published && !!allocation;
+  // Once we confirmed the order, that is what the customer sees; the original request
+  // is one click away, not a second copy of the sheet.
+  const confirmedShown = !!(published && allocation && allocation.state === "ok");
   const registration = submission?.registration ?? { state: "none" as const, canRetry: false };
 
   const renderStatusCell = (rowId: string) => {
@@ -429,19 +490,39 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
             </div>
           </div>
           <div className="flex-1" />
-          {!locked && (
-            <div className="hidden sm:flex items-center gap-0.5 rounded-lg border border-border p-0.5">
-              <button onClick={() => setMode("grid")} className={cn("flex items-center gap-1 rounded-md px-2 py-1 text-[12px]", mode === "grid" ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:text-foreground")}>
-                <Table2 className="w-3.5 h-3.5" /> Grid
-              </button>
-              <button onClick={() => setMode("guided")} className={cn("flex items-center gap-1 rounded-md px-2 py-1 text-[12px]", mode === "guided" ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:text-foreground")}>
-                <LayoutGrid className="w-3.5 h-3.5" /> Store
-              </button>
-            </div>
-          )}
         </div>
-        <div className="px-4 md:px-6 pb-2">
-          <TabBar tabs={tabsForBar} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
+        <div className="px-4 md:px-6 flex items-stretch gap-3">
+          {tabsForBar.length > 0 && <TabBar tabs={tabsForBar} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />}
+          <div className="flex-1" />
+          {!locked && (
+            // How to browse the sheet — the same underline tabs as the sections, right end.
+            <nav className="flex items-stretch gap-0.5 -mb-px h-9" aria-label="View">
+              {(
+                [
+                  ["guided", LayoutGrid, "Catalogue"],
+                  ["grid", Table2, "Order sheet"],
+                ] as [Mode, React.ElementType, string][]
+              ).map(([m, Icon, label]) => {
+                const on = mode === m;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMode(m)}
+                    aria-pressed={on}
+                    className={cn(
+                      "group relative isolate inline-flex items-center gap-1.5 whitespace-nowrap px-2.5 text-[12.5px] font-medium transition-colors border-b-2",
+                      on ? "border-lime-600 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <Icon className={cn("w-3.5 h-3.5 shrink-0", on ? "text-lime-600" : "text-muted-foreground/70 group-hover:text-foreground/70")} />
+                    {label}
+                    <span className="pointer-events-none absolute inset-x-0.5 top-1 bottom-1.5 rounded-md transition-colors group-hover:bg-muted/60 -z-10" aria-hidden />
+                  </button>
+                );
+              })}
+            </nav>
+          )}
         </div>
       </header>
 
@@ -449,46 +530,72 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
         <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
           {/* Sheet */}
           <div className="min-w-0">
-            {!locked && campaign.effective.note && (
-              <div className="mb-4 rounded-xl border border-lime-300/60 bg-lime-50 dark:border-lime-800/50 dark:bg-lime-950/30 px-4 py-3 text-[13px] text-lime-900 dark:text-lime-200 flex items-start gap-2">
-                <Info className="w-4 h-4 shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-lime-700 dark:text-lime-400">Your terms</div>
-                  <p className="whitespace-pre-line mt-0.5">{campaign.effective.note}</p>
-                </div>
-              </div>
-            )}
-
-            {locked && submitted && (
-              <RegistrationBanner registration={registration} published={published} busy={busy === "retry"} onRetry={retryRegistration} />
-            )}
 
             {published && allocation && (
-              <YourOrderCard allocation={allocation} currency={currency} orderMkId={orderMkId} />
+              <YourOrderCard allocation={allocation} currency={currency} orderMkId={orderMkId} pricing={sheet?.pricing} />
             )}
 
-            {locked && !submitted && (
-              <div className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground flex items-center gap-2">
-                <Lock className="w-4 h-4 shrink-0" />
-                This campaign is closed. You&rsquo;re viewing your preorder as it was saved.
+            {confirmedShown && (
+              <button
+                type="button"
+                onClick={() => setShowRequest((v) => !v)}
+                className="mb-3 inline-flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground"
+              >
+                <ChevronRight className={cn("w-3.5 h-3.5 transition-transform", showRequest && "rotate-90")} />
+                {showRequest ? "Hide" : "Show"} what you originally requested{submission?.submittedAt ? ` (${fmtDate(submission.submittedAt)})` : ""}
+              </button>
+            )}
+
+            {/* The order document: status → how you are priced / discount progress →
+                the products. One frame, rows divided, nothing floating. */}
+            {(!confirmedShown || showRequest) && (
+            <div className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
+              {locked && submitted && !confirmedShown && (
+                <RegistrationBanner registration={registration} published={published} busy={busy === "retry"} onRetry={retryRegistration} />
+              )}
+              {locked && !submitted && (
+                <div className="bg-muted/30 px-4 py-2.5 text-[13px] text-muted-foreground flex items-center gap-2">
+                  <Lock className="w-4 h-4 shrink-0" />
+                  This campaign is closed. You&rsquo;re viewing your preorder as it was saved.
+                </div>
+              )}
+              {locked && submitted && (
+                <div className="px-4 py-2.5 flex items-baseline gap-2">
+                  <h2 className="text-[13px] font-semibold text-foreground">Your preorder request</h2>
+                  <span className="text-[11px] text-muted-foreground">what you submitted{submission?.submittedAt ? ` on ${fmtDate(submission.submittedAt)}` : ""}</span>
+                </div>
+              )}
+              {(sheet.pricing || orphanLines.length > 0 || unpricedFilled.length > 0 || (activeTab && (activeTab.tiers?.length ?? 0) > 0)) && (
+              <div className="divide-y divide-border/60 bg-muted/10">
+                <SheetContextBar pricing={sheet.pricing} tab={activeTab} quantities={quantities} currency={currency} />
+                {orphanLines.length > 0 && (
+                  <div className="px-4 py-2.5 text-[12px] text-amber-800 dark:text-amber-300 flex items-start gap-2.5 bg-amber-50/70 dark:bg-amber-950/30">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-px text-amber-600" />
+                    <div className="min-w-0">
+                      <span className="font-semibold">{orphanLines.length} item{orphanLines.length === 1 ? "" : "s"} from your saved preorder {orphanLines.length === 1 ? "is" : "are"} no longer offered to you</span>{" "}
+                      ({orphanLines.slice(0, 4).map((l) => `${l.code || "item"} × ${l.qty}`).join(", ")}{orphanLines.length > 4 ? ", …" : ""}). {orphanLines.length === 1 ? "It stays" : "They stay"} in your draft but will not be part of a submitted preorder — contact us if you still need {orphanLines.length === 1 ? "it" : "them"}.
+                    </div>
+                  </div>
+                )}
+                {unpricedFilled.length > 0 && !locked && (
+                  <div className="px-4 py-2.5 text-[12px] text-amber-800 dark:text-amber-300 flex items-start gap-2.5 bg-amber-50/70 dark:bg-amber-950/30">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-px text-amber-600" />
+                    <div className="min-w-0">
+                      <span className="font-semibold">{unpricedFilled.length} product{unpricedFilled.length === 1 ? "" : "s"} in your preorder {unpricedFilled.length === 1 ? "has" : "have"} no consumer price yet</span>{" "}
+                      and cannot be ordered: {unpricedFilled.slice(0, 4).map(({ row }) => row.name).join(", ")}{unpricedFilled.length > 4 ? ", …" : ""}.{" "}
+                      <button
+                        type="button"
+                        className="underline font-medium"
+                        onClick={() => setQuantities((prev) => { const next = { ...prev }; for (const { row } of unpricedFilled) delete next[row.id]; return next; })}
+                      >
+                        Remove {unpricedFilled.length === 1 ? "it" : "them"}
+                      </button>{" "}
+                      or contact us.
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-
-            {locked && submitted && (
-              <h2 className="text-[13px] font-semibold text-foreground mb-2 flex items-center gap-2">
-                Your preorder request
-                <span className="text-[11px] font-normal text-muted-foreground">what you submitted{submission?.submittedAt ? ` on ${fmtDate(submission.submittedAt)}` : ""}</span>
-              </h2>
-            )}
-
-            {activeTab && (
-              <TabTierBanner
-                tab={activeTab}
-                quantities={quantities}
-                currency={currency}
-                className="mb-4"
-              />
-            )}
+              )}
             {!activeTab ? (
               <div className="text-center text-[13px] text-muted-foreground py-16">
                 {locked ? "No items in this preorder." : "This sheet has no tabs yet."}
@@ -505,70 +612,60 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
                   renderQty={renderQtyCell}
                   extraHeader={<th className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-2 text-left w-32">Status</th>}
                   renderExtraCell={renderStatusCell}
+                  pricing={sheet.pricing}
+                  bare
                 />
               ) : (
-                <PreorderGridTab tab={activeTab} quantities={quantities} currency={currency} readOnly onlyFilled />
+                <PreorderGridTab tab={activeTab} quantities={quantities} currency={currency} readOnly onlyFilled pricing={sheet.pricing} bare />
               )
             ) : mode === "grid" ? (
-              <PreorderGridTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} />
+              <PreorderGridTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={sheet.pricing} bare searchable />
             ) : (
-              <PreorderGuidedTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} />
+              <div className="p-4">
+                <PreorderGuidedTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={sheet.pricing} />
+              </div>
             )}
-
-            {/* Details */}
-            <section className="mt-6 rounded-xl border border-border bg-surface p-4">
-              <h2 className="text-[13px] font-semibold text-foreground mb-3">Your details</h2>
-              {locked ? (
-                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
-                  <ViewRow label="Name" value={partnerName} />
-                  <ViewRow label="Country" value={terms.country} />
-                  <ViewRow label="Invoice address" value={terms.invoiceAddress} />
-                  <ViewRow label="Shipping address" value={terms.shippingAddress} />
-                  <ViewRow label="Phone" value={terms.phone} />
-                  <ViewRow label="Requested delivery" value={terms.deliveryDate ? fmtDate(terms.deliveryDate) : ""} />
-                  {terms.comment && <ViewRow label="Comment" value={terms.comment} className="sm:col-span-2" />}
-                </dl>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label="Name" value={partnerName} readOnly />
-                  <Field label="Country" value={terms.country ?? ""} onChange={(v) => setTerms((t) => ({ ...t, country: v }))} />
-                  <Field label="Invoice address" value={terms.invoiceAddress ?? ""} onChange={(v) => setTerms((t) => ({ ...t, invoiceAddress: v }))} className="sm:col-span-2" />
-                  <Field label="Shipping address" value={terms.shippingAddress ?? ""} onChange={(v) => setTerms((t) => ({ ...t, shippingAddress: v }))} className="sm:col-span-2" />
-                  <Field label="Phone" value={terms.phone ?? ""} onChange={(v) => setTerms((t) => ({ ...t, phone: v }))} />
-                  <div>
-                    <label className="text-[11px] font-medium text-muted-foreground">Requested delivery</label>
-                    <Input
-                      type="date"
-                      value={terms.deliveryDate ? terms.deliveryDate.slice(0, 10) : ""}
-                      onChange={(e) => setTerms((t) => ({ ...t, deliveryDate: e.target.value ? new Date(e.target.value).toISOString() : null }))}
-                      className="mt-1 h-9 text-[12px]"
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="text-[11px] font-medium text-muted-foreground">Comment</label>
-                    <textarea
-                      value={terms.comment ?? ""}
-                      onChange={(e) => setTerms((t) => ({ ...t, comment: e.target.value }))}
-                      rows={2}
-                      className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-[12px] focus:border-ring focus:outline-none"
-                      placeholder="Anything we should know about this order…"
-                    />
-                  </div>
-                </div>
-              )}
-            </section>
+            </div>
+            )}
           </div>
 
           {/* Sidebar */}
-          <aside className="lg:sticky lg:top-4 space-y-3">
-            <OrderSummaryPanel campaign={sheet} quantities={quantities} currency={currency} confirmed={confirmedTotals} />
+          <aside className="lg:sticky lg:top-4">
+            <div className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
+            {confirmedShown && allocation && allocation.state === "ok" ? (
+              <div className="p-4 space-y-2">
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Your order</div>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[13px] text-muted-foreground">Items confirmed</span>
+                  <span className="text-[15px] font-semibold tabular-nums text-foreground">{allocation.allocation.allocatedQty}</span>
+                </div>
+                {allocation.allocation.allocatedQty !== allocation.allocation.requestedQty && (
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-[12px] text-muted-foreground">You requested</span>
+                    <span className="text-[12px] tabular-nums text-muted-foreground">{allocation.allocation.requestedQty}</span>
+                  </div>
+                )}
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[13px] text-muted-foreground">Order total</span>
+                  <span className="text-[18px] font-bold tabular-nums text-foreground">{fmtMoney(Number(allocation.allocation.sumAll ?? 0) || 0, allocation.allocation.currency ?? currency)}</span>
+                </div>
+                {sheet.pricing && <div className="text-[10px] text-muted-foreground text-right -mt-1">{vatLabel(sheet.pricing)}</div>}
+                {orderMkId && (
+                  <Link href={`/portal/orders/${encodeURIComponent(orderMkId)}`} className="inline-flex items-center gap-1 text-[12px] font-medium text-emerald-700 dark:text-emerald-300 hover:underline pt-1">
+                    View order <ExternalLink className="w-3 h-3" />
+                  </Link>
+                )}
+              </div>
+            ) : (
+              <OrderSummaryPanel campaign={sheet} quantities={quantities} currency={currency} confirmed={confirmedTotals} bare />
+            )}
             {campaign.effective.minOrderAmount && !locked && (
-              <p className="text-[11px] text-muted-foreground px-1">
+              <p className="text-[11px] text-muted-foreground px-4 -mt-2 pb-2">
                 Minimum order value: <span className="font-medium text-foreground">{fmtMoney(campaign.effective.minOrderAmount, currency)}</span>
               </p>
             )}
             {locked ? (
-              <div className="rounded-xl border border-border bg-surface p-3 space-y-2">
+              <div className="p-3 space-y-2">
                 <div className="text-[12px] text-muted-foreground flex items-start gap-2">
                   <Lock className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   {submitted ? "This preorder is submitted and locked." : "This campaign is closed."}
@@ -600,21 +697,79 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
                 )}
               </div>
             ) : (
-              <div className="rounded-xl border border-border bg-surface p-3 space-y-2">
-                <Button className="w-full" onClick={() => setReviewOpen(true)} disabled={busy !== null}>
+              <div className="p-3 space-y-2">
+                <Button className="w-full" onClick={() => setReviewOpen(true)} disabled={busy !== null || vatMissing || unpricedFilled.length > 0}>
                   <Eye className="w-4 h-4" /> Preview &amp; submit
                 </Button>
-                <Button variant="outline" className="w-full" onClick={() => save("save")} disabled={busy !== null}>
-                  {busy === "save" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                  Save draft
-                </Button>
-                <p className="text-[11px] text-muted-foreground text-center pt-0.5">Once submitted, your preorder is locked.</p>
+                {vatMissing && (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-300 text-center">
+                    Submitting is disabled until the VAT rate for your country is configured.
+                  </p>
+                )}
+                <p className="text-[11px] text-muted-foreground text-center pt-0.5 inline-flex w-full items-center justify-center gap-1.5">
+                  {autoState === "saving" ? (
+                    <><Loader2 className="w-3 h-3 animate-spin" /> Saving draft…</>
+                  ) : autoState === "pending" ? (
+                    <><span className="size-1.5 rounded-full bg-amber-500" /> Unsaved changes</>
+                  ) : autoState === "error" ? (
+                    <span className="text-destructive inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Autosave failed — <button type="button" className="underline" onClick={() => save("save")}>retry</button></span>
+                  ) : savedAt || status === "draft" ? (
+                    <><Check className="w-3 h-3 text-lime-600" /> Draft saved{savedAt ? ` ${savedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""} · saves automatically</>
+                  ) : (
+                    "Changes save automatically. Once submitted, your preorder is locked."
+                  )}
+                </p>
                 {flash && <p className="text-[12px] text-lime-600 dark:text-lime-400 text-center pt-1">{flash}</p>}
                 {error && error !== "no-account" && error !== "not-found" && (
                   <p className="text-[12px] text-destructive text-center pt-1">{error}</p>
                 )}
               </div>
             )}
+
+            {/* The only two things the customer fills in besides quantities. */}
+            {!locked && (
+              <div className="p-3 space-y-2.5">
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Delivery &amp; note</div>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground">Requested delivery <span className="font-normal">(optional)</span></label>
+                  <Input
+                    type="date"
+                    value={terms.deliveryDate ? terms.deliveryDate.slice(0, 10) : ""}
+                    onChange={(e) => setTerms((t) => ({ ...t, deliveryDate: e.target.value ? new Date(e.target.value).toISOString() : null }))}
+                    className="mt-1 h-8 text-[12px]"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground">Comment <span className="font-normal">(optional)</span></label>
+                  <textarea
+                    value={terms.comment ?? ""}
+                    onChange={(e) => setTerms((t) => ({ ...t, comment: e.target.value }))}
+                    rows={2}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-[12px] focus:border-ring focus:outline-none"
+                    placeholder="Anything we should know…"
+                  />
+                </div>
+              </div>
+            )}
+
+            {!locked && campaign.effective.note && (
+              <div className="px-3 py-2.5 text-[12px] text-foreground flex items-start gap-2 bg-muted/20">
+                <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-muted-foreground" />
+                <div className="min-w-0">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Your terms</div>
+                  <p className="whitespace-pre-line mt-0.5">{campaign.effective.note}</p>
+                </div>
+              </div>
+            )}
+
+            {locked && (terms.deliveryDate || terms.comment) && (
+              <div className="p-3 space-y-1.5">
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Delivery &amp; note</div>
+                {terms.deliveryDate && <ViewRow label="Requested delivery" value={fmtDate(terms.deliveryDate)} />}
+                {terms.comment && <ViewRow label="Comment" value={terms.comment} />}
+              </div>
+            )}
+            </div>
           </aside>
         </div>
       </div>
@@ -682,7 +837,7 @@ function RegistrationBanner({
   if (published) return null;
   if (registration.state === "pending") {
     return (
-      <div className="mb-4 rounded-xl border border-sky-200/70 bg-sky-50 dark:border-sky-800/50 dark:bg-sky-950/30 px-4 py-3 text-[13px] text-sky-800 dark:text-sky-200 flex items-center gap-2">
+      <div className="bg-sky-50/70 dark:bg-sky-950/30 px-4 py-2.5 text-[13px] text-sky-800 dark:text-sky-200 flex items-center gap-2">
         <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
         Registering your preorder with our order system…
       </div>
@@ -690,7 +845,7 @@ function RegistrationBanner({
   }
   if (registration.state === "failed") {
     return (
-      <div className="mb-4 rounded-xl border border-amber-300/70 bg-amber-50 dark:border-amber-800/50 dark:bg-amber-950/30 px-4 py-3 text-[13px] text-amber-900 dark:text-amber-200">
+      <div className="bg-amber-50/80 dark:bg-amber-950/30 px-4 py-3 text-[13px] text-amber-900 dark:text-amber-200">
         <div className="flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
           <div className="min-w-0 flex-1">
@@ -707,7 +862,7 @@ function RegistrationBanner({
     );
   }
   return (
-    <div className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground flex items-center gap-2">
+    <div className="bg-muted/30 px-4 py-2.5 text-[13px] text-muted-foreground flex items-center gap-2">
       <Lock className="w-4 h-4 shrink-0" />
       This preorder is submitted and being processed. You&rsquo;ll see your confirmed order here once it is ready.
     </div>
@@ -720,10 +875,12 @@ function YourOrderCard({
   allocation,
   currency,
   orderMkId,
+  pricing,
 }: {
   allocation: AllocationResult;
   currency: string;
   orderMkId: string | null;
+  pricing?: PricingContext | null;
 }) {
   if (allocation.state === "missing") {
     return (
@@ -742,15 +899,32 @@ function YourOrderCard({
   if (allocation.state !== "ok") return null;
   const a: AllocationView = allocation.allocation;
   const total = a.sumAll != null ? Number(a.sumAll) : null;
+  const cur = a.currency ?? currency;
+  const rate = pricing?.vat.rate ?? null;
+  const gross = pricing?.basis === "rrp";
+  // Net / VAT of a gross or net figure at the customer's rate (display only; MK owns the sums).
+  const split = (v: number) => {
+    if (rate == null) return null;
+    const c = toCents(v);
+    const parts = gross ? splitGross(c, rate) : addVat(c, rate);
+    return { net: fromCents(parts.net), vat: fromCents(parts.vat), gross: fromCents(parts.gross) };
+  };
+  const totalSplit = total != null ? split(total) : null;
+  const changed = a.lines.filter((l) => l.status !== "full").length;
   return (
-    <section className="mb-5 rounded-2xl border border-emerald-300/60 bg-emerald-50/60 dark:border-emerald-800/50 dark:bg-emerald-950/20 overflow-hidden">
-      <div className="px-4 py-3 flex items-center gap-3 border-b border-emerald-200/60 dark:border-emerald-800/40">
+    <section className="mb-4 rounded-2xl border border-border bg-surface overflow-hidden">
+      <div className="px-4 py-3 flex items-center gap-3 border-b border-border/60 bg-muted/20">
         <PackageCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
         <div className="min-w-0 flex-1">
           <h2 className="text-[14px] font-semibold text-foreground">Your confirmed order</h2>
           <p className="text-[11px] text-muted-foreground">
-            Order {a.countCode} · Requested <span className="font-medium text-foreground tabular-nums">{a.requestedQty}</span> · Confirmed{" "}
-            <span className="font-medium text-emerald-700 dark:text-emerald-300 tabular-nums">{a.allocatedQty}</span> items
+            Order {a.countCode} · <span className="font-medium text-emerald-700 dark:text-emerald-300 tabular-nums">{a.allocatedQty}</span> of{" "}
+            <span className="font-medium text-foreground tabular-nums">{a.requestedQty}</span> requested items confirmed
+            {changed > 0 && (
+              <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 px-1.5 py-px text-[10px] font-medium">
+                {changed} line{changed === 1 ? "" : "s"} differ{changed === 1 ? "s" : ""} from your request
+              </span>
+            )}
           </p>
         </div>
         {orderMkId && (
@@ -764,69 +938,83 @@ function YourOrderCard({
           <thead>
             <tr className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
               <th className="text-left px-4 py-2">Product</th>
+              <th className="text-right px-2 py-2 w-28 hidden md:table-cell">
+                Unit price
+                {rate != null && <div className="text-[9px] normal-case tracking-normal font-medium text-muted-foreground/70">{gross ? "incl." : "excl."} VAT</div>}
+              </th>
               <th className="text-right px-2 py-2 w-24">Requested</th>
               <th className="text-right px-2 py-2 w-24">Confirmed</th>
-              <th className="text-right px-4 py-2 w-28 hidden sm:table-cell">Total</th>
+              {rate != null && rate > 0 && <th className="text-right px-2 py-2 w-24 hidden md:table-cell">VAT {rate}%</th>}
+              <th className="text-right px-4 py-2 w-28">Total</th>
             </tr>
           </thead>
           <tbody>
             {a.lines.map((l) => {
-              const tone =
-                l.status === "full"
-                  ? "text-emerald-700 dark:text-emerald-300"
-                  : l.status === "removed"
-                    ? "text-rose-600 dark:text-rose-400"
-                    : "text-amber-700 dark:text-amber-300";
+              const diff = l.allocatedQty - l.requestedQty;
+              const same = l.status === "full";
+              const tone = same
+                ? "text-emerald-700 dark:text-emerald-300"
+                : l.status === "removed"
+                  ? "text-rose-600 dark:text-rose-400"
+                  : "text-amber-700 dark:text-amber-300";
+              const note =
+                l.status === "removed"
+                  ? "not available"
+                  : l.status === "partial"
+                    ? `${diff} — partly available`
+                    : l.status === "added"
+                      ? "added by us"
+                      : l.status === "increased"
+                        ? `+${diff} — more than requested`
+                        : null;
+              const lineSplit = l.lineTotal != null ? split(l.lineTotal) : null;
               return (
-                <tr key={l.code} className="border-t border-emerald-200/40 dark:border-emerald-800/30">
+                <tr key={l.code} className={cn("border-t border-border/40", !same && "bg-amber-50/50 dark:bg-amber-950/15")}>
                   <td className="px-4 py-2">
                     <div className="font-medium text-foreground truncate max-w-[28rem]">{l.name}</div>
-                    <div className="text-[10px] text-muted-foreground font-mono">{l.code}{l.status === "added" ? " · added" : ""}</div>
+                    <div className="text-[10px] text-muted-foreground font-mono">
+                      {l.code}
+                      {note && <span className={cn("ml-2 font-sans font-medium", tone)}>{note}</span>}
+                    </div>
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{l.requestedQty}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-muted-foreground hidden md:table-cell">{l.unitPriceWithTax != null ? fmtMoney(l.unitPriceWithTax, cur) : "—"}</td>
+                  <td className={cn("px-2 py-2 text-right tabular-nums", same ? "text-muted-foreground" : "text-muted-foreground line-through decoration-amber-500/60")}>{l.requestedQty}</td>
                   <td className={cn("px-2 py-2 text-right tabular-nums font-semibold", tone)}>{l.allocatedQty}</td>
-                  <td className="px-4 py-2 text-right tabular-nums hidden sm:table-cell">{l.lineTotal != null ? fmtMoney(l.lineTotal, a.currency ?? currency) : "—"}</td>
+                  {rate != null && rate > 0 && (
+                    <td className="px-2 py-2 text-right tabular-nums text-muted-foreground hidden md:table-cell">{lineSplit ? fmtMoney(lineSplit.vat, cur) : "—"}</td>
+                  )}
+                  <td className="px-4 py-2 text-right tabular-nums font-medium">{l.lineTotal != null ? fmtMoney(l.lineTotal, cur) : "—"}</td>
                 </tr>
               );
             })}
           </tbody>
           {total != null && (
-            <tfoot>
-              <tr className="border-t border-emerald-200/60 dark:border-emerald-800/40">
-                <td className="px-4 py-2 text-[11px] text-muted-foreground" colSpan={3}>Order total (incl. VAT)</td>
-                <td className="px-4 py-2 text-right tabular-nums font-semibold text-foreground">{fmtMoney(total, a.currency ?? currency)}</td>
+            <tfoot className="border-t border-border/60 bg-muted/10">
+              {totalSplit && rate != null && rate > 0 && (
+                <>
+                  <tr>
+                    <td className="px-4 pt-2 pb-0.5 text-[11px] text-muted-foreground" colSpan={99}>
+                      <div className="flex justify-end gap-6 tabular-nums">
+                        <span>Net {fmtMoney(totalSplit.net, cur)}</span>
+                        <span>VAT {rate}% {fmtMoney(totalSplit.vat, cur)}</span>
+                      </div>
+                    </td>
+                  </tr>
+                </>
+              )}
+              <tr>
+                <td className="px-4 py-2 text-[12px] text-foreground font-medium" colSpan={99}>
+                  <div className="flex items-baseline justify-between">
+                    <span>Order total{pricing ? <span className="ml-1 text-[11px] font-normal text-muted-foreground">({vatLabel(pricing)})</span> : null}</span>
+                    <span className="text-[15px] font-bold tabular-nums">{fmtMoney(total, cur)}</span>
+                  </div>
+                </td>
               </tr>
             </tfoot>
           )}
         </table>
       </div>
     </section>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  readOnly,
-  className,
-}: {
-  label: string;
-  value: string;
-  onChange?: (v: string) => void;
-  readOnly?: boolean;
-  className?: string;
-}) {
-  return (
-    <div className={className}>
-      <label className="text-[11px] font-medium text-muted-foreground">{label}</label>
-      <Input
-        value={value}
-        readOnly={readOnly}
-        onChange={(e) => onChange?.(e.target.value)}
-        className={cn("mt-1 h-9 text-[12px]", readOnly && "bg-muted/50 text-muted-foreground")}
-      />
-    </div>
   );
 }
 

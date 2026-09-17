@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveEffectiveCampaign } from "@/lib/preorder-effective";
-import { allocationFromDocument, buildCommercialSnapshot, orderHash, snapshotTotals } from "@/lib/preorder-snapshot";
+import { allocationFromDocument, buildCommercialSnapshot, orderHash, snapshotTotals, snapshotVatTotals } from "@/lib/preorder-snapshot";
 import { campaignFromSnapshot, computeTotals, flattenRows, rowUnitPrice, snapshotQuantities } from "@/types/preorder";
 import type { DocDetail } from "@/types/documents";
 import { baseCampaign } from "./helpers/fixtures";
@@ -25,7 +25,7 @@ function order(lines: { code: string; amount: string; priceWithTax?: string; shi
 describe("commercial snapshot", () => {
   const campaign = baseCampaign({
     markets: [{ id: "dach", name: "DACH", color: "sky", countries: ["AT"], config: { partnerPricelist: "DACH", currency: "EUR" } }],
-    priceBooks: [{ pricelist: "DACH", currency: "EUR", entries: [{ code: "SKU-s1", gross: 90, taxCode: "EX1" }], missing: 0 }],
+    priceBooks: [{ pricelist: "DACH", currency: "EUR", entries: [{ code: "SKU-s1", net: 90, taxCode: "EX1" }], missing: 0 }],
   });
   const effective = resolveEffectiveCampaign(campaign, ctx);
   const qty = { s1: 20, m1: 3, s2: 0 };
@@ -55,7 +55,7 @@ describe("commercial snapshot", () => {
     // Admin repoints Austria at another list and hides s1 after the customer submitted.
     const mutated = baseCampaign({
       markets: [{ id: "dach", name: "DACH", color: "sky", countries: ["AT"], config: { partnerPricelist: "NEW", hiddenIds: ["s1"] } }],
-      priceBooks: [{ pricelist: "NEW", currency: "EUR", entries: [{ code: "SKU-s1", gross: 999 }], missing: 0 }],
+      priceBooks: [{ pricelist: "NEW", currency: "EUR", entries: [{ code: "SKU-s1", net: 999 }], missing: 0 }],
     });
     const live = resolveEffectiveCampaign(mutated, ctx);
     expect(flattenRows(live).some((r) => r.row.id === "s1")).toBe(false);
@@ -101,5 +101,49 @@ describe("allocation (live MK order vs request)", () => {
     const o2 = order([{ code: "SKU-s1", amount: "90", priceWithTax: "100" }], "9000");
     expect(allocationFromDocument(snap, o2, { publishedHash: h }).changedSincePublish).toBe(true);
     expect(allocationFromDocument(snap, o2, { publishedHash: null }).changedSincePublish).toBe(false);
+  });
+});
+
+describe("commercial snapshot — frozen VAT arithmetic", () => {
+  const vat = { rates: { SI: 22 }, fallbackRate: null, taxCodes: [] };
+  const person = { partnerMkId: "p2", countryIso: "SI", countrySource: "mk" as const, kind: "person" as const };
+  const qty = { s1: 100, m1: 20 }; // Sails: 100 × 200 RRP = 20 000 ⇒ Gold 10 %
+
+  it("individual: lines carry unit/line net, VAT and gross; pricing block sums the lines", () => {
+    const snap = buildCommercialSnapshot(resolveEffectiveCampaign(baseCampaign(), person, vat), qty);
+    expect(snap.pricing).toMatchObject({ kind: "person", basis: "rrp", countryIso: "SI", vatRate: 22, vatSource: "global" });
+    const s1 = snap.lines.find((l) => l.code === "SKU-s1")!;
+    expect(s1).toMatchObject({ unitPrice: 200, rrp: 200, partnerPrice: 100, tierPct: 10, unitGross: 180, unitNet: 147.54, unitVat: 32.46, lineGross: 18000 });
+    expect(snap.pricing?.totals).toEqual(snapshotVatTotals(snap));
+    expect(snap.pricing?.totals.gross).toBe(18000 + 20 * 100);
+    expect(snapshotTotals(snap).net).toBe(snap.pricing?.totals.gross);
+  });
+
+  it("company: net lines, zero VAT, gross = net", () => {
+    const company = { ...person, partnerMkId: "p1", kind: "business" as const };
+    const snap = buildCommercialSnapshot(resolveEffectiveCampaign(baseCampaign(), company, vat), qty);
+    expect(snap.pricing).toMatchObject({ kind: "business", basis: "partner", vatRate: 0, vatSource: "zero-rated" });
+    expect(snap.lines[0]).toMatchObject({ unitPrice: 100, unitNet: 90, unitVat: 0, unitGross: 90 });
+    expect(snap.pricing?.totals).toEqual({ net: 9000 + 1000, vat: 0, gross: 10000 });
+  });
+
+  it("later VAT / price changes never alter the frozen order", () => {
+    const snap = buildCommercialSnapshot(resolveEffectiveCampaign(baseCampaign(), person, vat), qty);
+    // The VAT table and the sheet change after submit.
+    const mutated = baseCampaign({ vatOverrides: [{ iso: "SI", rate: 9.5 }] });
+    mutated.tabs[0].groups[0].rows[0].rrp = 999;
+    const live = resolveEffectiveCampaign(mutated, person, { rates: { SI: 25 }, fallbackRate: null, taxCodes: [] });
+    expect(live.pricing?.vat.rate).toBe(9.5);
+    const frozen = campaignFromSnapshot(mutated, snap);
+    expect(frozen.pricing).toEqual({ kind: "person", basis: "rrp", countryIso: "SI", vat: { rate: 22, source: "global" } });
+    expect(rowUnitPrice(flattenRows(frozen)[0].row, "rrp")).toBe(200);
+    expect(computeTotals(frozen, snapshotQuantities(snap))).toEqual(snapshotTotals(snap));
+    expect(snapshotVatTotals(snap)?.vat).toBeCloseTo(3246 + 360.6, 5); // 100 × 32.46 + 20 × 18.03
+  });
+
+  it("a missing VAT rate leaves no pricing block (submit refuses such an order)", () => {
+    const snap = buildCommercialSnapshot(resolveEffectiveCampaign(baseCampaign(), { ...person, countryIso: "DE" }, vat), qty);
+    expect(snap.pricing).toBeNull();
+    expect(snapshotVatTotals(snap)).toBeNull();
   });
 });

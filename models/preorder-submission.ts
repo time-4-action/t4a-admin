@@ -84,8 +84,27 @@ export interface ISnapshotLine {
   qty: number;
   unitPrice: number;
   rrp?: number | null;
+  partnerPrice?: number | null;
   taxCode?: string | null;
   priceSource: "sheet" | "manual" | "book" | "fallback";
+  tierPct?: number | null;
+  unitNet?: number | null;
+  unitVat?: number | null;
+  unitGross?: number | null;
+  lineNet?: number | null;
+  lineVat?: number | null;
+  lineGross?: number | null;
+}
+
+// Frozen pricing decision of a submission (see types/preorder.ts SnapshotPricing).
+export interface ISnapshotPricing {
+  kind: "business" | "person";
+  basis: "partner" | "rrp";
+  countryIso?: string | null;
+  vatRate: number;
+  vatSource: "campaign" | "global" | "fallback" | "zero-rated" | "exempt" | "market" | "customer";
+  mkTaxCode?: string | null;
+  totals: { net: number; vat: number; gross: number };
 }
 
 export interface ICommercialSnapshot {
@@ -103,10 +122,12 @@ export interface ICommercialSnapshot {
     deadline: ConfigSource;
     note: ConfigSource;
     minOrderAmount: ConfigSource;
+    vat?: ConfigSource;
     tiers: Map<string, ConfigSource> | Record<string, ConfigSource>;
   };
   tabs: { tabId: string; tabName: string; tiers: IPreorderTier[] }[];
   lines: ISnapshotLine[];
+  pricing?: ISnapshotPricing | null;
 }
 
 export interface IPreorderSubmission extends Document {
@@ -245,8 +266,39 @@ const SnapshotLineSchema = new Schema<ISnapshotLine>(
     qty: { type: Number, required: true },
     unitPrice: { type: Number, required: true },
     rrp: { type: Number, default: null },
+    partnerPrice: { type: Number, default: null },
     taxCode: { type: String, default: null },
     priceSource: { type: String, enum: ["sheet", "manual", "book", "fallback"], default: "sheet" },
+    tierPct: { type: Number, default: null },
+    unitNet: { type: Number, default: null },
+    unitVat: { type: Number, default: null },
+    unitGross: { type: Number, default: null },
+    lineNet: { type: Number, default: null },
+    lineVat: { type: Number, default: null },
+    lineGross: { type: Number, default: null },
+  },
+  { _id: false },
+);
+
+const SnapshotPricingSchema = new Schema<ISnapshotPricing>(
+  {
+    kind: { type: String, enum: ["business", "person"], required: true },
+    basis: { type: String, enum: ["partner", "rrp"], required: true },
+    countryIso: { type: String, default: null },
+    vatRate: { type: Number, required: true },
+    vatSource: { type: String, enum: ["campaign", "global", "fallback", "zero-rated", "exempt", "market", "customer"], required: true },
+    mkTaxCode: { type: String, default: null },
+    totals: {
+      type: new Schema(
+        {
+          net: { type: Number, default: 0 },
+          vat: { type: Number, default: 0 },
+          gross: { type: Number, default: 0 },
+        },
+        { _id: false },
+      ),
+      default: () => ({}),
+    },
   },
   { _id: false },
 );
@@ -272,6 +324,7 @@ const SnapshotSchema = new Schema<ICommercialSnapshot>(
           deadline: { type: String, default: "campaign" },
           note: { type: String, default: "campaign" },
           minOrderAmount: { type: String, default: "campaign" },
+          vat: { type: String, default: "campaign" },
           tiers: { type: Map, of: String, default: {} },
         },
         { _id: false },
@@ -292,6 +345,7 @@ const SnapshotSchema = new Schema<ICommercialSnapshot>(
       default: [],
     },
     lines: { type: [SnapshotLineSchema], default: [] },
+    pricing: { type: SnapshotPricingSchema, default: null },
   },
   { _id: false },
 );

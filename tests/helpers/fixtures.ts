@@ -63,6 +63,19 @@ export function baseCampaign(over: Partial<PreorderCampaignAdmin> = {}): Preorde
     markets: [],
     customerRules: [],
     priceBooks: [],
+    vatOverrides: [],
     ...over,
   };
 }
+
+// A global VAT table for the tests (lib/pricing.ts VatConfig).
+export const vatConfig = {
+  rates: { SI: 22, AT: 20, DE: 19 },
+  fallbackRate: null,
+  taxCodes: [
+    { rate: 0, code: "000" },
+    { rate: 9.5, code: "EX3" },
+    { rate: 20, code: "EX2" },
+    { rate: 22, code: "EX4" },
+  ],
+};

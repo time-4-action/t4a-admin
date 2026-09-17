@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB, PreorderCampaign, toCampaignAdminView, toObjectId } from "@/lib/preorder";
-import { assignCountries, replaceMarkets, upsertMarket } from "@/lib/preorder-markets";
+import { assignCountries, reorderMarkets, replaceMarkets, upsertMarket } from "@/lib/preorder-markets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,11 +42,18 @@ export async function POST(request: Request, { params }: RouteParams) {
   if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
   const body = (await request.json().catch(() => ({}))) as {
     assign?: { marketId?: string | null; countries?: string[] };
+    order?: string[];
     name?: string;
     color?: string;
     countries?: string[];
+    kinds?: string[];
     config?: unknown;
   };
+  if (body.order) {
+    const res = await reorderMarkets(doc, body.order);
+    if (res !== true) return NextResponse.json(res, { status: res.status });
+    return NextResponse.json({ markets: toCampaignAdminView(doc).markets });
+  }
   if (body.assign) {
     const res = await assignCountries(doc, body.assign.marketId ?? null, body.assign.countries ?? []);
     if (res !== true) return NextResponse.json(res, { status: res.status });

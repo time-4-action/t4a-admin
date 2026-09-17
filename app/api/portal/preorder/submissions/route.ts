@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionPartner } from "@/lib/portal";
 import { connectDB, PreorderCampaign, toObjectId, toPortalSubmissionView, partnerHasCampaignAccess } from "@/lib/preorder";
 import { saveOrSubmitPreorder } from "@/lib/preorder-submit";
+import { defaultTermsFromPartner } from "@/lib/preorder-terms";
 import type { PreorderTerms } from "@/types/preorder";
 
 export const runtime = "nodejs";
@@ -43,8 +44,12 @@ export async function POST(request: Request) {
     campaignDoc,
     partner: { mkId: partner.mkId, name: partner.name, email: partner.emails?.[0], mk: partner },
     quantities: body.quantities ?? {},
-    terms: body.terms,
+    // Identity + addresses are Metakocka's, never the browser's: only the requested
+    // delivery date and the comment are the customer's to set.
+    terms: { ...defaultTermsFromPartner(partner), deliveryDate: body.terms?.deliveryDate ?? null, comment: body.terms?.comment },
     action: body.action === "submit" ? "submit" : "save",
+    // An admin "viewing as" the customer acts AS the customer — the submission reads
+    // exactly as if the customer had made it.
     actor: { source: "customer" },
   });
   if (!result.ok) {

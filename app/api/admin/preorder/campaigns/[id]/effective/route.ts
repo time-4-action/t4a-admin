@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { connectDB, PreorderCampaign, toObjectId, loadEffectiveCampaignForPartner } from "@/lib/preorder";
 import { getPartnerById } from "@/lib/metakocka";
-import { getMkCustomer, effectiveCountryIso, upsertMkCustomer } from "@/lib/mk-customers";
+import { getMkCustomer, effectiveCountryIso, upsertMkCustomer, customerKind } from "@/lib/mk-customers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,10 +29,11 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       directory = await getMkCustomer(partnerMkId);
     }
   }
-  const effective = loadEffectiveCampaignForPartner(doc, {
+  const effective = await loadEffectiveCampaignForPartner(doc, {
     mkId: partnerMkId,
     countryIso: directory ? effectiveCountryIso(directory) : null,
     countrySource: directory?.countryIsoManual ? "manual" : directory?.countrySource ?? null,
+    kind: directory ? customerKind(directory) : mk ? customerKind(mk) : null,
     mk,
   });
   return NextResponse.json({

@@ -6,19 +6,50 @@ import "server-only";
 // see" for every /portal page and /api/portal route.
 
 import { auth0 } from "@/lib/auth";
-import { resolvePartnerByEmail } from "@/lib/metakocka";
+import { getPartnerById, resolvePartnerByEmail } from "@/lib/metakocka";
+import { readImpersonation } from "@/lib/portal-impersonation";
+import { cached } from "@/lib/auth0-cache";
+import { getMkCustomer, partnerFromDirectory } from "@/lib/mk-customers";
 import type { DocKind, MkPartner } from "@/types/documents";
 
 // The document families a customer may see in the portal. Offers are internal
 // (admins still browse them under /documents) and are never exposed here — not
 // as a page, a nav link, an API `type`, or a PDF.
-export const PORTAL_DOC_KINDS: readonly DocKind[] = ["invoice", "order"];
+export const PORTAL_DOC_KINDS: readonly DocKind[] = ["invoice", "credit-note", "order"];
 
 export function isPortalDocKind(kind: DocKind | null | undefined): kind is DocKind {
   return !!kind && PORTAL_DOC_KINDS.includes(kind);
 }
 
+// The partner the portal shows. Normally the session email's partner; for an admin
+// who is "viewing the portal as" a customer (lib/portal-impersonation.ts — a signed
+// cookie honoured only with an eligible admin role) it is that customer.
 export async function getSessionPartner(): Promise<MkPartner | null> {
+  return (await getPortalViewer()).partner;
+}
+
+export type PortalViewer = {
+  partner: MkPartner | null;
+  // Set while an admin views the portal as a customer: who they really are.
+  impersonating: { partnerMkId: string; partnerName: string; adminEmail: string | null; returnTo: string } | null;
+};
+
+export async function getPortalViewer(): Promise<PortalViewer> {
+  const imp = await readImpersonation();
+  if (imp) {
+    // Live Metakocka partner, else the directory record (MK unreachable / partner not
+    // returned by id) — an admin viewing as a customer must not land on "no account".
+    const partner = await cached(`portal-as:${imp.partnerMkId}`, 60_000, async () => {
+      const live = await getPartnerById(imp.partnerMkId).catch(() => null);
+      if (live) return live;
+      const dir = await getMkCustomer(imp.partnerMkId);
+      return dir ? partnerFromDirectory(dir) : null;
+    });
+    return {
+      partner,
+      impersonating: { partnerMkId: imp.partnerMkId, partnerName: partner?.name ?? imp.partnerName, adminEmail: imp.adminEmail, returnTo: imp.returnTo },
+    };
+  }
   const session = await auth0.getSession();
-  return resolvePartnerByEmail(session?.user?.email);
+  return { partner: await resolvePartnerByEmail(session?.user?.email), impersonating: null };
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getProduct } from "@/lib/product-api";
-import { getMkProductPrices, pickMkListGrossPrice, productTaxCode } from "@/lib/metakocka";
+import { getMkProductPrices, pickMkListGrossPrice, pickMkListNetPrice, productTaxCode } from "@/lib/metakocka";
 import type { CatalogueProduct, ProductPrice } from "@/types/product";
 
 export const runtime = "nodejs";
@@ -68,8 +68,9 @@ export async function POST(request: Request) {
       : parent
         ? heuristicPrice(parent, code, /rrp|retail|msrp/i)
         : null;
+    // Partner price is NET (excl. VAT); RRP is gross (consumer price incl. VAT).
     const partnerPrice = partnerTitle
-      ? pickMkListGrossPrice(mk[code], partnerTitle, { untaxedIsNet: true })
+      ? pickMkListNetPrice(mk[code], partnerTitle)
       : parent
         ? heuristicPrice(parent, code, /partner/i)
         : null;

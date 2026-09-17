@@ -10,6 +10,7 @@ import {
   Users,
   BarChart3,
   Settings,
+  Percent,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -39,6 +40,7 @@ import {
   Tags,
   FileText,
   ReceiptText,
+  FileMinus,
   ClipboardList,
   Building2,
   ShoppingCart,
@@ -50,26 +52,24 @@ type NavLinkDef = {
   icon: React.ElementType;
   matchPrefix?: boolean;
   superAdminOnly?: boolean;
+  // Gate this link by another section than its group's (General holds both the
+  // user-admin and the access-admin links).
+  section?: SectionKey;
 };
 type NavSection = { label: string; section: SectionKey; links: NavLinkDef[] };
 
 const sections: NavSection[] = [
   {
+    // Users + access management in one group; each link keeps its own gate.
     label: "General",
     section: "general",
     links: [
-      { href: "/users", label: "Users", icon: Users, matchPrefix: true },
-    ],
-  },
-  {
-    label: "Access",
-    section: "access",
-    links: [
-      { href: "/roles",                label: "Access Types",    icon: ShieldCheck },
-      { href: "/roles/assign",         label: "Assign Access",   icon: UserCog },
-      { href: "/roles/scopes",         label: "Scopes",          icon: KeyRound },
-      { href: "/roles/new",            label: "New Access Type", icon: UserPlus },
-      { href: "/roles/super-admins",   label: "Super Admins",    icon: Crown, superAdminOnly: true },
+      { href: "/users",              label: "Users",           icon: Users, matchPrefix: true },
+      { href: "/roles",              label: "Access Types",    icon: ShieldCheck, section: "access" },
+      { href: "/roles/assign",       label: "Assign Access",   icon: UserCog, section: "access" },
+      { href: "/roles/scopes",       label: "Scopes",          icon: KeyRound, section: "access" },
+      { href: "/roles/new",          label: "New Access Type", icon: UserPlus, section: "access" },
+      { href: "/roles/super-admins", label: "Super Admins",    icon: Crown, section: "access", superAdminOnly: true },
     ],
   },
   {
@@ -129,6 +129,7 @@ const sections: NavSection[] = [
     links: [
       { href: "/documents/customer", label: "Customer", icon: Building2,     matchPrefix: true },
       { href: "/documents/invoices", label: "Invoices", icon: ReceiptText,   matchPrefix: true },
+      { href: "/documents/credit-notes", label: "Credit notes", icon: FileMinus, matchPrefix: true },
       { href: "/documents/offers",   label: "Offers",   icon: FileText,      matchPrefix: true },
       { href: "/documents/orders",   label: "Orders",   icon: ClipboardList, matchPrefix: true },
       { href: "/documents/access",   label: "Documents Access", icon: ShieldCheck, superAdminOnly: true },
@@ -138,8 +139,17 @@ const sections: NavSection[] = [
     label: "Preorder",
     section: "preorder",
     links: [
-      { href: "/preorder",        label: "Campaigns",       icon: ClipboardList, matchPrefix: true },
-      { href: "/preorder/access", label: "Preorder Access", icon: ShieldCheck, superAdminOnly: true },
+      { href: "/preorder",           label: "Campaigns",       icon: ClipboardList, matchPrefix: true },
+      { href: "/preorder/vat-rates", label: "VAT rates",       icon: Percent },
+      { href: "/preorder/access",    label: "Preorder Access", icon: ShieldCheck, superAdminOnly: true },
+    ],
+  },
+  {
+    label: "Customers",
+    section: "customers",
+    links: [
+      { href: "/customers",        label: "All customers",    icon: Users, matchPrefix: true },
+      { href: "/customers/access", label: "Customers Access", icon: ShieldCheck, superAdminOnly: true },
     ],
   },
 ];
@@ -156,6 +166,7 @@ const SECTION_STYLE: Record<SectionKey, { icon: React.ElementType; color: string
   builder:    { icon: Blocks,    color: "text-blue-600 dark:text-blue-500", bg: "bg-blue-600/10" },
   documents:  { icon: FileText,  color: "text-teal-500",    bg: "bg-teal-500/10" },
   preorder:   { icon: ShoppingCart, color: "text-lime-600 dark:text-lime-500", bg: "bg-lime-600/10" },
+  customers:  { icon: Users,     color: "text-cyan-600 dark:text-cyan-500", bg: "bg-cyan-600/10" },
   system:     { icon: Cog,       color: "text-slate-500",   bg: "bg-slate-500/10" },
 };
 
@@ -245,10 +256,9 @@ export default function Nav({ user, roles = [] }: { user?: NavUser; roles?: stri
 
   const superAdmin = isSuperAdmin(roles);
   const visibleSections = sections
-    .filter((s) => canSee(roles, s.section))
     .map((s) => ({
       ...s,
-      links: s.links.filter((l) => !l.superAdminOnly || superAdmin),
+      links: s.links.filter((l) => canSee(roles, l.section ?? s.section) && (!l.superAdminOnly || superAdmin)),
     }))
     .filter((s) => s.links.length > 0);
   const canSeeSettings = canSee(roles, "system");

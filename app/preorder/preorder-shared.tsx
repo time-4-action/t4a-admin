@@ -2,7 +2,7 @@
 // Shared presentational pieces for the preorder fill experience. Rendered by BOTH the
 // partner fill portal (app/portal/preorders/[id]) and the admin review view
 // (app/preorder/[id]/submissions/[id]) — the admin passes readOnly + fulfilment columns.
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Package,
   Minus,
@@ -10,6 +10,7 @@ import {
   Search,
   X,
   ChevronRight,
+  ChevronLeft,
   ImageIcon,
   ShoppingCart,
   Check,
@@ -18,6 +19,10 @@ import {
   Loader2,
   Percent,
   ArrowLeft,
+  Layers,
+  Building2,
+  User,
+  AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -33,16 +38,21 @@ import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   rowUnitPrice,
   computeTabTotals,
-  sumTabTotals,
+  computePricedOrder,
+  campaignBasis,
   activeTiers,
   totalsNet,
   totalsDiscount,
+  CUSTOMER_KIND_LABELS,
   type PreorderCampaign,
   type PreorderSubmissionTotals,
   type PreorderTab,
   type PreorderRow,
   type PreorderTerms,
+  type PricingContext,
+  type PriceBasis,
 } from "@/types/preorder";
+import { fmtVatRate, vatIsMissing, type OrderVatTotals } from "@/lib/pricing";
 
 export function fmtMoney(amount: number, currency = "EUR"): string {
   try {
@@ -71,7 +81,7 @@ export function TabBar({
   quantities: QtyMap;
 }) {
   return (
-    <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+    <nav className="flex items-stretch gap-0.5 overflow-x-auto scrollbar-none -mb-px h-9" aria-label="Sections">
       {tabs.map((t) => {
         const active = t.id === activeId;
         const count = t.groups.reduce(
@@ -84,27 +94,22 @@ export function TabBar({
             onClick={() => onSelect(t.id)}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "shrink-0 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-all",
-              active
-                ? "bg-lime-600 text-white shadow-sm"
-                : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground",
+              "group relative isolate inline-flex items-center gap-1.5 whitespace-nowrap px-2.5 text-[12.5px] font-medium transition-colors border-b-2",
+              active ? "border-lime-600 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
+            <Layers className={cn("w-3.5 h-3.5 shrink-0 transition-colors", active ? "text-lime-600" : "text-muted-foreground/70 group-hover:text-foreground/70")} />
             {t.name || "Tab"}
             {count > 0 && (
-              <span
-                className={cn(
-                  "text-[10px] tabular-nums rounded-full px-1.5 py-0.5 leading-none font-semibold",
-                  active ? "bg-white/25 text-white" : "bg-lime-600 text-white",
-                )}
-              >
+              <span className={cn("text-[10px] tabular-nums rounded-full px-1.5 py-px leading-none font-semibold", active ? "bg-foreground text-background" : "bg-muted text-foreground")}>
                 {count}
               </span>
             )}
+            <span className="pointer-events-none absolute inset-x-0.5 top-1 bottom-1.5 rounded-md transition-colors group-hover:bg-muted/60 -z-10" aria-hidden />
           </button>
         );
       })}
-    </div>
+    </nav>
   );
 }
 
@@ -172,6 +177,70 @@ function TagPill({ tag }: { tag?: PreorderRow["tag"] }) {
   );
 }
 
+// ── Pricing banner ───────────────────────────────────────────────────────────
+// Tells the customer how THEY are priced: a company orders at partner prices,
+// zero-rated; an individual at the RRP with their country's VAT inside it. When the
+// VAT rate is not configured the banner turns amber — the order cannot be submitted.
+export function PricingBanner({ pricing, className, bare }: { pricing: PricingContext | null | undefined; className?: string; bare?: boolean }) {
+  if (!pricing) return null;
+  const missing = vatIsMissing(pricing);
+  const company = pricing.kind === "business";
+  const Icon = missing ? AlertTriangle : company ? Building2 : User;
+  return (
+    <div
+      className={cn(
+        "px-4 py-2.5 flex items-start gap-2.5 text-[12px]",
+        !bare && "rounded-xl border",
+        missing
+          ? cn("text-amber-800 dark:text-amber-300", !bare && "border-amber-300/70 bg-amber-50/70 dark:border-amber-800/60 dark:bg-amber-950/30")
+          : cn("text-muted-foreground", !bare && "border-border bg-surface"),
+        className,
+      )}
+    >
+      <Icon className={cn("w-4 h-4 shrink-0 mt-px", missing ? "text-amber-600" : "text-muted-foreground")} />
+      <div className="min-w-0">
+        {missing ? (
+          <>
+            <span className="font-semibold">VAT rate not configured{pricing.countryIso ? ` for ${pricing.countryIso}` : ""}.</span>{" "}
+            Your prices cannot be finalised yet, so the preorder cannot be submitted. Please contact us — you can still save a draft.
+          </>
+        ) : company ? (
+          <>
+            <span className="font-semibold text-foreground">You order as a company</span> — partner prices, excl. VAT
+            {(pricing.vat.rate ?? 0) > 0
+              ? ` — ${fmtVatRate(pricing.vat.rate)} VAT is added to your total.`
+              : ` (${fmtVatRate(pricing.vat.rate)}, ${pricing.vat.source === "exempt" ? "VAT exempt" : "zero-rated"}).`}{" "}
+            The RRP column is shown for reference.
+          </>
+        ) : pricing.vat.source === "exempt" ? (
+          <>
+            <span className="font-semibold text-foreground">You order as an individual</span> — retail prices (RRP), VAT exempt (0%). The partner column is
+            shown for reference.
+          </>
+        ) : (
+          <>
+            <span className="font-semibold text-foreground">You order as an individual</span> — retail prices (RRP) incl.{" "}
+            {fmtVatRate(pricing.vat.rate)} VAT{pricing.countryIso ? ` (${pricing.countryIso})` : ""}. VAT is included in every price shown, never added on
+            top. The partner column is shown for reference.
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Column captions for the two price columns, highlighting the one the customer pays.
+function priceHeader(label: string, sub: string, active: boolean) {
+  return (
+    <span className={cn("inline-flex flex-col items-end leading-tight", active ? "text-foreground" : "")}>
+      <span>{label}</span>
+      <span className={cn("text-[9px] normal-case tracking-normal font-medium", active ? "text-foreground/70" : "text-muted-foreground/60")}>
+        {active ? `your price · ${sub}` : sub}
+      </span>
+    </span>
+  );
+}
+
 // ── Grid (spreadsheet-like) ──────────────────────────────────────────────────
 export function PreorderGridTab({
   tab,
@@ -184,6 +253,9 @@ export function PreorderGridTab({
   renderExtraCell,
   qtyHeader,
   renderQty,
+  pricing,
+  bare = false,
+  searchable = false,
 }: {
   tab: PreorderTab;
   quantities: QtyMap;
@@ -195,22 +267,55 @@ export function PreorderGridTab({
   renderExtraCell?: (rowId: string) => ReactNode;
   qtyHeader?: string; // custom Qty column label
   renderQty?: (rowId: string, qty: number) => ReactNode; // custom read-only qty cell
+  pricing?: PricingContext | null; // the customer's price basis (campaign.pricing); partner when absent
+  bare?: boolean; // no border / radius — the caller frames it
+  searchable?: boolean; // a search box above the table (name / SKU / group)
 }) {
   const th = "text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-2";
-  const groups = onlyFilled
-    ? tab.groups
-        .map((g) => ({ ...g, rows: g.rows.filter((r) => (quantities[r.id] || 0) > 0) }))
-        .filter((g) => g.rows.length > 0)
-    : tab.groups;
+  const basis: PriceBasis = pricing?.basis ?? "partner";
+  const [search, setSearch] = useState("");
+  const needle = searchable ? search.trim().toLowerCase() : "";
+  const groups = tab.groups
+    .map((g) => ({
+      ...g,
+      rows: g.rows.filter(
+        (r) =>
+          (!onlyFilled || (quantities[r.id] || 0) > 0) &&
+          (!needle || g.name.toLowerCase().includes(needle) || r.name.toLowerCase().includes(needle) || r.code.toLowerCase().includes(needle) || (r.variantLabel ?? "").toLowerCase().includes(needle)),
+      ),
+    }))
+    .filter((g) => g.rows.length > 0 || (!onlyFilled && !needle));
+  const filled = tab.groups.reduce((n, g) => n + g.rows.filter((r) => (quantities[r.id] || 0) > 0).length, 0);
   return (
-    <div className="rounded-xl border border-border bg-surface overflow-x-auto">
+    <div className={cn("overflow-x-auto", !bare && "rounded-xl border border-border bg-surface")}>
+      {searchable && (
+        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border/60">
+          <div className="relative max-w-sm flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search products, SKU…"
+              className="h-8 w-full rounded-lg border border-border bg-background pl-8 pr-8 text-[12px] focus:border-ring focus:outline-none"
+            />
+            {search && (
+              <button type="button" onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Clear search">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <span className="text-[11px] text-muted-foreground tabular-nums ml-auto">
+            {needle ? `${groups.reduce((n, g) => n + g.rows.length, 0)} match${groups.reduce((n, g) => n + g.rows.length, 0) === 1 ? "" : "es"}` : filled > 0 ? `${filled} line${filled === 1 ? "" : "s"} filled` : ""}
+          </span>
+        </div>
+      )}
       <table className="w-full text-[12px] border-collapse">
         <thead className="sticky top-0 z-10 bg-surface">
-          <tr className="border-b border-border">
+          <tr className="border-b border-border bg-muted/20">
             <th className={cn(th, "text-left pl-4 min-w-[220px]")}>Product</th>
             <th className={cn(th, "text-left")}>SKU</th>
-            <th className={cn(th, "text-right")}>RRP</th>
-            <th className={cn(th, "text-right")}>Partner</th>
+            <th className={cn(th, "text-right")}>{priceHeader("RRP", "incl. VAT", basis === "rrp")}</th>
+            <th className={cn(th, "text-right")}>{priceHeader("Partner", "excl. VAT", basis === "partner")}</th>
             <th className={cn(th, "text-right w-28")}>{qtyHeader ?? "Qty"}</th>
             <th className={cn(th, "text-right pr-4 w-24")}>Total</th>
             {extraHeader}
@@ -229,12 +334,13 @@ export function PreorderGridTab({
               renderExtraCell={renderExtraCell}
               renderQty={renderQty}
               hasExtra={!!extraHeader}
+              basis={basis}
             />
           ))}
           {groups.every((g) => g.rows.length === 0) && (
             <tr>
               <td colSpan={7} className="text-center text-[13px] text-muted-foreground py-12">
-                {onlyFilled ? "No items ordered in this tab." : "No products in this tab."}
+                {needle ? "No product matches your search." : onlyFilled ? "No items ordered in this tab." : "No products in this tab."}
               </td>
             </tr>
           )}
@@ -254,6 +360,7 @@ function GroupRows({
   renderExtraCell,
   renderQty,
   hasExtra,
+  basis,
 }: {
   groupName: string;
   rows: PreorderRow[];
@@ -264,22 +371,55 @@ function GroupRows({
   renderExtraCell?: (rowId: string) => ReactNode;
   renderQty?: (rowId: string, qty: number) => ReactNode;
   hasExtra: boolean;
+  basis: PriceBasis;
 }) {
   if (rows.length === 0) return null;
   const span = 6 + (hasExtra ? 1 : 0);
   return (
     <>
-      <tr className="bg-muted/40">
-        <td colSpan={span} className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-foreground/70">
+      <tr className="bg-muted/15">
+        <td colSpan={span} className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           {groupName}
         </td>
       </tr>
       {rows.map((r) => {
         const qty = quantities[r.id] || 0;
-        const unit = rowUnitPrice(r);
+        const unit = rowUnitPrice(r, basis);
         const total = qty * unit;
+        const partnerShown = r.discountedPrice ?? r.partnerPrice ?? null;
+        const priceCell = (v: number | null, active: boolean) => (
+          <td className={cn("px-2 py-1.5 text-right tabular-nums", active ? "text-foreground font-medium" : "text-muted-foreground")}>
+            {v != null && v > 0 ? fmtMoney(v, currency) : "—"}
+          </td>
+        );
+        if (r.unpriced) {
+          return (
+            <tr key={r.id} className={cn("border-b border-border/40", qty > 0 ? "bg-amber-50/60 dark:bg-amber-950/20" : "opacity-70")}>
+              <td className="pl-4 pr-2 py-1.5">
+                <div className="flex items-center gap-2 min-w-0">
+                  <RowThumb row={r} />
+                  <span className="text-[12px] text-foreground truncate">{r.name}</span>
+                  <TagPill tag={r.tag} />
+                </div>
+              </td>
+              <td className="px-2 py-1.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap">{r.code}</td>
+              <td colSpan={2} className="px-2 py-1.5 text-right text-[11px] text-amber-700 dark:text-amber-300">
+                <span className="inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> no consumer price yet — not orderable</span>
+              </td>
+              <td className="px-2 py-1.5 text-right">
+                {qty > 0 && !readOnly ? (
+                  <button type="button" onClick={() => onQty?.(r.id, 0)} className="text-[11px] text-amber-700 dark:text-amber-300 underline">remove {qty}</button>
+                ) : (
+                  <span className="tabular-nums text-muted-foreground block text-right">{qty || "—"}</span>
+                )}
+              </td>
+              <td className="px-2 pr-4 py-1.5 text-right text-muted-foreground">—</td>
+              {renderExtraCell && <td className="px-2 py-1.5">{renderExtraCell(r.id)}</td>}
+            </tr>
+          );
+        }
         return (
-          <tr key={r.id} className={cn("border-b border-border/40 hover:bg-muted/20", qty > 0 && "bg-lime-50/40 dark:bg-lime-950/10")}>
+          <tr key={r.id} className={cn("border-b border-border/40 hover:bg-muted/20", qty > 0 && "bg-muted/25")}>
             <td className="pl-4 pr-2 py-1.5">
               <div className="flex items-center gap-2 min-w-0">
                 <RowThumb row={r} />
@@ -288,8 +428,8 @@ function GroupRows({
               </div>
             </td>
             <td className="px-2 py-1.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap">{r.code}</td>
-            <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{r.rrp != null ? fmtMoney(r.rrp, currency) : "—"}</td>
-            <td className="px-2 py-1.5 text-right tabular-nums text-foreground">{unit ? fmtMoney(unit, currency) : "—"}</td>
+            {priceCell(r.rrp ?? null, basis === "rrp")}
+            {priceCell(partnerShown, basis === "partner")}
             <td className="px-2 py-1.5">
               {readOnly ? (
                 renderQty ? (
@@ -313,8 +453,8 @@ function GroupRows({
 }
 
 // ── Guided (Shopify-like store) ──────────────────────────────────────────────
-function groupPriceRange(group: PreorderTab["groups"][number]): [number, number] {
-  const prices = group.rows.map(rowUnitPrice).filter((p) => p > 0);
+function groupPriceRange(group: PreorderTab["groups"][number], basis: PriceBasis): [number, number] {
+  const prices = group.rows.filter((r) => !r.unpriced).map((r) => rowUnitPrice(r, basis)).filter((p) => p > 0);
   if (prices.length === 0) return [0, 0];
   return [Math.min(...prices), Math.max(...prices)];
 }
@@ -330,14 +470,17 @@ export function PreorderGuidedTab({
   quantities,
   onQty,
   currency,
+  pricing,
 }: {
   tab: PreorderTab;
   quantities: QtyMap;
   onQty: (rowId: string, qty: number) => void;
   currency: string;
+  pricing?: PricingContext | null;
 }) {
   const [search, setSearch] = useState("");
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
+  const basis: PriceBasis = pricing?.basis ?? "partner";
 
   const groups = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -371,7 +514,7 @@ export function PreorderGuidedTab({
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
           {groups.map((g) => (
-            <ProductCard key={g.id} group={g} quantities={quantities} currency={currency} onOpen={() => setOpenGroupId(g.id)} />
+            <ProductCard key={g.id} group={g} quantities={quantities} currency={currency} basis={basis} onOpen={() => setOpenGroupId(g.id)} />
           ))}
         </div>
       )}
@@ -382,6 +525,7 @@ export function PreorderGuidedTab({
           quantities={quantities}
           onQty={onQty}
           currency={currency}
+          basis={basis}
           onClose={() => setOpenGroupId(null)}
         />
       )}
@@ -393,15 +537,19 @@ function ProductCard({
   group,
   quantities,
   currency,
+  basis,
   onOpen,
 }: {
   group: PreorderTab["groups"][number];
   quantities: QtyMap;
   currency: string;
+  basis: PriceBasis;
   onOpen: () => void;
 }) {
   const hero = groupHero(group);
-  const [lo, hi] = groupPriceRange(group);
+  const [lo, hi] = groupPriceRange(group, basis);
+  const [olo, ohi] = groupPriceRange(group, basis === "rrp" ? "partner" : "rrp");
+  const fmtRange = (a: number, b: number) => (a === 0 ? "—" : a === b ? fmtMoney(a, currency) : `${fmtMoney(a, currency)}–${fmtMoney(b, currency)}`);
   const cart = groupCartCount(group, quantities);
   const hasNew = group.rows.some((r) => r.tag);
   return (
@@ -410,7 +558,7 @@ function ProductCard({
       onClick={onOpen}
       className={cn(
         "group text-left rounded-xl border bg-surface overflow-hidden transition-colors flex flex-col",
-        cart > 0 ? "border-lime-400 dark:border-lime-600" : "border-border hover:border-foreground/20",
+        cart > 0 ? "border-foreground/50" : "border-border hover:border-foreground/20",
       )}
     >
       <div className="relative aspect-square bg-muted flex items-center justify-center overflow-hidden">
@@ -432,11 +580,16 @@ function ProductCard({
       <div className="p-2.5 flex flex-col gap-0.5 flex-1">
         <div className="text-[12px] font-medium text-foreground leading-snug line-clamp-2">{group.name}</div>
         <div className="text-[10px] text-muted-foreground">{group.rows.length} variant{group.rows.length === 1 ? "" : "s"}</div>
-        <div className="flex items-center justify-between mt-auto pt-1">
-          <span className="text-[12px] font-semibold tabular-nums text-foreground">
-            {lo === 0 ? "—" : lo === hi ? fmtMoney(lo, currency) : `${fmtMoney(lo, currency)}–${fmtMoney(hi, currency)}`}
+        <div className="flex items-end justify-between mt-auto pt-1 gap-1">
+          <span className="flex flex-col leading-tight min-w-0">
+            <span className="text-[12px] font-semibold tabular-nums text-foreground truncate">{fmtRange(lo, hi)}</span>
+            {olo > 0 && (
+              <span className="text-[10px] tabular-nums text-muted-foreground truncate">
+                {basis === "rrp" ? "Partner" : "RRP"} {fmtRange(olo, ohi)}
+              </span>
+            )}
           </span>
-          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/50 group-hover:text-foreground group-hover:translate-x-0.5 transition-all" />
+          <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground/50 group-hover:text-foreground group-hover:translate-x-0.5 transition-all" />
         </div>
       </div>
     </button>
@@ -448,12 +601,14 @@ function ProductDetailModal({
   quantities,
   onQty,
   currency,
+  basis,
   onClose,
 }: {
   group: PreorderTab["groups"][number];
   quantities: QtyMap;
   onQty: (rowId: string, qty: number) => void;
   currency: string;
+  basis: PriceBasis;
   onClose: () => void;
 }) {
   const gallery = useMemo(() => {
@@ -461,11 +616,29 @@ function ProductDetailModal({
     for (const r of group.rows) if (r.image && !imgs.includes(r.image)) imgs.push(r.image);
     return imgs;
   }, [group]);
-  const [main, setMain] = useState<string | null>(gallery[0] ?? null);
+  const [index, setIndex] = useState(0);
+  const main = gallery[index] ?? null;
   const [zoom, setZoom] = useState(false);
+  const thumbsRef = useRef<HTMLDivElement | null>(null);
+  // Left / right wrap around; the thumbnail strip follows the selection.
+  const step = (d: number) => setIndex((i) => (gallery.length ? (i + d + gallery.length) % gallery.length : 0));
+  useEffect(() => {
+    thumbsRef.current?.children[index]?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }, [index]);
+  useEffect(() => {
+    if (gallery.length < 2) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (zoom) return;
+      if (e.key === "ArrowRight") step(1);
+      else if (e.key === "ArrowLeft") step(-1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gallery.length, zoom]);
 
   const cart = groupCartCount(group, quantities);
-  const subtotal = group.rows.reduce((s, r) => s + (quantities[r.id] || 0) * rowUnitPrice(r), 0);
+  const subtotal = group.rows.reduce((s, r) => s + (quantities[r.id] || 0) * rowUnitPrice(r, basis), 0);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -473,33 +646,77 @@ function ProductDetailModal({
         <DialogTitle className="sr-only">{group.name}</DialogTitle>
         <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_1.25fr] max-h-[85vh]">
           {/* Gallery */}
-          <div className="bg-muted/40 p-4 flex flex-col gap-3 border-b sm:border-b-0 sm:border-r border-border">
-            <button
-              type="button"
-              onClick={() => main && setZoom(true)}
-              disabled={!main}
-              className={cn("aspect-square rounded-xl bg-background border border-border overflow-hidden flex items-center justify-center", main && "cursor-zoom-in")}
-            >
-              {main ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={main} alt={group.name} className="w-full h-full object-contain" />
-              ) : (
-                <ImageIcon className="w-8 h-8 text-muted-foreground/40" />
-              )}
-            </button>
-            {gallery.length > 1 && (
-              <div className="flex gap-2 flex-wrap">
-                {gallery.slice(0, 6).map((img) => (
+          <div className="bg-muted/40 p-4 flex flex-col gap-3 border-b sm:border-b-0 sm:border-r border-border min-w-0">
+            <div className="relative group/gallery">
+              <button
+                type="button"
+                onClick={() => main && setZoom(true)}
+                disabled={!main}
+                className={cn("aspect-square w-full rounded-xl bg-background border border-border overflow-hidden flex items-center justify-center", main && "cursor-zoom-in")}
+              >
+                {main ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={main} alt={group.name} className="w-full h-full object-contain" />
+                ) : (
+                  <ImageIcon className="w-8 h-8 text-muted-foreground/40" />
+                )}
+              </button>
+              {gallery.length > 1 && (
+                <>
                   <button
-                    key={img}
                     type="button"
-                    onClick={() => setMain(img)}
-                    className={cn("w-12 h-12 rounded-lg overflow-hidden border shrink-0", img === main ? "border-lime-500" : "border-border")}
+                    onClick={() => step(-1)}
+                    aria-label="Previous image"
+                    className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-background/90 border border-border shadow-sm flex items-center justify-center text-foreground hover:bg-background"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={img} alt="" className="w-full h-full object-cover" />
+                    <ChevronLeft className="w-4 h-4" />
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    onClick={() => step(1)}
+                    aria-label="Next image"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-background/90 border border-border shadow-sm flex items-center justify-center text-foreground hover:bg-background"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                  <span className="absolute bottom-2 right-2 rounded-full bg-background/90 border border-border px-1.5 py-px text-[10px] tabular-nums text-muted-foreground">
+                    {index + 1} / {gallery.length}
+                  </span>
+                </>
+              )}
+            </div>
+            {gallery.length > 1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => thumbsRef.current?.scrollBy({ left: -160, behavior: "smooth" })}
+                  aria-label="Scroll thumbnails left"
+                  className="h-7 w-7 shrink-0 rounded-full border border-border bg-background text-muted-foreground hover:text-foreground flex items-center justify-center"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <div ref={thumbsRef} className="flex-1 min-w-0 flex gap-2 overflow-x-auto scrollbar-none py-0.5 px-0.5 snap-x">
+                  {gallery.map((img, i) => (
+                    <button
+                      key={img}
+                      type="button"
+                      onClick={() => setIndex(i)}
+                      aria-current={i === index ? "true" : undefined}
+                      className={cn("w-12 h-12 rounded-lg overflow-hidden border-2 shrink-0 snap-start transition-colors", i === index ? "border-lime-500" : "border-transparent hover:border-border")}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={img} alt="" className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => thumbsRef.current?.scrollBy({ left: 160, behavior: "smooth" })}
+                  aria-label="Scroll thumbnails right"
+                  className="h-7 w-7 shrink-0 rounded-full border border-border bg-background text-muted-foreground hover:text-foreground flex items-center justify-center"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
               </div>
             )}
           </div>
@@ -515,7 +732,8 @@ function ProductDetailModal({
             <div className="flex-1 overflow-y-auto px-4 divide-y divide-border/60">
               {group.rows.map((r) => {
                 const qty = quantities[r.id] || 0;
-                const unit = rowUnitPrice(r);
+                const unit = rowUnitPrice(r, basis);
+                const other = basis === "rrp" ? (r.discountedPrice ?? r.partnerPrice ?? null) : (r.rrp ?? null);
                 return (
                   <div key={r.id} className="flex items-center gap-2.5 py-2.5">
                     <RowThumb row={r} />
@@ -526,8 +744,26 @@ function ProductDetailModal({
                       </div>
                       <div className="text-[10px] text-muted-foreground font-mono truncate">{r.code}</div>
                     </div>
-                    <span className="text-[12px] font-semibold tabular-nums text-foreground shrink-0">{unit ? fmtMoney(unit, currency) : "—"}</span>
-                    <Stepper value={qty} onChange={(n) => onQty(r.id, n)} />
+                    {r.unpriced ? (
+                      <span className="text-[11px] text-amber-700 dark:text-amber-300 text-right inline-flex items-center gap-1 shrink-0">
+                        <AlertTriangle className="w-3 h-3" /> no consumer price yet
+                        {qty > 0 && (
+                          <button type="button" onClick={() => onQty(r.id, 0)} className="underline ml-1">remove {qty}</button>
+                        )}
+                      </span>
+                    ) : (
+                      <>
+                        <span className="flex flex-col items-end leading-tight shrink-0">
+                          <span className="text-[12px] font-semibold tabular-nums text-foreground">{unit ? fmtMoney(unit, currency) : "—"}</span>
+                          {other != null && other > 0 && (
+                            <span className="text-[10px] tabular-nums text-muted-foreground">
+                              {basis === "rrp" ? "Partner" : "RRP"} {fmtMoney(other, currency)}
+                            </span>
+                          )}
+                        </span>
+                        <Stepper value={qty} onChange={(n) => onQty(r.id, n)} />
+                      </>
+                    )}
                   </div>
                 );
               })}
@@ -592,14 +828,18 @@ export function TabTierBanner({
   quantities,
   currency,
   className,
+  pricing,
+  bare,
 }: {
   tab: PreorderTab;
   quantities: QtyMap;
   currency: string;
   className?: string;
+  pricing?: PricingContext | null; // thresholds are compared in the customer's basis
+  bare?: boolean; // no border / radius — the caller frames it
 }) {
   const ladder = activeTiers(tab.tiers);
-  const totals = useMemo(() => computeTabTotals({ tabs: [tab] }, quantities)[0], [tab, quantities]);
+  const totals = useMemo(() => computeTabTotals({ tabs: [tab], pricing: pricing ?? null }, quantities)[0], [tab, quantities, pricing]);
   if (ladder.length === 0) return null;
 
   const reached = totals.tier;
@@ -611,10 +851,9 @@ export function TabTierBanner({
   return (
     <div
       className={cn(
-        "rounded-xl border px-4 py-3",
-        reached
-          ? "border-lime-300 dark:border-lime-800 bg-lime-50/60 dark:bg-lime-950/20"
-          : "border-border bg-surface",
+        "px-4 py-3",
+        !bare && "rounded-xl border",
+        !bare && "border-border bg-surface",
         className,
       )}
     >
@@ -660,10 +899,10 @@ export function TabTierBanner({
               className={cn(
                 "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
                 current
-                  ? "bg-lime-600 text-white font-semibold"
+                  ? "bg-foreground text-background font-semibold"
                   : hit
-                    ? "bg-lime-100 dark:bg-lime-900/40 text-lime-700 dark:text-lime-300"
-                    : "bg-muted text-muted-foreground",
+                    ? "bg-muted text-foreground"
+                    : "bg-muted/60 text-muted-foreground",
               )}
             >
               {current && <Check className="w-2.5 h-2.5" />}
@@ -677,27 +916,205 @@ export function TabTierBanner({
   );
 }
 
+// ── Sheet context bar ────────────────────────────────────────────────────────
+// One dense row above the products: who is ordering and how they are priced (left),
+// the tab's volume-discount ladder as a stepped track with the current position
+// (middle), and what the reached tier saves (right). Replaces the stacked
+// pricing sentence + discount banner on the customer's and the admin's order views.
+export function SheetContextBar({
+  pricing,
+  tab,
+  quantities,
+  currency,
+  className,
+}: {
+  pricing: PricingContext | null | undefined;
+  tab: PreorderTab | null;
+  quantities: QtyMap;
+  currency: string;
+  className?: string;
+}) {
+  const ladder = tab ? activeTiers(tab.tiers) : [];
+  const totals = useMemo(() => (tab ? computeTabTotals({ tabs: [tab], pricing: pricing ?? null }, quantities)[0] : null), [tab, quantities, pricing]);
+  if (!pricing && ladder.length === 0) return null;
+  const missing = vatIsMissing(pricing);
+  const company = pricing?.kind === "business";
+  const reached = totals?.tier ?? null;
+  const next = totals?.nextTier ?? null;
+  const amount = totals?.amount ?? 0;
+  // Tiers sit at EQUAL spacing along the track (thresholds can be wildly apart —
+  // €10k then €4bn — so a proportional track would pile every marker at the left).
+  // The current position is interpolated inside the segment it is in.
+  const n = ladder.length;
+  const tierX = (i: number) => ((i + 1) / n) * 100; // i-th tier (0-based) → % along the track
+  const reachedCount = ladder.filter((t) => amount + 1e-9 >= t.minAmount).length;
+  const lower = reachedCount === 0 ? 0 : ladder[reachedCount - 1].minAmount;
+  const upper = reachedCount < n ? ladder[reachedCount].minAmount : null;
+  const frac = upper == null ? 1 : Math.min(1, Math.max(0, (amount - lower) / Math.max(1e-9, upper - lower)));
+  const pos = n === 0 ? 0 : upper == null ? 100 : ((reachedCount + frac) / n) * 100;
+
+  return (
+    <div className={cn("grid grid-cols-1 lg:grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-6 gap-y-3 px-4 py-3", className)}>
+      {/* who / how priced */}
+      {pricing && (
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", missing ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" : "bg-muted text-foreground")}>
+            {missing ? <AlertTriangle className="w-4 h-4" /> : company ? <Building2 className="w-4 h-4" /> : <User className="w-4 h-4" />}
+          </span>
+          <div className="min-w-0 leading-tight">
+            <div className="text-[13px] font-semibold text-foreground">{company ? "Company" : "Individual"}</div>
+            <div className={cn("text-[11px]", missing ? "text-amber-700 dark:text-amber-300 font-medium" : "text-muted-foreground")}>
+              {missing
+                ? `VAT rate not configured${pricing.countryIso ? ` for ${pricing.countryIso}` : ""} — cannot submit`
+                : company
+                  ? `Partner prices · ${(pricing.vat.rate ?? 0) > 0 ? `+${fmtVatRate(pricing.vat.rate)} VAT` : `${fmtVatRate(pricing.vat.rate)} VAT, ${pricing.vat.source === "exempt" ? "exempt" : "zero-rated"}`}`
+                  : `RRP · incl. ${fmtVatRate(pricing.vat.rate)} VAT${pricing.countryIso ? ` (${pricing.countryIso})` : ""}`}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ladder */}
+      {ladder.length > 0 && totals ? (
+        <div className="min-w-0">
+          <div className="relative h-7">
+            {/* track */}
+            <div className="absolute left-0 right-0 top-[9px] h-1.5 rounded-full bg-muted" />
+            <div className="absolute left-0 top-[9px] h-1.5 rounded-full bg-lime-600 transition-[width] duration-300" style={{ width: `${pos}%` }} />
+            {/* tier markers */}
+            {ladder.map((t, i) => {
+              const x = tierX(i);
+              const hit = amount + 1e-9 >= t.minAmount;
+              const last = i === n - 1;
+              return (
+                <div key={t.id} className={cn("absolute top-0 flex flex-col", last ? "-translate-x-full items-end" : "-translate-x-1/2 items-center")} style={{ left: `${x}%` }}>
+                  <span className={cn("mt-[6px] size-3 rounded-full border-2 bg-background", hit ? "border-lime-600" : "border-border", last && "translate-x-1/2")} />
+                  <span className={cn("mt-1 whitespace-nowrap text-[10px] leading-none", hit ? "text-foreground font-semibold" : "text-muted-foreground")}>
+                    {t.name || "Tier"} −{t.discountPct}% <span className="font-normal text-muted-foreground/80">from {fmtMoney(t.minAmount, currency)}</span>
+                  </span>
+                </div>
+              );
+            })}
+            {/* current position */}
+            <div className="absolute top-0 -translate-x-1/2 flex flex-col items-center" style={{ left: `${pos}%` }}>
+              <span className="mt-[3px] size-[18px] rounded-full bg-foreground ring-2 ring-background shadow-sm" />
+            </div>
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-3 text-[11px]">
+            <span className="text-muted-foreground tabular-nums">
+              {fmtMoney(amount, currency)} in {tab?.name || "this section"}
+            </span>
+            <span className="text-muted-foreground tabular-nums truncate">
+              {next
+                ? <>{fmtMoney(totals.toNextTier, currency)} more → <span className="text-foreground font-medium">{next.name || "next tier"} −{next.discountPct}%</span></>
+                : reached
+                  ? "Top tier reached"
+                  : null}
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div />
+      )}
+
+      {/* savings */}
+      {ladder.length > 0 && totals && (
+        <div className="text-right leading-tight lg:min-w-[120px]">
+          {reached ? (
+            <>
+              <div className="text-[15px] font-bold tabular-nums text-lime-700 dark:text-lime-400">−{fmtMoney(totals.discount, currency)}</div>
+              <div className="text-[11px] text-muted-foreground">{reached.name || "Volume discount"} −{reached.discountPct}% applied</div>
+            </>
+          ) : (
+            <>
+              <div className="text-[13px] font-semibold text-foreground">Volume discount</div>
+              <div className="text-[11px] text-muted-foreground">not reached yet</div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── VAT breakdown ────────────────────────────────────────────────────────────
+// Under a total: what the figure includes. An individual sees the net / VAT split of
+// their VAT-inclusive total; a company sees "excl. VAT · zero-rated". Without a pricing
+// context (admin builder) it says nothing.
+export function VatBreakdown({
+  pricing,
+  vat,
+  currency,
+  className,
+}: {
+  pricing: PricingContext | null | undefined;
+  vat: OrderVatTotals | null | undefined;
+  currency: string;
+  className?: string;
+}) {
+  if (!pricing) return null;
+  if (vatIsMissing(pricing)) {
+    return <div className={cn("text-[10px] text-amber-700 dark:text-amber-400 text-right -mt-0.5", className)}>VAT rate not configured</div>;
+  }
+  if (pricing.basis === "partner") {
+    if ((pricing.vat.rate ?? 0) > 0) {
+      return (
+        <div className={cn("text-[10px] text-muted-foreground -mt-0.5 space-y-px", className)}>
+          <div className="text-right">excl. VAT · {fmtVatRate(pricing.vat.rate)} VAT added</div>
+          {vat && vat.gross > 0 && (
+            <div className="flex items-center justify-between tabular-nums">
+              <span>
+                Net {fmtMoney(vat.net, currency)} + VAT {fmtMoney(vat.vat, currency)}
+              </span>
+              <span>= {fmtMoney(vat.gross, currency)}</span>
+            </div>
+          )}
+        </div>
+      );
+    }
+    return (
+      <div className={cn("text-[10px] text-muted-foreground text-right -mt-0.5", className)}>
+        excl. VAT · {fmtVatRate(pricing.vat.rate)} ({CUSTOMER_KIND_LABELS[pricing.kind].toLowerCase()}, {pricing.vat.source === "exempt" ? "VAT exempt" : "zero-rated"})
+      </div>
+    );
+  }
+  return (
+    <div className={cn("text-[10px] text-muted-foreground -mt-0.5 space-y-px", className)}>
+      <div className="text-right">incl. {fmtVatRate(pricing.vat.rate)} VAT</div>
+      {vat && vat.gross > 0 && (
+        <div className="flex items-center justify-between tabular-nums">
+          <span>
+            Net {fmtMoney(vat.net, currency)} · VAT {fmtMoney(vat.vat, currency)}
+          </span>
+          <span>= {fmtMoney(vat.gross, currency)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Summary panel ────────────────────────────────────────────────────────────
 export function OrderSummaryPanel({
   campaign,
   quantities,
   currency,
   confirmed,
+  bare,
 }: {
   campaign: PreorderCampaign;
   quantities: QtyMap;
   currency: string;
   confirmed?: PreorderSubmissionTotals; // admin-confirmed subset (review/locked view)
+  bare?: boolean; // no border / radius — the caller frames it
 }) {
-  const tabTotals = useMemo(
-    () => computeTabTotals(campaign, quantities).filter((t) => t.amount > 0),
-    [campaign, quantities],
-  );
-  const totals = useMemo(() => sumTabTotals(tabTotals), [tabTotals]);
+  const priced = useMemo(() => computePricedOrder(campaign, quantities), [campaign, quantities]);
+  const tabTotals = priced.tabs.filter((t) => t.amount > 0);
+  const totals = priced.totals;
   const discounted = totals.discount ?? 0;
+  const pricing = campaign.pricing ?? null;
 
   return (
-    <div className="rounded-xl border border-border bg-surface p-4 space-y-4">
+    <div className={cn("p-4 space-y-4", !bare && "rounded-xl border border-border bg-surface")}>
       <div>
         <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Order summary</div>
         <div className="mt-2 flex items-baseline justify-between">
@@ -722,7 +1139,7 @@ export function OrderSummaryPanel({
           <span className="text-[13px] text-muted-foreground">{confirmed ? "Ordered total" : "Total"}</span>
           <span className="text-[18px] font-bold tabular-nums text-foreground">{fmtMoney(totalsNet(totals), currency)}</span>
         </div>
-        <div className="text-[10px] text-muted-foreground text-right -mt-0.5">incl. VAT</div>
+        <VatBreakdown pricing={pricing} vat={priced.vat} currency={currency} />
         {confirmed && (
           <div className="mt-1 pt-1 border-t border-border/50">
             <div className="flex items-baseline justify-between">
@@ -805,15 +1222,19 @@ export function PreorderReviewModal({
     .map((tab) => ({
       tab,
       groups: tab.groups
-        .map((g) => ({ g, rows: g.rows.filter((r) => (quantities[r.id] || 0) > 0) }))
+        .map((g) => ({ g, rows: g.rows.filter((r) => (quantities[r.id] || 0) > 0 && !r.unpriced) }))
         .filter((x) => x.rows.length > 0),
     }))
     .filter((t) => t.groups.length > 0);
-  const tabTotals = computeTabTotals(campaign, quantities);
+  const priced = computePricedOrder(campaign, quantities);
+  const tabTotals = priced.tabs;
   const byTab = new Map(tabTotals.map((t) => [t.tabId, t]));
-  const totals = sumTabTotals(tabTotals);
+  const totals = priced.totals;
   const discount = totals.discount ?? 0;
   const empty = totals.qty === 0;
+  const basis = campaignBasis(campaign);
+  const pricing = campaign.pricing ?? null;
+  const vatMissing = vatIsMissing(pricing);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -848,12 +1269,12 @@ export function PreorderReviewModal({
                       <ul className="mt-0.5 divide-y divide-border/50">
                         {rows.map((r) => {
                           const qty = quantities[r.id] || 0;
-                          const line = qty * rowUnitPrice(r);
+                          const line = qty * rowUnitPrice(r, basis);
                           return (
                             <li key={r.id} className="flex items-center gap-2 py-1 text-[12px]">
                               <span className="flex-1 truncate text-foreground">{r.name}</span>
                               <span className="tabular-nums text-muted-foreground">{qty} ×</span>
-                              <span className="tabular-nums text-muted-foreground w-20 text-right">{fmtMoney(rowUnitPrice(r), currency)}</span>
+                              <span className="tabular-nums text-muted-foreground w-20 text-right">{fmtMoney(rowUnitPrice(r, basis), currency)}</span>
                               <span className="tabular-nums font-medium w-24 text-right">{fmtMoney(line, currency)}</span>
                             </li>
                           );
@@ -893,11 +1314,18 @@ export function PreorderReviewModal({
             )}
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">
-                Total · {totals.qty} item{totals.qty === 1 ? "" : "s"} <span className="text-[11px]">(incl. VAT)</span>
+                Total · {totals.qty} item{totals.qty === 1 ? "" : "s"}
               </span>
               <span className="text-[16px] font-bold tabular-nums text-foreground">{fmtMoney(totalsNet(totals), currency)}</span>
             </div>
+            <VatBreakdown pricing={pricing} vat={priced.vat} currency={currency} />
           </div>
+        )}
+        {vatMissing && (
+          <p className="text-[12px] text-amber-700 dark:text-amber-300 flex items-start gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            The VAT rate for this customer&apos;s country is not configured, so the preorder cannot be submitted yet.
+          </p>
         )}
         {terms.shippingAddress && (
           <p className="text-[11px] text-muted-foreground">Ship to: {terms.shippingAddress}</p>
@@ -905,7 +1333,7 @@ export function PreorderReviewModal({
 
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={onClose} disabled={submitting}>Keep editing</Button>
-          <Button size="sm" onClick={onSubmit} disabled={submitting || empty}>
+          <Button size="sm" onClick={onSubmit} disabled={submitting || empty || vatMissing}>
             {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
             {submitLabel}
           </Button>
@@ -1035,7 +1463,7 @@ export function PreorderGridSkeleton({
   );
 }
 
-/** Twin of OrderSummaryPanel: label, Items row, Total row, "incl. VAT". */
+/** Twin of OrderSummaryPanel: label, Items row, Total row, VAT note. */
 export function OrderSummaryPanelSkeleton({ confirmed = false }: { confirmed?: boolean }) {
   return (
     <div className="rounded-xl border border-border bg-surface p-4 space-y-4">
@@ -1050,7 +1478,7 @@ export function OrderSummaryPanelSkeleton({ confirmed = false }: { confirmed?: b
           {/* text-[18px] → 27px line */}
           <SkeletonLine lh="h-[27px]" h="h-4" w="w-24" delay={80} />
         </div>
-        <div className="text-[10px] text-muted-foreground text-right -mt-0.5">incl. VAT</div>
+        <div className="text-[10px] text-muted-foreground text-right -mt-0.5">VAT</div>
         {confirmed && (
           <div className="mt-1 pt-1 border-t border-border/50">
             <div className="flex items-baseline justify-between">

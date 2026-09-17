@@ -111,17 +111,27 @@ export function SourceBadge({
   return <span className={cn(PILL, SOURCE_STYLE[source], className)}>{label ?? CONFIG_SOURCE_LABELS[source]}</span>;
 }
 
-// Market colours: the hex is what the SVG map paints with; the classes drive chips.
-export const MARKET_COLORS: Record<MarketColor, { hex: string; chip: string; dot: string; ring: string }> = {
-  sky: { hex: "#0ea5e9", chip: "bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300", dot: "bg-sky-500", ring: "ring-sky-500" },
-  violet: { hex: "#8b5cf6", chip: "bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300", dot: "bg-violet-500", ring: "ring-violet-500" },
-  amber: { hex: "#f59e0b", chip: "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300", dot: "bg-amber-500", ring: "ring-amber-500" },
-  rose: { hex: "#f43f5e", chip: "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300", dot: "bg-rose-500", ring: "ring-rose-500" },
-  emerald: { hex: "#10b981", chip: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300", dot: "bg-emerald-500", ring: "ring-emerald-500" },
-  indigo: { hex: "#6366f1", chip: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300", dot: "bg-indigo-500", ring: "ring-indigo-500" },
-  fuchsia: { hex: "#d946ef", chip: "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/50 dark:text-fuchsia-300", dot: "bg-fuchsia-500", ring: "ring-fuchsia-500" },
-  teal: { hex: "#14b8a6", chip: "bg-teal-100 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300", dot: "bg-teal-500", ring: "ring-teal-500" },
+// Market colours = the Patrik International brand palette (patrikinternational.com
+// stylesheet): brand blue, cyan, navy, steel, magenta, pink, orange, red. The
+// keys are what is stored on a market — they predate the palette, so a key like
+// "emerald" is just a slot; `label` is what people see. Chips are painted
+// inline from the hex so light and dark mode both use the real brand colour.
+export const MARKET_COLORS: Record<MarketColor, { hex: string; label: string }> = {
+  sky: { hex: "#2786b4", label: "Patrik blue" },
+  teal: { hex: "#01a0be", label: "Cyan" },
+  indigo: { hex: "#083080", label: "Navy" },
+  violet: { hex: "#43609c", label: "Steel" },
+  rose: { hex: "#b3004b", label: "Magenta" },
+  fuchsia: { hex: "#ff1a7b", label: "Pink" },
+  amber: { hex: "#ff8a3c", label: "Orange" },
+  emerald: { hex: "#e91b23", label: "Red" },
 };
+
+// Chip styling from a brand hex: tinted background, coloured text and dot.
+export function marketChipStyle(color: MarketColor): React.CSSProperties {
+  const hex = MARKET_COLORS[color].hex;
+  return { background: `${hex}1f`, color: hex };
+}
 
 export function MarketChip({
   name,
@@ -134,9 +144,87 @@ export function MarketChip({
 }) {
   const c = MARKET_COLORS[color];
   return (
-    <span className={cn(PILL, c.chip, className)}>
-      <span className={cn("size-1.5 rounded-full", c.dot)} />
+    <span className={cn(PILL, "dark:brightness-125", className)} style={marketChipStyle(color)}>
+      <span className="size-1.5 rounded-full" style={{ background: c.hex }} />
       {name}
     </span>
+  );
+}
+
+// ── Resolver warnings, in plain English ──────────────────────────────────────
+// lib/preorder-effective.ts reports machine codes ("vat-missing:DE",
+// "rrp-missing:<sku>", …). Group the per-product ones and spell every code out so
+// an admin reads a sentence, not a log line.
+export function describeWarnings(codes: string[]): string[] {
+  const out: string[] = [];
+  const grouped: Record<string, string[]> = {};
+  let extra: Record<string, number> = {};
+  for (const w of codes) {
+    const i = w.indexOf(":");
+    const kind = i === -1 ? w : w.slice(0, i);
+    const arg = i === -1 ? "" : w.slice(i + 1);
+    if (kind === "price-missing" || kind === "rrp-missing" || kind === "stale-assortment-id") {
+      const more = /^\+(\d+) more$/.exec(arg);
+      if (more) extra = { ...extra, [kind]: Number(more[1]) };
+      else (grouped[kind] ??= []).push(arg);
+      continue;
+    }
+    switch (kind) {
+      case "vat-missing":
+        out.push(
+          arg === "no-country"
+            ? "No VAT rate: the customer's country is unknown and no fallback rate is set — an individual cannot submit."
+            : `No VAT rate configured for ${arg} (and no fallback) — individuals there cannot submit. Set it under Preorder → VAT rates or override it on the campaign.`,
+        );
+        break;
+      case "kind-unknown":
+        out.push("Company or individual is unknown for this customer — priced as a company (partner price, 0% VAT).");
+        break;
+      case "market-missing":
+        out.push("The market pinned on this customer's rule no longer exists — matched by country instead.");
+        break;
+      case "price-book-missing":
+        out.push(`No price book for the "${arg}" price list — sheet prices are used. Refresh the price books.`);
+        break;
+      case "currency-mismatch":
+        out.push(`Price book currency differs from the effective currency (${arg}) — no conversion is applied.`);
+        break;
+      default:
+        out.push(w);
+    }
+  }
+  const list = (kind: string) => {
+    const items = grouped[kind] ?? [];
+    const n = items.length + (extra[kind] ?? 0);
+    const shown = items.slice(0, 5).join(", ");
+    return { n, tail: shown + (n > 5 ? `, … (+${n - 5} more)` : "") };
+  };
+  if (grouped["rrp-missing"]) {
+    const { n, tail } = list("rrp-missing");
+    out.push(`${n} product${n === 1 ? " has" : "s have"} no RRP and ${n === 1 ? "is" : "are"} hidden from this individual — fill the RRP on the sheet to offer ${n === 1 ? "it" : "them"}: ${tail}.`);
+  }
+  if (grouped["price-missing"]) {
+    const { n, tail } = list("price-missing");
+    out.push(`${n} product${n === 1 ? " is" : "s are"} not in the price book — sheet price used: ${tail}.`);
+  }
+  if (grouped["stale-assortment-id"]) {
+    const { n } = list("stale-assortment-id");
+    out.push(`${n} assortment rule${n === 1 ? "" : "s"} point${n === 1 ? "s" : ""} at rows that no longer exist.`);
+  }
+  return out;
+}
+
+export function WarningList({ codes, className }: { codes: string[]; className?: string }) {
+  const lines = describeWarnings(codes);
+  if (lines.length === 0) return null;
+  return (
+    <ul className={cn("space-y-1", className)}>
+      {lines.map((l, i) => (
+        <li key={i} className="flex items-start gap-1.5">
+          <span className="mt-[7px] size-1 rounded-full bg-current shrink-0" />
+          <span>{l}</span>
+        </li>
+      ))}
+    </ul>
   );
 }

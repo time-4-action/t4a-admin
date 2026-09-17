@@ -12,6 +12,7 @@ export class MkFake implements MkOrderPort {
   creates: SalesOrderInput[] = [];
   orders = new Map<string, DocDetail>(); // mkId → order
   private seq = 1;
+  // A company (has a tax id) — the default partner of the tests.
   partnerById: MkPartner = {
     mkId: "p1",
     name: "Surf Shop X",
@@ -19,6 +20,7 @@ export class MkFake implements MkOrderPort {
     address: { street: "Cesta 1", postNumber: "1000", city: "Ljubljana", country: "Slovenija" },
     businessEntity: true,
     foreignCountry: false,
+    taxId: "SI12345678",
   };
 
   private commit(input: SalesOrderInput): DocDetail {
@@ -30,10 +32,19 @@ export class MkFake implements MkOrderPort {
       countCode: `PP-${mkId}`,
       docDate: "2026-09-14",
       currency: input.currencyCode,
-      sumAll: String(input.lines.reduce((a, l) => a + l.amount * l.priceWithTax, 0).toFixed(2)),
+      // MK computes the gross of a net line from its tax factor.
+      sumAll: String(input.lines.reduce((a, l) => a + l.amount * lineGross(l), 0).toFixed(2)),
       statusDesc: "created",
       buyerOrder: input.buyerOrder,
-      lines: input.lines.map((l) => ({ code: l.code, name: l.code, amount: String(l.amount), priceWithTax: String(l.priceWithTax), tax: l.tax })),
+      lines: input.lines.map((l) => ({
+        code: l.code,
+        name: l.code,
+        amount: String(l.amount),
+        price: l.price != null ? String(l.price) : undefined,
+        priceWithTax: String(lineGross(l)),
+        taxFactor: String(l.taxFactor),
+        tax: l.tax ?? undefined,
+      })),
       links: [],
     };
     this.orders.set(mkId, order);
@@ -80,6 +91,19 @@ export class MkFake implements MkOrderPort {
   };
 
   partner: MkOrderPort["partner"] = async () => this.partnerById;
-
-  taxCodes: MkOrderPort["taxCodes"] = async (codes) => Object.fromEntries(codes.map((c) => [c, "EX4"]));
 }
+
+function lineGross(l: SalesOrderInput["lines"][number]): number {
+  if (l.priceWithTax != null) return l.priceWithTax;
+  return Math.round((l.price ?? 0) * (1 + l.taxFactor) * 100) / 100;
+}
+
+// An individual (no tax id) in Slovenia — orders at the RRP incl. SI VAT.
+export const personPartner: MkPartner = {
+  mkId: "p2",
+  name: "Janez Novak",
+  emails: ["janez@example.com"],
+  address: { street: "Ulica 2", postNumber: "2000", city: "Maribor", country: "Slovenija" },
+  businessEntity: false,
+  foreignCountry: false,
+};

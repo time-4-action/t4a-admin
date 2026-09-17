@@ -9,6 +9,7 @@ import {
   sanitizeTiers,
 } from "@/lib/preorder";
 import type { CampaignStatus, PreorderTab } from "@/types/preorder";
+import { normalizeVatOverrides } from "@/lib/pricing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,6 +40,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     rrpPricelist?: string | null;
     partnerPricelist?: string | null;
     tabs?: PreorderTab[];
+    vatOverrides?: unknown;
   };
   await connectDB();
   const doc = await PreorderCampaign.findById(id).exec();
@@ -64,6 +66,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       tiers: sanitizeTiers(t?.tiers),
     })) as unknown as typeof doc.tabs;
   }
+  // Per-country VAT overrides: replaced wholesale, invalid entries dropped.
+  if (Array.isArray(body.vatOverrides)) doc.vatOverrides = normalizeVatOverrides(body.vatOverrides);
   await doc.save();
   return NextResponse.json({ campaign: toCampaignAdminView(doc) });
 }

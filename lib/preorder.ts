@@ -25,6 +25,8 @@ import { PreorderAccess, type IPreorderAccess } from "@/models/preorder-access";
 import { countryIsoFromPartner, type CountrySource } from "@/lib/countries";
 import { normalizeIso } from "@/lib/countries-client";
 import { resolveEffectiveCampaign, resolvePartnerContext, type PartnerContext } from "@/lib/preorder-effective";
+import { getVatSettings } from "@/lib/vat-settings";
+import { normalizeVatRate, VAT_MODES, type VatConfig, type VatMode } from "@/lib/pricing";
 import type { MkPartner } from "@/types/documents";
 import {
   isLegacyMkOrder,
@@ -48,6 +50,8 @@ import {
   type PreorderTab,
   type PreorderTier,
   type MarketColor,
+  MARKET_KINDS,
+  type MarketKind,
 } from "@/types/preorder";
 
 export { connectDB };
@@ -154,6 +158,9 @@ export function sanitizeCommercialConfig(raw: unknown): CommercialConfig {
   }
   if ("hiddenIds" in r) out.hiddenIds = cleanIdList(r.hiddenIds) ?? [];
   if ("exposedIds" in r) out.exposedIds = cleanIdList(r.exposedIds) ?? [];
+  if ("vatMode" in r) out.vatMode = (VAT_MODES as readonly string[]).includes(String(r.vatMode)) ? (r.vatMode as VatMode) : null;
+  if ("vatRate" in r) out.vatRate = normalizeVatRate(r.vatRate);
+  if ("vatCompanies" in r) out.vatCompanies = r.vatCompanies == null ? null : !!r.vatCompanies;
   if ("tiersByTab" in r) {
     const list = Array.isArray(r.tiersByTab) ? (r.tiersByTab as Record<string, unknown>[]) : [];
     const seen = new Set<string>();
@@ -176,6 +183,7 @@ export function sanitizeMarket(raw: unknown, fallbackId?: string): PreorderMarke
     name: String(r.name ?? "").trim().slice(0, 80) || "Market",
     color: MARKET_COLOR_KEYS.includes(color) ? color : "sky",
     countries: Array.from(new Set((Array.isArray(r.countries) ? r.countries : []).map((c) => normalizeIso(String(c))).filter((c): c is string => !!c))),
+    kinds: Array.from(new Set((Array.isArray(r.kinds) ? r.kinds : []).map(String).filter((k): k is MarketKind => (MARKET_KINDS as readonly string[]).includes(k)))),
     config: sanitizeCommercialConfig(r.config),
     updatedAt: new Date().toISOString(),
   };
@@ -207,6 +215,9 @@ function configView(c?: ICommercialConfig | null): CommercialConfig {
   if (c.minOrderAmount !== undefined) out.minOrderAmount = c.minOrderAmount ?? null;
   if (c.hiddenIds !== undefined) out.hiddenIds = [...c.hiddenIds];
   if (c.exposedIds !== undefined) out.exposedIds = [...c.exposedIds];
+  if (c.vatMode !== undefined) out.vatMode = c.vatMode ?? null;
+  if (c.vatRate !== undefined) out.vatRate = c.vatRate ?? null;
+  if (c.vatCompanies !== undefined) out.vatCompanies = c.vatCompanies ?? null;
   if (c.tiersByTab !== undefined) {
     out.tiersByTab = c.tiersByTab.map((t) => ({
       tabId: t.tabId,
@@ -223,7 +234,7 @@ function rawConfig(doc: { config?: unknown }): ICommercialConfig | null {
   if (!c) return null;
   const plain = typeof c.toObject === "function" ? c.toObject() : c;
   const out: ICommercialConfig = {};
-  for (const k of ["partnerPricelist", "currency", "deadline", "note", "minOrderAmount", "hiddenIds", "exposedIds", "tiersByTab"] as const) {
+  for (const k of ["partnerPricelist", "currency", "deadline", "note", "minOrderAmount", "hiddenIds", "exposedIds", "tiersByTab", "vatMode", "vatRate", "vatCompanies"] as const) {
     if (plain[k] !== undefined) (out as Record<string, unknown>)[k] = plain[k];
   }
   return out;
@@ -235,6 +246,7 @@ export function marketView(m: IPreorderMarket): PreorderMarket {
     name: m.name,
     color: m.color,
     countries: [...m.countries],
+    kinds: [...(m.kinds ?? [])],
     config: configView(rawConfig(m)),
     updatedAt: iso(m.updatedAt),
   };
@@ -289,9 +301,10 @@ export function toCampaignAdminView(doc: IPreorderCampaign): PreorderCampaignAdm
       pricelist: b.pricelist,
       currency: b.currency ?? null,
       fetchedAt: iso(b.fetchedAt),
-      entries: b.entries.map((e) => ({ code: e.code, gross: e.gross ?? null, taxCode: e.taxCode ?? null })),
+      entries: b.entries.map((e) => ({ code: e.code, net: e.net ?? null, taxCode: e.taxCode ?? null })),
       missing: b.missing ?? 0,
     })),
+    vatOverrides: (doc.vatOverrides ?? []).map((o) => ({ iso: o.iso, rate: o.rate })),
   };
 }
 
@@ -347,6 +360,7 @@ export function snapshotView(s?: ICommercialSnapshot | null): CommercialSnapshot
       deadline: s.sources?.deadline ?? "campaign",
       note: s.sources?.note ?? "campaign",
       minOrderAmount: s.sources?.minOrderAmount ?? "campaign",
+      vat: s.sources?.vat ?? "campaign",
       tiers,
     },
     tabs: (s.tabs ?? []).map((t) => ({
@@ -367,9 +381,32 @@ export function snapshotView(s?: ICommercialSnapshot | null): CommercialSnapshot
       qty: l.qty,
       unitPrice: l.unitPrice,
       rrp: l.rrp ?? null,
+      partnerPrice: l.partnerPrice ?? null,
       taxCode: l.taxCode ?? null,
       priceSource: l.priceSource ?? "sheet",
+      tierPct: l.tierPct ?? null,
+      unitNet: l.unitNet ?? null,
+      unitVat: l.unitVat ?? null,
+      unitGross: l.unitGross ?? null,
+      lineNet: l.lineNet ?? null,
+      lineVat: l.lineVat ?? null,
+      lineGross: l.lineGross ?? null,
     })),
+    pricing: s.pricing
+      ? {
+          kind: s.pricing.kind,
+          basis: s.pricing.basis,
+          countryIso: s.pricing.countryIso ?? null,
+          vatRate: s.pricing.vatRate,
+          vatSource: s.pricing.vatSource,
+          mkTaxCode: s.pricing.mkTaxCode ?? null,
+          totals: {
+            net: s.pricing.totals?.net ?? 0,
+            vat: s.pricing.totals?.vat ?? 0,
+            gross: s.pricing.totals?.gross ?? 0,
+          },
+        }
+      : null,
   };
 }
 
@@ -548,7 +585,10 @@ export type PartnerFacts = {
   mkId: string;
   countryIso?: string | null;
   countrySource?: CountrySource;
-  mk?: Pick<MkPartner, "address" | "addresses" | "foreignCountry"> | null;
+  // Company vs individual — markets can target one kind. Derived from the tax id
+  // when not given (a live MkPartner carries taxId; the directory passes kind).
+  kind?: MarketKind | null;
+  mk?: Pick<MkPartner, "address" | "addresses" | "foreignCountry" | "taxId"> | null;
 };
 
 export function partnerContextFor(campaign: PreorderCampaignAdmin, partner: PartnerFacts): PartnerContext {
@@ -559,12 +599,20 @@ export function partnerContextFor(campaign: PreorderCampaignAdmin, partner: Part
     iso = r.iso;
     source = r.source;
   }
-  return resolvePartnerContext(campaign, partner.mkId, iso, source);
+  const kind: MarketKind | null = partner.kind ?? (partner.mk ? (partner.mk.taxId?.trim() ? "business" : "person") : null);
+  return resolvePartnerContext(campaign, partner.mkId, iso, source, kind);
 }
 
-export function loadEffectiveCampaignForPartner(campaignDoc: IPreorderCampaign, partner: PartnerFacts): EffectiveCampaign {
+// Async because the global VAT table is read from Mongo (pass `vat` to reuse one
+// read across many partners, e.g. in customer tables).
+export async function loadEffectiveCampaignForPartner(
+  campaignDoc: IPreorderCampaign,
+  partner: PartnerFacts,
+  opts: { vat?: VatConfig } = {},
+): Promise<EffectiveCampaign> {
   const admin = toCampaignAdminView(campaignDoc);
-  return resolveEffectiveCampaign(admin, partnerContextFor(admin, partner));
+  const vat = opts.vat ?? (await getVatSettings());
+  return resolveEffectiveCampaign(admin, partnerContextFor(admin, partner), vat);
 }
 
 export { PreorderCampaign, PreorderSubmission, PreorderAccess };

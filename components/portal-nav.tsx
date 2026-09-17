@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { ReceiptText, ClipboardList, Building2, LogOut, Menu, X, ShoppingCart } from "lucide-react";
+import { ReceiptText, FileMinus, ClipboardList, Building2, LogOut, Menu, X, ShoppingCart } from "lucide-react";
 
 // The B2B customer portal shell. Shown to any authenticated non-admin (they hold
 // no role; their documents are matched by email inside the portal). Deliberately
@@ -16,7 +16,8 @@ type PortalUser = { name?: string | null; email?: string | null; picture?: strin
 const links = [
   { href: "/portal/preorders", label: "Preorders", icon: ShoppingCart },
   { href: "/portal/invoices", label: "Invoices", icon: ReceiptText },
-  { href: "/portal/orders", label: "Orders", icon: ClipboardList },
+  { href: "/portal/orders", label: "Sales orders", icon: ClipboardList },
+  { href: "/portal/credit-notes", label: "Credit notes", icon: FileMinus },
   { href: "/portal/account", label: "My Account", icon: Building2 },
 ];
 
@@ -40,7 +41,7 @@ function Avatar({ user }: { user?: PortalUser }) {
   );
 }
 
-export default function PortalNav({ user }: { user?: PortalUser }) {
+export default function PortalNav({ user, viewingAs }: { user?: PortalUser; viewingAs?: { partnerMkId: string; partnerName: string } | null }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -111,13 +112,22 @@ export default function PortalNav({ user }: { user?: PortalUser }) {
         </div>
         {user && (
           <div className="flex items-center rounded-xl px-3 py-2 gap-2.5">
-            <Avatar user={user} />
+            <Avatar user={viewingAs ? { name: viewingAs.partnerName } : user} />
             <div className="flex-1 min-w-0">
-              {user.name && (
-                <p className="text-[12px] font-medium text-foreground truncate leading-tight">{user.name}</p>
-              )}
-              {user.email && (
-                <p className="text-[10px] text-muted-foreground truncate leading-tight">{user.email}</p>
+              {viewingAs ? (
+                <>
+                  <p className="text-[12px] font-medium text-foreground truncate leading-tight">{viewingAs.partnerName}</p>
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400 truncate leading-tight">viewed by {user.email ?? user.name}</p>
+                </>
+              ) : (
+                <>
+                  {user.name && (
+                    <p className="text-[12px] font-medium text-foreground truncate leading-tight">{user.name}</p>
+                  )}
+                  {user.email && (
+                    <p className="text-[10px] text-muted-foreground truncate leading-tight">{user.email}</p>
+                  )}
+                </>
               )}
             </div>
             <a

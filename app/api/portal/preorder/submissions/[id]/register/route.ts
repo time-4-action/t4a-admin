@@ -3,6 +3,7 @@ import type { Types } from "mongoose";
 import { getSessionPartner } from "@/lib/portal";
 import { connectDB, PreorderSubmission, toObjectId, toPortalSubmissionView } from "@/lib/preorder";
 import { registerSalesOrder } from "@/lib/preorder-mk";
+import { repriceSubmission } from "@/lib/preorder-submit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,12 @@ export async function POST(_req: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "not retryable", submission: view }, { status: 409 });
   }
 
+  // A preorder without a pricing snapshot (submitted before VAT support) is re-priced
+  // from the campaign as it is now before the order is built.
+  if (!doc.snapshot?.pricing) {
+    const rp = await repriceSubmission(doc);
+    if (!rp.ok) return NextResponse.json({ error: rp.error, message: rp.message, submission: toPortalSubmissionView(doc) }, { status: rp.status });
+  }
   await registerSalesOrder(doc._id as Types.ObjectId, { source: "customer" }, { partner });
   const fresh = await PreorderSubmission.findById(id).exec();
   return NextResponse.json({ submission: toPortalSubmissionView(fresh ?? doc) });

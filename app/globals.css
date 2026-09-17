@@ -163,6 +163,10 @@
 }
 
 /* Page-load stagger reveal. Pair with style={{animationDelay:`${i*40}ms`}}. */
+/* Scrollable rows that must not show a scrollbar (tab strips, pill rows). */
+.scrollbar-none { scrollbar-width: none; -ms-overflow-style: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
+
 @keyframes reveal {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
