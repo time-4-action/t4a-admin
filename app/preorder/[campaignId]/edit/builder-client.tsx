@@ -32,7 +32,6 @@ import {
   Package,
   PencilLine,
   Layers,
-  Tags,
   Settings2,
   Rocket,
   Eye,
@@ -455,18 +454,9 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
           above the tab rail on purpose — it is not a property of the selected tab. */}
       <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6 py-2.5">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-lime-500/12 text-lime-700 dark:text-lime-400">
-              <Tags className="size-4" />
-            </span>
-            <div className="min-w-0">
-              <div className="text-[13px] font-semibold text-foreground">
-                Prices <span className="ml-1 rounded-full bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground">all tabs</span>
-              </div>
-              <div className="text-[11px] text-muted-foreground">
-                Every row&rsquo;s RRP and partner price, on every tab, is read from these Metakocka price lists.
-              </div>
-            </div>
+          <div className="min-w-0">
+            <div className="text-[13px] font-semibold text-foreground">Price lists</div>
+            <div className="text-[11px] text-muted-foreground">Every RRP and partner price on every tab is read from these two Metakocka lists.</div>
           </div>
           <div className="flex-1" />
           <InlineField label="RRP" hint="Recommended retail price list (incl. VAT), shown next to the partner price">
@@ -542,24 +532,25 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="rounded-xl border border-border bg-surface px-4 py-3 flex flex-wrap items-center gap-2">
-                <InlineField label="Tab">
+              {/* The tab reads like a document: an editable title, a subtitle partners
+                  see, then the discount ladder as one line. No card around it. */}
+              <div className="flex flex-wrap items-start gap-x-4 gap-y-2 px-1">
+                <div className="min-w-0 flex-1">
                   <input
                     value={activeTab.name}
                     onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, name: e.target.value }))}
-                    className={cn(inlineInput, "font-semibold text-[13px] w-56")}
+                    className="h-10 w-full max-w-[560px] -ml-2 rounded-md border border-transparent bg-transparent px-2 font-display text-[22px] font-semibold tracking-tight text-foreground hover:border-border focus:border-ring focus:bg-background focus:outline-none placeholder:text-muted-foreground/50"
+                    placeholder="Tab name"
                     aria-label="Tab name"
                   />
-                </InlineField>
-                <InlineField label="Note to partners" hint="Free-text hint shown to the partner under this tab's name">
                   <input
                     value={activeTab.discountNote ?? ""}
                     onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, discountNote: e.target.value }))}
-                    className={cn(inlineInput, "w-80")}
-                    placeholder="Optional — e.g. “Free shipping over €5,000”"
+                    className="mt-0.5 h-8 w-full max-w-[640px] -ml-2 rounded-md border border-transparent bg-transparent px-2 text-[13px] text-muted-foreground hover:border-border focus:border-ring focus:bg-background focus:text-foreground focus:outline-none placeholder:text-muted-foreground/50"
+                    placeholder="Add a note partners see under this tab — e.g. free shipping over €5,000"
+                    aria-label="Note to partners"
                   />
-                </InlineField>
-                <div className="flex-1" />
+                </div>
                 {activeTab.groups.length > 0 && (() => {
                   const allCollapsed = activeTab.groups.every((g) => collapsed.has(g.id));
                   const ids = activeTab.groups.map((g) => g.id);
@@ -602,20 +593,22 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                 }
               />
 
-              {/* Primary add actions — a group is a parent product */}
-              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-border bg-muted/20 px-3 py-2.5">
-                <Button size="sm" onClick={() => setPicker({ tabId: activeTab.id })}>
-                  <Search className="w-3.5 h-3.5" /> Add product
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setCsvTab(activeTab.id)}>
-                  <Upload className="w-3.5 h-3.5" /> Import SKUs
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => addBlankGroup(activeTab.id)} className="text-muted-foreground">
+              {/* Products on this tab: the sheet itself starts here. */}
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
+                <span className="text-[13px] font-semibold text-foreground mr-1">Products</span>
+                <span className="text-[12px] text-muted-foreground tabular-nums mr-2">
+                  {activeTab.groups.length} product{activeTab.groups.length === 1 ? "" : "s"} · {activeTab.groups.reduce((n, g) => n + g.rows.length, 0)} variants
+                </span>
+                <div className="flex-1" />
+                <Button variant="ghost" size="sm" onClick={() => addBlankGroup(activeTab.id)} className="h-8 text-muted-foreground">
                   <Plus className="w-3.5 h-3.5" /> Blank group
                 </Button>
-                <span className="text-[11px] text-muted-foreground ml-auto hidden sm:block">
-                  Each product becomes a group of its variants — delete any you don&rsquo;t want.
-                </span>
+                <Button variant="outline" size="sm" onClick={() => setCsvTab(activeTab.id)} className="h-8">
+                  <Upload className="w-3.5 h-3.5" /> Import SKUs
+                </Button>
+                <Button size="sm" onClick={() => setPicker({ tabId: activeTab.id })} className="h-8">
+                  <Search className="w-3.5 h-3.5" /> Add product
+                </Button>
               </div>
 
               <DndContext
@@ -650,9 +643,14 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
               </DndContext>
 
               {activeTab.groups.length === 0 && (
-                <div className="text-center text-[13px] text-muted-foreground py-14 rounded-xl border border-dashed border-border">
-                  <FileSpreadsheet className="w-6 h-6 mx-auto mb-2 text-muted-foreground/40" />
-                  No products yet. Use <strong className="text-foreground">Add product</strong> or <strong className="text-foreground">Import SKUs</strong> above.
+                <div className="rounded-xl border border-dashed border-border py-14 text-center">
+                  <FileSpreadsheet className="w-6 h-6 mx-auto mb-3 text-muted-foreground/40" />
+                  <p className="text-[13px] font-medium text-foreground">This tab has no products yet</p>
+                  <p className="mt-1 text-[12px] text-muted-foreground">Add a product from the catalogue and it arrives with all its variants — remove the ones you don&rsquo;t sell.</p>
+                  <div className="mt-4 flex justify-center gap-2">
+                    <Button size="sm" onClick={() => setPicker({ tabId: activeTab.id })}><Search className="w-3.5 h-3.5" /> Add product</Button>
+                    <Button variant="outline" size="sm" onClick={() => setCsvTab(activeTab.id)}><Upload className="w-3.5 h-3.5" /> Import SKUs</Button>
+                  </div>
                 </div>
               )}
             </div>
@@ -957,7 +955,7 @@ function GroupSection({
       style={style}
       className={cn("rounded-xl border border-border bg-surface overflow-hidden", isDragging && "shadow-xl opacity-95")}
     >
-      <div className={cn("group/g flex items-center gap-1.5 pl-2 pr-3 py-2 bg-muted/40", !collapsed && "border-b border-border")}>
+      <div className={cn("group/g flex items-center gap-1.5 pl-2 pr-3 py-2", !collapsed && "border-b border-border")}>
         <button
           type="button"
           {...attributes}
@@ -977,8 +975,14 @@ function GroupSection({
         >
           {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
-        <Input value={group.name} onChange={(e) => onRenameGroup(e.target.value)} className="h-8 max-w-[340px] text-[13.5px] font-semibold bg-background" aria-label="Group name" />
-        <span className="rounded-full bg-muted px-2 h-6 inline-flex items-center text-[11px] text-muted-foreground tabular-nums shrink-0">
+        <input
+          value={group.name}
+          onChange={(e) => onRenameGroup(e.target.value)}
+          className="h-8 w-full max-w-[360px] rounded-md border border-transparent bg-transparent px-2 text-[14px] font-semibold text-foreground hover:border-border focus:border-ring focus:bg-background focus:outline-none placeholder:text-muted-foreground/50"
+          placeholder="Group name"
+          aria-label="Group name"
+        />
+        <span className="text-[12px] text-muted-foreground tabular-nums shrink-0">
           {group.rows.length} variant{group.rows.length === 1 ? "" : "s"}
         </span>
         <div className="flex-1" />
@@ -1061,22 +1065,22 @@ const VariantTable = memo(function VariantTable({
             <col className="w-[76px]" />
           </colgroup>
           <thead>
-            <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60 bg-muted/15">
+            <tr className="text-[11px] text-muted-foreground border-b border-border/60 bg-muted/20">
               <th className="py-2" />
-              <th className="text-left font-semibold px-3 py-2">Variant</th>
-              <th className="text-left font-semibold px-3 py-2">SKU</th>
-              <th className="text-left font-semibold px-3 py-2">Size / label</th>
-              <th className="text-right font-semibold px-3 py-2 border-l border-l-border/40" title={pricing.rrp ? `From “${pricing.rrp}” — incl. VAT` : "Recommended retail price, incl. VAT"}>
+              <th className="text-left font-medium px-3 py-2">Variant</th>
+              <th className="text-left font-medium px-3 py-2">SKU</th>
+              <th className="text-left font-medium px-3 py-2">Size / label</th>
+              <th className="text-right font-medium px-3 py-2 border-l border-l-border/40" title={pricing.rrp ? `From “${pricing.rrp}” — incl. VAT` : "Recommended retail price, incl. VAT"}>
                 RRP
-                {pricing.rrp && <div className="text-[9px] font-normal normal-case tracking-normal text-muted-foreground/70 truncate max-w-[110px] ml-auto">{pricing.rrp}</div>}
+                {pricing.rrp && <div className="text-[10px] font-normal text-muted-foreground/70 truncate max-w-[110px] ml-auto">{pricing.rrp}</div>}
               </th>
-              <th className="text-right font-semibold px-3 py-2" title={pricing.partner ? `From “${pricing.partner}” — excl. VAT` : "Partner price, excl. VAT"}>
+              <th className="text-right font-medium px-3 py-2" title={pricing.partner ? `From “${pricing.partner}” — excl. VAT` : "Partner price, excl. VAT"}>
                 Partner
-                {pricing.partner && <div className="text-[9px] font-normal normal-case tracking-normal text-muted-foreground/70 truncate max-w-[110px] ml-auto">{pricing.partner}</div>}
+                {pricing.partner && <div className="text-[10px] font-normal text-muted-foreground/70 truncate max-w-[110px] ml-auto">{pricing.partner}</div>}
               </th>
-              <th className="text-right font-semibold px-3 py-2" title="Discounted partner price — overrides the partner price when set">
+              <th className="text-right font-medium px-3 py-2" title="Discounted partner price — overrides the partner price when set">
                 Discounted
-                <div className="text-[9px] font-normal normal-case tracking-normal text-muted-foreground/70">optional</div>
+                <div className="text-[10px] font-normal text-muted-foreground/70">optional</div>
               </th>
               <th className="py-2" />
             </tr>
@@ -1161,31 +1165,25 @@ function TierEditor({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-surface">
-      <div className="flex items-center gap-3 px-4 py-3">
+    <div className={cn("rounded-xl", open && "border border-border bg-surface")}>
+      <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-1.5 px-1", open && "px-4 py-3")}>
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
-          className="flex items-center gap-3 min-w-0 text-left group"
+          className="group inline-flex items-center gap-1.5 text-left"
         >
-          <span className="w-8 h-8 rounded-lg bg-lime-600/10 text-lime-700 dark:text-lime-300 flex items-center justify-center shrink-0">
-            <Percent className="w-4 h-4" />
-          </span>
-          <span className="min-w-0">
-            <span className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground group-hover:text-lime-700 dark:group-hover:text-lime-300 transition-colors">
-              Volume discounts
-              <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
-            </span>
-            <span className="block text-[11px] text-muted-foreground truncate">
-              {ladder.length === 0
-                ? "No tiers — this tab is always at list price."
-                : `${ladder.length} tier${ladder.length === 1 ? "" : "s"} · best case −${ladder[ladder.length - 1].discountPct}% from ${fmtMoney(ladder[ladder.length - 1].minAmount, currency)}`}
-            </span>
-          </span>
+          <Percent className="w-3.5 h-3.5 text-lime-700 dark:text-lime-400" />
+          <span className="text-[13px] font-semibold text-foreground group-hover:underline decoration-border underline-offset-4">Volume discounts</span>
+          <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
         </button>
+        <span className="text-[12px] text-muted-foreground">
+          {ladder.length === 0
+            ? "none — this tab stays at list price"
+            : `${ladder.length} tier${ladder.length === 1 ? "" : "s"}, up to −${ladder[ladder.length - 1].discountPct}% from ${fmtMoney(ladder[ladder.length - 1].minAmount, currency)}`}
+        </span>
         {ladder.length > 0 && (
-          <div className="hidden lg:flex flex-wrap items-center gap-1 ml-2">
+          <div className="hidden lg:flex flex-wrap items-center gap-1">
             {ladder.map((t) => (
               <span
                 key={t.id}
@@ -1206,7 +1204,7 @@ function TierEditor({
             <AlertTriangle className="w-3.5 h-3.5" /> {warnings.length} note{warnings.length === 1 ? "" : "s"}
           </span>
         )}
-        <Button variant="outline" size="sm" className="h-8 bg-background" onClick={addTier}>
+        <Button variant={open ? "outline" : "ghost"} size="sm" className={cn("h-8", open && "bg-background", !open && "text-muted-foreground")} onClick={addTier}>
           <Plus className="w-3.5 h-3.5" /> Add tier
         </Button>
       </div>
@@ -1231,7 +1229,7 @@ function TierEditor({
             </button>
           ) : (
             <div className="space-y-1.5">
-              <div className="hidden sm:grid grid-cols-[minmax(0,320px)_150px_110px_32px] gap-2 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-1">
+              <div className="hidden sm:grid grid-cols-[minmax(0,320px)_150px_110px_32px] gap-2 text-[11px] font-medium text-muted-foreground px-1">
                 <span>Tier name</span>
                 <span>Spend at least</span>
                 <span>Discount</span>
@@ -1807,12 +1805,9 @@ function BuilderSkeleton({ campaignId }: { campaignId: string }) {
       />
 
       <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="flex items-center gap-2.5">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-lime-500/12 text-lime-700 dark:text-lime-400"><Tags className="size-4" /></span>
-          <div>
-            <div className="text-[13px] font-semibold text-foreground">Prices <span className="ml-1 rounded-full bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground">all tabs</span></div>
-            <div className="text-[11px] text-muted-foreground">Every row&rsquo;s RRP and partner price, on every tab, is read from these Metakocka price lists.</div>
-          </div>
+        <div>
+          <div className="text-[13px] font-semibold text-foreground">Price lists</div>
+          <div className="text-[11px] text-muted-foreground">Every RRP and partner price on every tab is read from these two Metakocka lists.</div>
         </div>
         <div className="flex-1" />
         <InlineField label="RRP"><Skeleton className="h-full w-[230px] rounded-none" delay={100} /></InlineField>
@@ -1835,10 +1830,9 @@ function BuilderSkeleton({ campaignId }: { campaignId: string }) {
 
         <main className="flex-1 min-w-0 overflow-y-auto p-4 md:p-6">
           <div className="space-y-4">
-            <div className="rounded-xl border border-border bg-surface px-4 py-3 flex flex-wrap items-center gap-2">
-              <InlineField label="Tab"><Skeleton className="h-full w-56 rounded-none" /></InlineField>
-              <InlineField label="Note to partners"><Skeleton className="h-full w-80 rounded-none" delay={40} /></InlineField>
-              <div className="flex-1" />
+            <div className="px-1">
+              <SkeletonLine lh="h-10" h="h-6" w="w-48" />
+              <SkeletonLine lh="h-8" h="h-3.5" w="w-80" delay={40} />
             </div>
             <div className="rounded-xl border border-border bg-surface">
               <div className="flex items-center gap-3 px-4 py-3">
