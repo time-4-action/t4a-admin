@@ -451,6 +451,56 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
           </>
         }
       />
+      {/* Campaign-wide: where the RRP / Partner numbers on EVERY tab come from. Sits
+          above the tab rail on purpose — it is not a property of the selected tab. */}
+      <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6 py-2.5">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-lime-500/12 text-lime-700 dark:text-lime-400">
+              <Tags className="size-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-[13px] font-semibold text-foreground">
+                Prices <span className="ml-1 rounded-full bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground">all tabs</span>
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                Every row&rsquo;s RRP and partner price, on every tab, is read from these Metakocka price lists.
+              </div>
+            </div>
+          </div>
+          <div className="flex-1" />
+          <InlineField label="RRP" hint="Recommended retail price list (incl. VAT), shown next to the partner price">
+            <PricelistSelect
+              label="RRP list"
+              value={campaign.rrpPricelist ?? null}
+              pricelists={pricelists}
+              onChange={(v) => mutate((c) => ({ ...c, rrpPricelist: v }))}
+              className={inlineSelect}
+            />
+          </InlineField>
+          <InlineField label="Partner" hint="The price list the sheet's partner prices come from (excl. VAT)">
+            <PricelistSelect
+              label="Partner list"
+              value={campaign.partnerPricelist ?? null}
+              pricelists={pricelists}
+              onChange={(v) => mutate((c) => ({ ...c, partnerPricelist: v }))}
+              className={inlineSelect}
+            />
+          </InlineField>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 bg-background"
+            onClick={reprice}
+            disabled={repricing}
+            title="Re-read both lists from Metakocka and refresh every catalogue row on every tab"
+          >
+            {repricing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            {repricedAt && !repricing ? "Repriced ✓" : "Re-price all tabs"}
+          </Button>
+        </div>
+      </div>
+
       <div className="flex-1 min-h-0 flex">
         {/* Tab rail */}
         <aside className="w-44 md:w-52 shrink-0 border-r border-border overflow-y-auto p-2 space-y-1">
@@ -492,53 +542,6 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
             </div>
           ) : (
             <div className="space-y-4">
-              {/* Where the numbers in the RRP / Partner columns come from. */}
-              <div className="rounded-xl border border-border bg-surface px-4 py-3">
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-lime-500/12 text-lime-700 dark:text-lime-400">
-                      <Tags className="size-4" />
-                    </span>
-                    <div className="min-w-0">
-                      <div className="text-[13px] font-semibold text-foreground">Prices</div>
-                      <div className="text-[11px] text-muted-foreground">
-                        Every row&rsquo;s RRP and partner price is read from these Metakocka price lists.
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex-1" />
-                  <InlineField label="RRP" hint="Recommended retail price list (incl. VAT), shown next to the partner price">
-                    <PricelistSelect
-                      label="RRP list"
-                      value={campaign.rrpPricelist ?? null}
-                      pricelists={pricelists}
-                      onChange={(v) => mutate((c) => ({ ...c, rrpPricelist: v }))}
-                      className={inlineSelect}
-                    />
-                  </InlineField>
-                  <InlineField label="Partner" hint="The price list the sheet's partner prices come from (excl. VAT)">
-                    <PricelistSelect
-                      label="Partner list"
-                      value={campaign.partnerPricelist ?? null}
-                      pricelists={pricelists}
-                      onChange={(v) => mutate((c) => ({ ...c, partnerPricelist: v }))}
-                      className={inlineSelect}
-                    />
-                  </InlineField>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-9 bg-background"
-                    onClick={reprice}
-                    disabled={repricing}
-                    title="Re-read both lists from Metakocka and refresh every catalogue row on the sheet"
-                  >
-                    {repricing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                    {repricedAt && !repricing ? "Repriced ✓" : "Re-price sheet"}
-                  </Button>
-                </div>
-              </div>
-
               <div className="rounded-xl border border-border bg-surface px-4 py-3 flex flex-wrap items-center gap-2">
                 <InlineField label="Tab">
                   <input
@@ -1803,6 +1806,20 @@ function BuilderSkeleton({ campaignId }: { campaignId: string }) {
         }
       />
 
+      <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex items-center gap-2.5">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-lime-500/12 text-lime-700 dark:text-lime-400"><Tags className="size-4" /></span>
+          <div>
+            <div className="text-[13px] font-semibold text-foreground">Prices <span className="ml-1 rounded-full bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground">all tabs</span></div>
+            <div className="text-[11px] text-muted-foreground">Every row&rsquo;s RRP and partner price, on every tab, is read from these Metakocka price lists.</div>
+          </div>
+        </div>
+        <div className="flex-1" />
+        <InlineField label="RRP"><Skeleton className="h-full w-[230px] rounded-none" delay={100} /></InlineField>
+        <InlineField label="Partner"><Skeleton className="h-full w-[230px] rounded-none" delay={120} /></InlineField>
+        <Button variant="outline" size="sm" className="h-9 bg-background" disabled><RefreshCw className="w-3.5 h-3.5" /> Re-price all tabs</Button>
+      </div>
+
       <div className="flex-1 min-h-0 flex">
         <aside className="w-44 md:w-52 shrink-0 border-r border-border overflow-y-auto p-2 space-y-1">
           {[0, 1, 2].map((i) => (
@@ -1818,19 +1835,6 @@ function BuilderSkeleton({ campaignId }: { campaignId: string }) {
 
         <main className="flex-1 min-w-0 overflow-y-auto p-4 md:p-6">
           <div className="space-y-4">
-            <div className="rounded-xl border border-border bg-surface px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-              <div className="flex items-center gap-2.5">
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-lime-500/12 text-lime-700 dark:text-lime-400"><Tags className="size-4" /></span>
-                <div>
-                  <div className="text-[13px] font-semibold text-foreground">Prices</div>
-                  <div className="text-[11px] text-muted-foreground">Every row&rsquo;s RRP and partner price is read from these Metakocka price lists.</div>
-                </div>
-              </div>
-              <div className="flex-1" />
-              <InlineField label="RRP"><Skeleton className="h-full w-[230px] rounded-none" delay={100} /></InlineField>
-              <InlineField label="Partner"><Skeleton className="h-full w-[230px] rounded-none" delay={120} /></InlineField>
-              <Button variant="outline" size="sm" className="h-9 bg-background" disabled><RefreshCw className="w-3.5 h-3.5" /> Re-price sheet</Button>
-            </div>
             <div className="rounded-xl border border-border bg-surface px-4 py-3 flex flex-wrap items-center gap-2">
               <InlineField label="Tab"><Skeleton className="h-full w-56 rounded-none" /></InlineField>
               <InlineField label="Note to partners"><Skeleton className="h-full w-80 rounded-none" delay={40} /></InlineField>
