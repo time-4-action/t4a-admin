@@ -356,7 +356,7 @@ export default function SubmissionClient({
           </>
         }
       />
-      {filledTabs.length > 0 && (
+      {filledTabs.length > 1 && (
         <div className="shrink-0 border-b border-border bg-background px-4 md:px-6 flex items-stretch">
           <TabBar tabs={filledTabs} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
         </div>
