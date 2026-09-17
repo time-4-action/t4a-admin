@@ -73,6 +73,122 @@ const MK_COUNTRY_ALIASES: Record<string, string> = {
   "moldavija": "MD",
   "belorusija": "BY",
   "belarus": "BY",
+  // Regions / islands MK registers sometimes carry instead of the country. They
+  // have no ISO 3166-1 code of their own (or one the locale tables don't know,
+  // e.g. the reserved "IC"), so they map to the parent state.
+  "kanarski otoki": "ES",
+  "canary islands": "ES",
+  "islas canarias": "ES",
+  "kanarische inseln": "ES",
+  "isole canarie": "ES",
+  "balearski otoki": "ES",
+  "baleari": "ES",
+  "balearic islands": "ES",
+  "islas baleares": "ES",
+  "ceuta": "ES",
+  "melilla": "ES",
+  "madeira": "PT",
+  "madeira islands": "PT",
+  "azori": "PT",
+  "azores": "PT",
+  "acores": "PT",
+  "korzika": "FR",
+  "corsica": "FR",
+  "corse": "FR",
+  "sardinija": "IT",
+  "sardinia": "IT",
+  "sardegna": "IT",
+  "sicilija": "IT",
+  "sicily": "IT",
+  "sicilia": "IT",
+  "severna irska": "GB",
+  "northern ireland": "GB",
+  "skotska": "GB",
+  "scotland": "GB",
+  "wales": "GB",
+  "anglija": "GB",
+  "kreta": "GR",
+  "crete": "GR",
+  "ciper": "CY",
+  "kanalski otoki": "GB",
+  "channel islands": "GB",
+  // Metakocka's register uses the Slovenian ISO 3166 *formal* names (comma-inverted,
+  // "X, Republika"), while the locale tables carry the CLDR short names. The full
+  // list of formal names that differ from CLDR:
+  "koreja": "KR",
+  "koreja, republika": "KR",
+  "republika koreja": "KR",
+  "juzna koreja": "KR",
+  "koreja, demokraticna ljudska republika": "KP",
+  "severna koreja": "KP",
+  "ruska federacija": "RU",
+  "iran, islamska republika": "IR",
+  "moldavija, republika": "MD",
+  "tanzanija, zdruzena republika": "TZ",
+  "kongo, demokraticna republika": "CD",
+  "kongo": "CG",
+  "kongo, republika": "CG",
+  "laoska ljudska demokraticna republika": "LA",
+  "sirska arabska republika": "SY",
+  "tajvan, provinca kitajske": "TW",
+  "tajvan": "TW",
+  "palestinsko ozemlje, zasedeno": "PS",
+  "palestina": "PS",
+  "sveti sedez (vatikanska mestna drzava)": "VA",
+  "sveti sedez": "VA",
+  "vatikanska mestna drzava": "VA",
+  "brunej darussalam": "BN",
+  "mikronezija, federativne drzave": "FM",
+  "libijska arabska dzamahirija": "LY",
+  "ceska republika": "CZ",
+  "slovaska republika": "SK",
+  "makedonija, nekdanja jugoslovanska republika": "MK",
+  "makedonija, republika": "MK",
+  "bolivija, vecnacionalna drzava": "BO",
+  "venezuela, bolivarska republika": "VE",
+  "vzhodni timor": "TL",
+  "sveta helena, ascension in tristan da cunha": "SH",
+  "deviski otoki, britanski": "VG",
+  "britanski deviski otoki": "VG",
+  "deviski otoki, ameriski": "VI",
+  "ameriski deviski otoki": "VI",
+  "falklandski otoki (malvini)": "FK",
+  "bonaire, sint eustatius in saba": "BQ",
+  "kapverdski otoki": "CV",
+  "sveti kitts in nevis": "KN",
+  "sveta lucija": "LC",
+  "sveti vincencij in grenadine": "VC",
+  "sveti pierre in miquelon": "PM",
+  "sveti martin": "MF",
+  "sveti bartolomej": "BL",
+  "farski otoki": "FO",
+  "ferski otoki": "FO",
+  "zdruzene drzave": "US",
+  "savdska arabija": "SA",
+  "saudova arabija": "SA",
+  "svazi": "SZ",
+  "esvatini": "SZ",
+  "burma": "MM",
+  "mjanmar": "MM",
+  "kirgizija": "KG",
+  "kirgizistan": "KG",
+  "zelenortski otoki": "CV",
+  "slonokoscena obala": "CI",
+  "cote d'ivoire": "CI",
+  "kajmanski otoki": "KY",
+  "hongkong": "HK",
+  "hong kong": "HK",
+  "macao": "MO",
+  "makao": "MO",
+  "papua nova gvineja": "PG",
+  "sao tome in principe": "ST",
+  "trinidad in tobago": "TT",
+  "antigva in barbuda": "AG",
+  "dominikanska republika": "DO",
+  // Dissolved in 2010 (no current ISO code); Curaçao is the successor that
+  // carries on in most registers.
+  "nizozemski antili": "CW",
+  "netherlands antilles": "CW",
 };
 
 export function normalizeCountryName(raw: string): string {
@@ -97,6 +213,36 @@ export function countryIsoFromName(raw: string | null | undefined): string | nul
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
 
+  let iso: string | null = resolveExact(trimmed, key);
+  if (!iso) {
+    // Registers decorate names: "Združeno kraljestvo (UK)", "Deutschland / Germany",
+    // "Slovenia - EU". Try the name without any parenthetical, then each
+    // parenthetical / slash / dash / comma part on its own.
+    for (const part of nameVariants(trimmed)) {
+      iso = resolveExact(part, normalizeCountryName(part));
+      if (iso) break;
+    }
+  }
+  cache.set(key, iso);
+  return iso;
+}
+
+// Sub-strings of a decorated country name worth resolving on their own, most
+// specific first. Never includes the input itself.
+function nameVariants(name: string): string[] {
+  const out: string[] = [];
+  const push = (v: string) => {
+    const t = v.replace(/^[\s\-–—/,.:;]+|[\s\-–—/,.:;]+$/g, "").trim();
+    if (t && t !== name && !out.includes(t)) out.push(t);
+  };
+  push(name.replace(/\([^)]*\)/g, " "));
+  for (const m of name.matchAll(/\(([^)]*)\)/g)) push(m[1]);
+  for (const part of name.split(/\s*[/|,;]\s*|\s+[-–—]\s+/)) push(part);
+  return out;
+}
+
+// One exact resolution pass — codes, the alias table, then the locale tables.
+function resolveExact(trimmed: string, key: string): string | null {
   let iso: string | null = null;
   const upper = trimmed.toUpperCase();
   if (/^[A-Z]{2}$/.test(upper) && (countries.isValid(upper) || upper === "XK")) iso = upper;
@@ -126,9 +272,14 @@ export function countryIsoFromName(raw: string | null | undefined): string | nul
       }
     }
   }
-  cache.set(key, iso);
   return iso;
 }
+
+// Bump whenever countryIsoFromName learns something new (aliases, decorated
+// names, …). Directory rows stamp the version they were resolved with; rows
+// behind it are re-resolved from their stored raw name on the next read
+// (lib/mk-customers.ts → ensureCountriesResolved), without touching Metakocka.
+export const COUNTRY_RESOLVER_VERSION = 3;
 
 export type CountrySource = "mk" | "manual" | "home-fallback" | null;
 
@@ -148,6 +299,18 @@ export function countryIsoFromPartner(
   if (iso) return { iso, source: "mk" };
   if (p.foreignCountry === false) return { iso: homeCountryIso(), source: "home-fallback" };
   return { iso: null, source: null };
+}
+
+// Every ISO-2 code → English name, for the client-side country pickers (the
+// client never loads the locale tables itself). Cached for the process.
+let allNames: Record<string, string> | null = null;
+export function allCountryNames(): Record<string, string> {
+  if (allNames) return allNames;
+  const out: Record<string, string> = {};
+  for (const code of Object.keys(countries.getAlpha2Codes())) out[code] = countryName(code);
+  out.XK = "Kosovo";
+  allNames = out;
+  return out;
 }
 
 // English display name for an ISO-2 code (falls back to the code itself).

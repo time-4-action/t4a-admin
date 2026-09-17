@@ -25,6 +25,7 @@ import {
   SlidersHorizontal,
   FileText,
   ReceiptText,
+  FileMinus,
   ClipboardList,
   Building2,
   ShoppingCart,
@@ -125,6 +126,7 @@ export const sections: {
     cards: [
       { href: "/documents/customer", icon: Building2,      title: "Customer", desc: "Customer details and account" },
       { href: "/documents/invoices", icon: ReceiptText,    title: "Invoices", desc: "Browse any customer's invoices" },
+      { href: "/documents/credit-notes", icon: FileMinus,  title: "Credit notes", desc: "Browse any customer's credit notes" },
       { href: "/documents/offers",   icon: FileText,       title: "Offers",   desc: "Browse any customer's offers" },
       { href: "/documents/orders",   icon: ClipboardList,  title: "Orders",   desc: "Browse any customer's orders" },
     ],

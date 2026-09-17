@@ -13,8 +13,8 @@ import type { IPreorderCampaign } from "@/models/preorder-campaign";
 import { MkCustomer, type IMkCustomer } from "@/models/mk-customer";
 import { connectDB, toCampaignAdminView, partnerContextFor } from "@/lib/preorder";
 import { resolveProvenanceOnly } from "@/lib/preorder-effective";
-import { countMkCustomersByCountry, effectiveCountryIso, listManualPins, listMkCustomers, toMkCustomerView, type MkCustomerView } from "@/lib/mk-customers";
-import { countryName } from "@/lib/countries";
+import { countMkCustomersByCountry, effectiveCountryIso, listMkCustomers, toMkCustomerView, type CustomerKind, type MkCustomerView } from "@/lib/mk-customers";
+import { allCountryNames, countryName } from "@/lib/countries";
 import { submissionStage, type MarketColor, type SubmissionStage } from "@/types/preorder";
 
 export type CustomerRow = MkCustomerView & {
@@ -32,6 +32,7 @@ export type CustomerRow = MkCustomerView & {
 
 export type CustomersQuery = {
   q?: string;
+  kind?: CustomerKind | null;
   countryIso?: string | null;
   marketId?: string | null; // "none" = no market
   access?: "all" | "unlocked" | "not-unlocked";
@@ -137,6 +138,7 @@ export async function listCampaignCustomers(
   if (!needsScan) {
     const res = await listMkCustomers({
       q: query.q,
+      kind: query.kind ?? null,
       countryIso: query.countryIso ?? null,
       partnerMkIds: restrict ? Array.from(restrict) : undefined,
       page,
@@ -145,7 +147,7 @@ export async function listCampaignCustomers(
     return { items: res.items.map((c) => rowFor(campaignDoc, c, facts)), total: res.total, page, pageSize };
   }
 
-  const scan = await listMkCustomers({ q: query.q, partnerMkIds: restrict ? Array.from(restrict) : undefined, page: 1, pageSize: 200 * 25 });
+  const scan = await listMkCustomers({ q: query.q, kind: query.kind ?? null, partnerMkIds: restrict ? Array.from(restrict) : undefined, page: 1, pageSize: 200 * 25 });
   let rows = scan.items.map((c) => rowFor(campaignDoc, c, facts));
   if (query.countryIso === "none") rows = rows.filter((r) => !r.countryIso);
   else if (query.countryIso) rows = rows.filter((r) => r.countryIso === query.countryIso!.toUpperCase());
@@ -165,24 +167,39 @@ export async function getCampaignCustomer(campaignDoc: IPreorderCampaign, partne
   return rowFor(campaignDoc, c, facts);
 }
 
-export type CountryGeo = { customers: number; unlocked: number; submitted: number; published: number; overrides: number; marketId: string | null };
+export type CountryGeo = {
+  customers: number;
+  business: number;
+  person: number;
+  unlocked: number;
+  submitted: number;
+  published: number;
+  overrides: number;
+  marketId: string | null;
+};
 
-// Per-country aggregates for the map, plus the manual pins.
+// Per-country aggregates for the Countries table + the summary strip: directory
+// counts split by kind, campaign-scoped counters, the country's market, and the
+// English name of every country (for the pickers).
 export async function campaignGeo(campaignDoc: IPreorderCampaign): Promise<{
   byCountry: Record<string, CountryGeo>;
   unresolved: number;
-  manualPins: { partnerMkId: string; name: string; lat: number; lng: number; countryIso: string | null }[];
+  kinds: { business: number; person: number };
+  countries: Record<string, string>;
 }> {
   await connectDB();
   const admin = toCampaignAdminView(campaignDoc);
-  const [byIso, facts, pins] = await Promise.all([countMkCustomersByCountry(), campaignFacts(campaignDoc._id as Types.ObjectId), listManualPins()]);
+  const [byIso, facts] = await Promise.all([countMkCustomersByCountry(), campaignFacts(campaignDoc._id as Types.ObjectId)]);
   const out: Record<string, CountryGeo> = {};
   const marketOf = (iso: string) => admin.markets.find((m) => m.countries.includes(iso))?.id ?? null;
-  const ensure = (iso: string) => (out[iso] ??= { customers: 0, unlocked: 0, submitted: 0, published: 0, overrides: 0, marketId: marketOf(iso) });
+  const ensure = (iso: string) => (out[iso] ??= { customers: 0, business: 0, person: 0, unlocked: 0, submitted: 0, published: 0, overrides: 0, marketId: marketOf(iso) });
   let unresolved = 0;
-  for (const [iso, n] of Object.entries(byIso)) {
-    if (iso === "none") unresolved = n;
-    else ensure(iso).customers = n;
+  const kinds = { business: 0, person: 0 };
+  for (const [iso, c] of Object.entries(byIso)) {
+    kinds.business += c.business;
+    kinds.person += c.person;
+    if (iso === "none") unresolved = c.customers;
+    else Object.assign(ensure(iso), { customers: c.customers, business: c.business, person: c.person });
   }
   // Campaign-scoped counters need each participant's country (small sets).
   const ids = new Set([...facts.access.keys(), ...facts.subs.keys(), ...admin.customerRules.map((r) => r.partnerMkId)]);
@@ -202,5 +219,5 @@ export async function campaignGeo(campaignDoc: IPreorderCampaign): Promise<{
     }
   }
   for (const m of admin.markets) for (const iso of m.countries) ensure(iso);
-  return { byCountry: out, unresolved, manualPins: pins };
+  return { byCountry: out, unresolved, kinds, countries: allCountryNames() };
 }

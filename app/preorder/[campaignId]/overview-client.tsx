@@ -6,13 +6,11 @@ import {
   ArrowLeft,
   Clock,
   Users,
-  Package,
   Wallet,
   CheckCircle2,
   UserPlus,
   Link2,
   Check,
-  ShoppingCart,
   Eye,
   AlertTriangle,
   Globe2,
@@ -21,7 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
-import { CampaignNav } from "@/app/preorder/[campaignId]/campaign-nav";
+import { CampaignHeader } from "@/app/preorder/[campaignId]/campaign-nav";
 import { CampaignStatusBadge } from "@/app/preorder/preorder-badges";
 import { PreordersTable, PreordersTableSkeleton } from "@/app/preorder/[campaignId]/submissions/submissions-client";
 import {
@@ -94,7 +92,8 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
     const failures = subs.filter((s) => s.mkState === "failed").length;
     // Everyone with access = submitters (all hold access) + unlocked-not-started.
     const unlockedCount = subs.length + unlocked.length;
-    return { count: subs.length, submitted: submitted.length, totalQty, totalAmount, registered, published, failures, unlockedCount };
+    const drafts = subs.length - submitted.length;
+    return { count: subs.length, submitted: submitted.length, drafts, totalQty, totalAmount, registered, published, failures, unlockedCount };
   }, [subs, unlocked]);
 
   if (loading) return <OverviewSkeleton campaignId={campaignId} />;
@@ -114,46 +113,75 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
 
   return (
     <div className="flex flex-col h-full">
-      <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="flex items-center gap-3 px-4 md:px-6 h-14">
-          <Link href="/preorder" className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back">
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
-          <div className="min-w-0">
-            <h1 className="text-[15px] font-semibold text-foreground truncate leading-tight">{campaign.title}</h1>
-            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-              <CampaignStatusBadge status={campaign.status} />
-              {campaign.deadline && <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" /> {fmtDate(campaign.deadline)}</span>}
-              {marketCount > 0 && (
-                <span className="inline-flex items-center gap-1"><Globe2 className="w-3 h-3" /> {marketCount} market{marketCount === 1 ? "" : "s"}</span>
-              )}
-            </div>
-          </div>
-          <div className="flex-1" />
-          <Button variant="outline" size="sm" className="h-8" onClick={copyInvite} disabled={!inviteUrl} title={inviteUrl ?? "Invite link"}>
-            {copied ? <><Check className="w-3.5 h-3.5 text-lime-600" /> Copied</> : <><Link2 className="w-3.5 h-3.5" /> Copy invite link</>}
-          </Button>
-          <Link href={`/preorder/${campaignId}/preview?fill=1`}>
-            <Button variant="outline" size="sm" className="h-8"><UserPlus className="w-3.5 h-3.5" /> Fill for customer</Button>
-          </Link>
-        </div>
-        <div className="px-4 md:px-6 pb-2">
-          <CampaignNav campaignId={campaignId} active="overview" compact />
-        </div>
-      </header>
+      <CampaignHeader
+        campaignId={campaignId}
+        active="overview"
+        title={campaign.title}
+        meta={
+          <>
+            <CampaignStatusBadge status={campaign.status} />
+            {campaign.deadline && <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" /> {fmtDate(campaign.deadline)}</span>}
+            {marketCount > 0 && (
+              <span className="inline-flex items-center gap-1"><Globe2 className="w-3 h-3" /> {marketCount} market{marketCount === 1 ? "" : "s"}</span>
+            )}
+          </>
+        }
+        actions={
+          <>
+            <Button variant="outline" size="sm" className="h-8" onClick={copyInvite} disabled={!inviteUrl} title={inviteUrl ?? "Invite link"}>
+              {copied ? <><Check className="w-3.5 h-3.5 text-lime-600" /> Copied</> : <><Link2 className="w-3.5 h-3.5" /> Copy invite link</>}
+            </Button>
+            <Link href={`/preorder/${campaignId}/preview?fill=1`}>
+              <Button variant="outline" size="sm" className="h-8"><UserPlus className="w-3.5 h-3.5" /> Fill for customer</Button>
+            </Link>
+          </>
+        }
+      />
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
         <div className="space-y-5">
-          {/* KPIs */}
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-            <Kpi icon={Link2} label="Unlocked" value={String(kpis.unlockedCount)} />
-            <Kpi icon={Users} label="Preorders" value={String(kpis.count)} />
-            <Kpi icon={CheckCircle2} label="Submitted" value={String(kpis.submitted)} />
-            <Kpi icon={Package} label="Items" value={String(kpis.totalQty)} />
-            <Kpi icon={Wallet} label="Requested value" value={fmtMoney(kpis.totalAmount, currency)} />
-            <Kpi icon={ShoppingCart} label="In Metakocka" value={String(kpis.registered)} />
-            <Kpi icon={Eye} label="Published" value={String(kpis.published)} accent />
-            <Kpi icon={AlertTriangle} label="Integration failures" value={String(kpis.failures)} danger={kpis.failures > 0} />
+          {/* Integration failures only surface when there are some. */}
+          {kpis.failures > 0 && (
+            <Link
+              href={`/preorder/${campaignId}/submissions?stage=failures`}
+              className="flex items-center gap-2.5 rounded-xl border border-rose-300 dark:border-rose-800/60 bg-rose-50/70 dark:bg-rose-950/20 px-4 py-2.5 text-[12px] text-rose-800 dark:text-rose-200 hover:bg-rose-100/70 dark:hover:bg-rose-950/40 transition-colors"
+            >
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
+              <span className="font-medium">
+                {kpis.failures} preorder{kpis.failures === 1 ? "" : "s"} failed to register in Metakocka
+              </span>
+              <span className="text-rose-700/80 dark:text-rose-300/80">— retry from the preorder page.</span>
+              <ArrowRight className="w-3.5 h-3.5 ml-auto shrink-0" />
+            </Link>
+          )}
+
+          {/* The funnel: who has access → who submitted → what they asked for → what is confirmed back. */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Kpi
+              icon={Link2}
+              label="Unlocked"
+              value={String(kpis.unlockedCount)}
+              sub={kpis.unlockedCount === 0 ? "no one has opened the invite yet" : `${unlocked.length} not started`}
+            />
+            <Kpi
+              icon={CheckCircle2}
+              label="Submitted"
+              value={String(kpis.submitted)}
+              sub={kpis.drafts > 0 ? `${kpis.drafts} still drafting` : "no open drafts"}
+            />
+            <Kpi
+              icon={Wallet}
+              label="Requested"
+              value={fmtMoney(kpis.totalAmount, currency)}
+              sub={`${kpis.totalQty} item${kpis.totalQty === 1 ? "" : "s"} across submitted preorders`}
+            />
+            <Kpi
+              icon={Eye}
+              label="Published"
+              value={String(kpis.published)}
+              sub={`${kpis.registered} in Metakocka`}
+              accent
+            />
           </div>
 
           {/* Latest preorders */}
@@ -184,50 +212,38 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
 // static chrome (buttons, labels, headers) renders for real.
 const KPI_META: { icon: React.ElementType; label: string; accent?: boolean }[] = [
   { icon: Link2, label: "Unlocked" },
-  { icon: Users, label: "Preorders" },
   { icon: CheckCircle2, label: "Submitted" },
-  { icon: Package, label: "Items" },
-  { icon: Wallet, label: "Requested value" },
-  { icon: ShoppingCart, label: "In Metakocka" },
+  { icon: Wallet, label: "Requested" },
   { icon: Eye, label: "Published", accent: true },
-  { icon: AlertTriangle, label: "Integration failures" },
 ];
 
 function OverviewSkeleton({ campaignId }: { campaignId: string }) {
   return (
     <div className="flex flex-col h-full">
-      <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="flex items-center gap-3 px-4 md:px-6 h-14">
-          <Link href="/preorder" className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back">
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
-          <div className="min-w-0">
-            {/* text-[15px] leading-tight → 18.75px; pill row text-[11px] → 19.5px */}
-            <SkeletonLine lh="h-[19px]" h="h-3.5" w="w-48" />
-            <div className="flex items-center gap-2 h-[19.5px]">
-              <Skeleton className="h-[19.5px] w-12 rounded-full" delay={40} />
-              <Skeleton className="h-2.5 w-24" delay={60} />
-            </div>
-          </div>
-          <div className="flex-1" />
-          <Button variant="outline" size="sm" className="h-8" disabled><Link2 className="w-3.5 h-3.5" /> Copy invite link</Button>
-          <Button variant="outline" size="sm" className="h-8" disabled><UserPlus className="w-3.5 h-3.5" /> Fill for customer</Button>
-        </div>
-        <div className="px-4 md:px-6 pb-2">
-          <CampaignNav campaignId={campaignId} active="overview" compact />
-        </div>
-      </header>
+      <CampaignHeader
+        campaignId={campaignId}
+        active="overview"
+        title={<SkeletonLine lh="h-[19px]" h="h-3.5" w="w-48" />}
+        meta={<><Skeleton className="h-[16.5px] w-12 rounded-full" delay={40} /><Skeleton className="h-2.5 w-24" delay={60} /></>}
+        actions={
+          <>
+            <Button variant="outline" size="sm" className="h-8" disabled><Link2 className="w-3.5 h-3.5" /> Copy invite link</Button>
+            <Button variant="outline" size="sm" className="h-8" disabled><UserPlus className="w-3.5 h-3.5" /> Fill for customer</Button>
+          </>
+        }
+      />
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
         <div className="space-y-5">
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {KPI_META.map(({ icon: Icon, label, accent }, i) => (
-              <div key={label} className={cn("rounded-xl border p-3", accent ? "border-lime-300 dark:border-lime-800/60 bg-lime-50/60 dark:bg-lime-950/20" : "border-border bg-surface")}>
+              <div key={label} className={cn("rounded-xl border px-4 py-3.5", accent ? "border-lime-300 dark:border-lime-800/60 bg-lime-50/60 dark:bg-lime-950/20" : "border-border bg-surface")}>
                 <div className={cn("flex items-center gap-1.5 text-[11px]", accent ? "text-lime-700 dark:text-lime-400" : "text-muted-foreground")}>
                   <Icon className="w-3.5 h-3.5" /> {label}
                 </div>
-                {/* text-[20px] leading-none → 20px */}
-                <Skeleton className="h-5 w-16 mt-1" delay={stagger(i, 60)} />
+                {/* text-[24px] leading-none → 24px, then the 11px sub-line */}
+                <Skeleton className="h-6 w-16 mt-1.5" delay={stagger(i, 60)} />
+                <Skeleton className="h-2.5 w-24 mt-2" delay={stagger(i, 60, 30)} />
               </div>
             ))}
           </div>
@@ -245,22 +261,20 @@ function OverviewSkeleton({ campaignId }: { campaignId: string }) {
   );
 }
 
-function Kpi({ icon: Icon, label, value, accent, danger }: { icon: React.ElementType; label: string; value: string; accent?: boolean; danger?: boolean }) {
+// One funnel step: label, the headline number, and a one-line context under it.
+function Kpi({ icon: Icon, label, value, sub, accent }: { icon: React.ElementType; label: string; value: string; sub: string; accent?: boolean }) {
   return (
     <div
       className={cn(
-        "rounded-xl border p-3",
-        danger
-          ? "border-rose-300 dark:border-rose-800/60 bg-rose-50/60 dark:bg-rose-950/20"
-          : accent
-            ? "border-lime-300 dark:border-lime-800/60 bg-lime-50/60 dark:bg-lime-950/20"
-            : "border-border bg-surface",
+        "rounded-xl border px-4 py-3.5",
+        accent ? "border-lime-300 dark:border-lime-800/60 bg-lime-50/60 dark:bg-lime-950/20" : "border-border bg-surface",
       )}
     >
-      <div className={cn("flex items-center gap-1.5 text-[11px]", danger ? "text-rose-700 dark:text-rose-400" : accent ? "text-lime-700 dark:text-lime-400" : "text-muted-foreground")}>
+      <div className={cn("flex items-center gap-1.5 text-[11px]", accent ? "text-lime-700 dark:text-lime-400" : "text-muted-foreground")}>
         <Icon className="w-3.5 h-3.5" /> {label}
       </div>
-      <div className="text-[20px] font-bold tabular-nums text-foreground mt-1 leading-none">{value}</div>
+      <div className="text-[24px] font-bold tabular-nums text-foreground mt-1.5 leading-none">{value}</div>
+      <div className="text-[11px] text-muted-foreground mt-2 truncate">{sub}</div>
     </div>
   );
 }

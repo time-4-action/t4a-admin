@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { ReceiptText, ClipboardList, Building2, LogOut, Menu, X, ShoppingCart } from "lucide-react";
+import { ReceiptText, FileMinus, ClipboardList, Building2, LogOut, Menu, X, ShoppingCart } from "lucide-react";
 
 // The B2B customer portal shell. Shown to any authenticated non-admin (they hold
 // no role; their documents are matched by email inside the portal). Deliberately
@@ -16,6 +16,7 @@ type PortalUser = { name?: string | null; email?: string | null; picture?: strin
 const links = [
   { href: "/portal/preorders", label: "Preorders", icon: ShoppingCart },
   { href: "/portal/invoices", label: "Invoices", icon: ReceiptText },
+  { href: "/portal/credit-notes", label: "Credit notes", icon: FileMinus },
   { href: "/portal/orders", label: "Orders", icon: ClipboardList },
   { href: "/portal/account", label: "My Account", icon: Building2 },
 ];

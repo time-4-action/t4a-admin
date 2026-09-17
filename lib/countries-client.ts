@@ -20,14 +20,6 @@ export function isEuropean(iso: string | null | undefined): boolean {
   return !!iso && EUROPE_SET.has(iso.toUpperCase());
 }
 
-// Regional-indicator flag emoji for an ISO-2 code ("SI" → 🇸🇮). Empty for unknown input.
-export function flagEmoji(iso: string | null | undefined): string {
-  if (!iso || !/^[A-Za-z]{2}$/.test(iso)) return "";
-  const base = 0x1f1e6;
-  const up = iso.toUpperCase();
-  return String.fromCodePoint(base + up.charCodeAt(0) - 65, base + up.charCodeAt(1) - 65);
-}
-
 export function normalizeIso(iso: string | null | undefined): string | null {
   if (!iso) return null;
   const up = iso.trim().toUpperCase();

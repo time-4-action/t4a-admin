@@ -3,7 +3,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { CampaignNav } from "@/app/preorder/[campaignId]/campaign-nav";
+import { CampaignHeader } from "@/app/preorder/[campaignId]/campaign-nav";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +23,7 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
+  AlertTriangle,
   ChevronsDownUp,
   ChevronsUpDown,
   Loader2,
@@ -36,8 +37,6 @@ import {
   EyeOff,
   Upload,
   FileSpreadsheet,
-  LayoutDashboard,
-  Tag,
   RefreshCw,
   GripVertical,
   Percent,
@@ -373,7 +372,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
     [campaign, activeTabId],
   );
 
-  if (loading) return <BuilderSkeleton />;
+  if (loading) return <BuilderSkeleton campaignId={campaignId} />;
   if (error && !campaign) {
     return (
       <div className="p-8">
@@ -388,98 +387,99 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
 
   return (
     <div className="flex flex-col h-full">
-      <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-20">
-        <div className="flex items-center gap-3 px-4 md:px-6 h-14">
-          <Link href="/preorder" className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back to campaigns">
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
-          <Input
-            value={campaign.title}
-            onChange={(e) => mutate((c) => ({ ...c, title: e.target.value }))}
-            className="h-8 w-48 md:w-72 text-sm font-medium bg-background"
-            aria-label="Campaign title"
+      <CampaignHeader
+        campaignId={campaignId}
+        active="sheet"
+        title={
+          <div className="flex items-center gap-2">
+            <Input
+              value={campaign.title}
+              onChange={(e) => mutate((c) => ({ ...c, title: e.target.value }))}
+              className="h-8 w-48 md:w-72 text-sm font-medium bg-background"
+              aria-label="Campaign title"
+            />
+            <span className={cn(
+              "hidden sm:inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium shrink-0",
+              campaign.status === "open" ? "bg-lime-100 text-lime-700 dark:bg-lime-900/50 dark:text-lime-300"
+                : campaign.status === "closed" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300"
+                : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+            )}>
+              {campaign.status}
+            </span>
+          </div>
+        }
+        actions={
+          <>
+            <span
+              className="text-[11px] text-muted-foreground inline-flex items-center gap-1 min-w-[70px] justify-end"
+              title="Changes save automatically"
+            >
+              {saving ? (
+                <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</>
+              ) : dirty ? (
+                <><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Unsaved</>
+              ) : savedAt ? (
+                <><Check className="w-3.5 h-3.5 text-lime-600" /> Saved</>
+              ) : null}
+            </span>
+            {campaign.status === "open" ? (
+              <Button variant="outline" size="sm" onClick={() => save("draft")} disabled={saving} className="h-8"><EyeOff className="w-3.5 h-3.5" /> Unpublish</Button>
+            ) : (
+              <Button size="sm" onClick={() => save("open")} disabled={saving} className="h-8"><Rocket className="w-3.5 h-3.5" /> Publish</Button>
+            )}
+          </>
+        }
+      />
+      {/* Campaign settings toolbar — page-specific, so it sits below the shared header. */}
+      <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6 py-2.5 flex flex-wrap items-end gap-x-5 gap-y-3">
+        <SettingsField label="Season">
+          <Input value={campaign.season ?? ""} onChange={(e) => mutate((c) => ({ ...c, season: e.target.value }))} className="h-8 w-36 text-[12px] bg-background" placeholder="e.g. 2026" />
+        </SettingsField>
+        <SettingsField label="Deadline">
+          <DatePicker
+            value={campaign.deadline ?? null}
+            withTime
+            placeholder="Set deadline"
+            onChange={(iso) => mutate((c) => ({ ...c, deadline: iso }))}
+            triggerClassName="h-8"
           />
-          <span className={cn(
-            "hidden sm:inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium shrink-0",
-            campaign.status === "open" ? "bg-lime-100 text-lime-700 dark:bg-lime-900/50 dark:text-lime-300"
-              : campaign.status === "closed" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300"
-              : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
-          )}>
-            {campaign.status}
-          </span>
-          <div className="flex-1" />
-          <span
-            className="text-[11px] text-muted-foreground inline-flex items-center gap-1 min-w-[70px] justify-end"
-            title="Changes save automatically"
+        </SettingsField>
+        <div className="hidden md:block w-px h-8 bg-border" aria-hidden />
+        <SettingsField label="RRP price list" hint="Recommended retail prices shown next to the partner price">
+          <PricelistSelect
+            label="RRP list"
+            value={campaign.rrpPricelist ?? null}
+            pricelists={pricelists}
+            onChange={(v) => mutate((c) => ({ ...c, rrpPricelist: v }))}
+          />
+        </SettingsField>
+        <SettingsField label="Partner price list" hint="The price list the sheet's row prices come from">
+          <PricelistSelect
+            label="Partner list"
+            value={campaign.partnerPricelist ?? null}
+            pricelists={pricelists}
+            onChange={(v) => mutate((c) => ({ ...c, partnerPricelist: v }))}
+          />
+        </SettingsField>
+        <div className="flex items-center gap-2 h-8">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 bg-background"
+            onClick={reprice}
+            disabled={repricing}
+            title="Re-apply the selected price lists to every catalogue row on the sheet"
           >
-            {saving ? (
-              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</>
-            ) : dirty ? (
-              <><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Unsaved</>
-            ) : savedAt ? (
-              <><Check className="w-3.5 h-3.5 text-lime-600" /> Saved</>
-            ) : null}
-          </span>
-          <Link href={`/preorder/${campaignId}/preview`} className="hidden md:inline-flex" title="Preview as partner">
-            <Button variant="ghost" size="sm" className="h-8"><Eye className="w-3.5 h-3.5" /> Preview</Button>
-          </Link>
-          <Link href={`/preorder/${campaignId}`} className="hidden lg:inline-flex" title="Campaign overview">
-            <Button variant="ghost" size="sm" className="h-8"><LayoutDashboard className="w-3.5 h-3.5" /> Overview</Button>
-          </Link>
-          {campaign.status === "open" ? (
-            <Button variant="outline" size="sm" onClick={() => save("draft")} disabled={saving} className="h-8"><EyeOff className="w-3.5 h-3.5" /> Unpublish</Button>
-          ) : (
-            <Button size="sm" onClick={() => save("open")} disabled={saving} className="h-8"><Rocket className="w-3.5 h-3.5" /> Publish</Button>
+            {repricing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            Re-price sheet
+          </Button>
+          {repricedAt && !repricing && (
+            <span className="text-[11px] text-lime-600 dark:text-lime-400 inline-flex items-center gap-1">
+              <Check className="w-3 h-3" /> Repriced
+            </span>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 md:px-6 pb-2.5 text-[12px]">
-          <CampaignNav campaignId={campaignId} active="sheet" compact className="mr-2" />
-          <label className="flex items-center gap-1.5 text-muted-foreground">
-            Season
-            <Input value={campaign.season ?? ""} onChange={(e) => mutate((c) => ({ ...c, season: e.target.value }))} className="h-7 w-32 text-xs bg-background" placeholder="—" />
-          </label>
-          <label className="flex items-center gap-1.5 text-muted-foreground">
-            Deadline
-            <DatePicker
-              value={campaign.deadline ?? null}
-              withTime
-              placeholder="Set deadline"
-              onChange={(iso) => mutate((c) => ({ ...c, deadline: iso }))}
-            />
-          </label>
-          <div className="flex items-center gap-1.5 text-muted-foreground">
-            <Tag className="w-3.5 h-3.5 opacity-60" />
-            <PricelistSelect
-              label="RRP list"
-              value={campaign.rrpPricelist ?? null}
-              pricelists={pricelists}
-              onChange={(v) => mutate((c) => ({ ...c, rrpPricelist: v }))}
-            />
-            <PricelistSelect
-              label="Partner list"
-              value={campaign.partnerPricelist ?? null}
-              pricelists={pricelists}
-              onChange={(v) => mutate((c) => ({ ...c, partnerPricelist: v }))}
-            />
-            <Button
-              variant="ghost"
-              size="xs"
-              className="h-7 text-muted-foreground"
-              onClick={reprice}
-              disabled={repricing}
-              title="Re-apply the selected price lists to every catalogue row on the sheet"
-            >
-              {repricing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-              Re-price
-            </Button>
-            {repricedAt && !repricing && (
-              <span className="text-[11px] text-lime-600 dark:text-lime-400 inline-flex items-center gap-1">
-                <Check className="w-3 h-3" /> Repriced
-              </span>
-            )}
-          </div>
-        </div>
-      </header>
+      </div>
 
       <div className="flex-1 min-h-0 flex">
         {/* Tab rail */}
@@ -522,9 +522,13 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <Input value={activeTab.name} onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, name: e.target.value }))} className="h-9 max-w-xs text-sm font-semibold bg-background" aria-label="Tab name" />
-                <Input value={activeTab.discountNote ?? ""} onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, discountNote: e.target.value }))} className="h-9 max-w-xs text-xs bg-background" placeholder="Discount note (optional)" />
+              <div className="rounded-xl border border-border bg-surface px-4 py-3 flex flex-wrap items-end gap-x-5 gap-y-3">
+                <SettingsField label="Tab name">
+                  <Input value={activeTab.name} onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, name: e.target.value }))} className="h-8 w-56 text-[13px] font-semibold bg-background" aria-label="Tab name" />
+                </SettingsField>
+                <SettingsField label="Discount note" hint="Free-text hint shown to the partner under this tab's name">
+                  <Input value={activeTab.discountNote ?? ""} onChange={(e) => mutateTab(activeTab.id, (t) => ({ ...t, discountNote: e.target.value }))} className="h-8 w-80 text-[12px] bg-background" placeholder="Optional — shown to partners under the tab" />
+                </SettingsField>
                 <div className="flex-1" />
                 {activeTab.groups.length > 0 && (() => {
                   const allCollapsed = activeTab.groups.every((g) => collapsed.has(g.id));
@@ -545,7 +549,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                     </Button>
                   );
                 })()}
-                <Button variant="ghost" size="sm" onClick={() => deleteTab(activeTab.id)} className="h-8 text-destructive hover:text-destructive">
+                <Button variant="ghost" size="sm" onClick={() => deleteTab(activeTab.id)} className="h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
                   <Trash2 className="w-3.5 h-3.5" /> Delete tab
                 </Button>
               </div>
@@ -982,18 +986,30 @@ function TierEditor({
 
   return (
     <div className="rounded-xl border border-border bg-surface">
-      <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+      <div className="flex items-center gap-3 px-4 py-3">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
-          className="flex items-center gap-1.5 text-[13px] font-medium text-foreground hover:text-lime-600 transition-colors shrink-0"
+          aria-expanded={open}
+          className="flex items-center gap-3 min-w-0 text-left group"
         >
-          {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-          <Percent className="w-3.5 h-3.5 text-lime-600" />
-          Volume discounts
+          <span className="w-8 h-8 rounded-lg bg-lime-600/10 text-lime-700 dark:text-lime-300 flex items-center justify-center shrink-0">
+            <Percent className="w-4 h-4" />
+          </span>
+          <span className="min-w-0">
+            <span className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground group-hover:text-lime-700 dark:group-hover:text-lime-300 transition-colors">
+              Volume discounts
+              <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
+            </span>
+            <span className="block text-[11px] text-muted-foreground truncate">
+              {ladder.length === 0
+                ? "No tiers — this tab is always at list price."
+                : `${ladder.length} tier${ladder.length === 1 ? "" : "s"} · best case −${ladder[ladder.length - 1].discountPct}% from ${fmtMoney(ladder[ladder.length - 1].minAmount, currency)}`}
+            </span>
+          </span>
         </button>
-        {ladder.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-1">
+        {ladder.length > 0 && (
+          <div className="hidden lg:flex flex-wrap items-center gap-1 ml-2">
             {ladder.map((t) => (
               <span
                 key={t.id}
@@ -1007,23 +1023,21 @@ function TierEditor({
               </span>
             ))}
           </div>
-        ) : (
-          <span className="text-[12px] text-muted-foreground">None — this tab is always at list price.</span>
         )}
         <div className="flex-1" />
         {warnings.length > 0 && (
-          <span className="text-[11px] text-amber-600 dark:text-amber-400" title={warnings.join("\n")}>
-            {warnings.length} note{warnings.length === 1 ? "" : "s"}
+          <span className="inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400" title={warnings.join("\n")}>
+            <AlertTriangle className="w-3.5 h-3.5" /> {warnings.length} note{warnings.length === 1 ? "" : "s"}
           </span>
         )}
-        <Button variant="ghost" size="xs" className="h-7 text-muted-foreground" onClick={addTier}>
-          <Plus className="w-3 h-3" /> Add tier
+        <Button variant="outline" size="sm" className="h-8 bg-background" onClick={addTier}>
+          <Plus className="w-3.5 h-3.5" /> Add tier
         </Button>
       </div>
 
       {open && (
-        <div className="border-t border-border px-3 py-3 space-y-2.5">
-          <p className="text-[11px] text-muted-foreground">
+        <div className="border-t border-border px-4 py-4 space-y-3">
+          <p className="rounded-lg bg-muted/40 px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
             Reach a spend inside <span className="font-medium text-foreground">{tab.name || "this tab"}</span> and every
             line in it drops by that tier&rsquo;s percentage. Tiers don&rsquo;t stack — only the highest one reached
             applies, and every tab is counted on its own. Thresholds are the totals the partner sees (incl. VAT).
@@ -1033,20 +1047,22 @@ function TierEditor({
             <button
               type="button"
               onClick={addTier}
-              className="w-full rounded-lg border border-dashed border-border py-3 text-[12px] text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+              className="w-full rounded-lg border border-dashed border-border py-6 flex flex-col items-center gap-1.5 text-muted-foreground hover:text-foreground hover:border-foreground/30 hover:bg-muted/30 transition-colors"
             >
-              <Plus className="w-3.5 h-3.5 inline mr-1" /> Add the first tier
+              <Percent className="w-5 h-5 opacity-50" />
+              <span className="text-[12px] font-medium">Add the first tier</span>
+              <span className="text-[11px]">e.g. −5% once the partner spends {fmtMoney(10000, currency)} in this tab</span>
             </button>
           ) : (
             <div className="space-y-1.5">
-              <div className="hidden sm:grid grid-cols-[1fr_150px_110px_32px] gap-2 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-1">
+              <div className="hidden sm:grid grid-cols-[minmax(0,320px)_150px_110px_32px] gap-2 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-1">
                 <span>Tier name</span>
                 <span>Spend at least</span>
                 <span>Discount</span>
                 <span />
               </div>
               {tiers.map((t, i) => (
-                <div key={t.id} className="grid grid-cols-[1fr_150px_110px_32px] gap-2 items-center">
+                <div key={t.id} className="grid grid-cols-[minmax(0,320px)_150px_110px_32px] gap-2 items-center">
                   <Input
                     value={t.name}
                     onChange={(e) => update(t.id, { name: e.target.value })}
@@ -1110,13 +1126,8 @@ function TierEditor({
             </ul>
           )}
 
-          <div className="flex items-center justify-between gap-2 pt-1">
-            <span className="text-[11px] text-muted-foreground">
-              {ladder.length > 0
-                ? `Best case: −${ladder[ladder.length - 1].discountPct}% on everything in this tab from ${fmtMoney(ladder[ladder.length - 1].minAmount, currency)}.`
-                : ""}
-            </span>
-            {otherTabCount > 0 && tiers.length > 0 && (
+          {otherTabCount > 0 && tiers.length > 0 && (
+            <div className="flex items-center justify-end pt-1">
               <Button
                 variant="ghost"
                 size="xs"
@@ -1131,8 +1142,8 @@ function TierEditor({
                 {copied ? <Check className="w-3 h-3 text-lime-600" /> : <Copy className="w-3 h-3" />}
                 {copied ? "Copied to all tabs" : `Copy to all ${otherTabCount + 1} tabs`}
               </Button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1140,6 +1151,16 @@ function TierEditor({
 }
 
 const PL_NONE = "__none__";
+/** A labelled control in the sheet settings toolbar: 10px caps label over the field. */
+function SettingsField({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <label className="flex flex-col gap-1 min-w-0" title={hint}>
+      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground leading-none">{label}</span>
+      {children}
+    </label>
+  );
+}
+
 function PricelistSelect({
   label, value, pricelists, onChange,
 }: {
@@ -1156,7 +1177,7 @@ function PricelistSelect({
       value={value ?? PL_NONE}
       onValueChange={(v) => onChange(v === PL_NONE ? null : v)}
     >
-      <SelectTrigger size="sm" className="h-7 w-[150px] text-xs bg-background">
+      <SelectTrigger size="sm" className="h-8 w-[220px] text-[12px] bg-background [&>span]:truncate">
         <SelectValue placeholder={label} />
       </SelectTrigger>
       <SelectContent>
@@ -1392,41 +1413,37 @@ function ProductRowsSkeleton() {
  * the editor column with its name inputs, tier card, add-actions strip and a
  * couple of collapsed group cards.
  */
-function BuilderSkeleton() {
+function BuilderSkeleton({ campaignId }: { campaignId: string }) {
   return (
     <div className="flex flex-col h-full">
-      <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-20">
-        <div className="flex items-center gap-3 px-4 md:px-6 h-14">
-          <Link href="/preorder" className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back to campaigns">
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
-          <Skeleton className="h-8 w-48 md:w-72 rounded-md" />
-          <Skeleton className="hidden sm:block h-[20.5px] w-12 rounded-full" delay={40} />
-          <div className="flex-1" />
-          <span className="min-w-[70px]" />
-          <span className="hidden md:inline-flex"><Button variant="ghost" size="sm" className="h-8" disabled><Eye className="w-3.5 h-3.5" /> Preview</Button></span>
-          <span className="hidden lg:inline-flex"><Button variant="ghost" size="sm" className="h-8" disabled><LayoutDashboard className="w-3.5 h-3.5" /> Overview</Button></span>
-          <Skeleton className="h-8 w-[92px] rounded-md" delay={80} />
-        </div>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 md:px-6 pb-2.5 text-[12px]">
-          <label className="flex items-center gap-1.5 text-muted-foreground">
-            Season
-            <Skeleton className="h-7 w-32 rounded-md" delay={100} />
-          </label>
-          <label className="flex items-center gap-1.5 text-muted-foreground">
-            Deadline
-            <Skeleton className="h-7 w-40 rounded-md" delay={120} />
-          </label>
-          <div className="flex items-center gap-1.5 text-muted-foreground">
-            <Tag className="w-3.5 h-3.5 opacity-60" />
-            <Skeleton className="h-7 w-[150px] rounded-md" delay={140} />
-            <Skeleton className="h-7 w-[150px] rounded-md" delay={160} />
-            <Button variant="ghost" size="xs" className="h-7 text-muted-foreground" disabled>
-              <RefreshCw className="w-3 h-3" /> Re-price
-            </Button>
+      <CampaignHeader
+        campaignId={campaignId}
+        active="sheet"
+        title={
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-8 w-48 md:w-72 rounded-md" />
+            <Skeleton className="hidden sm:block h-[20.5px] w-12 rounded-full" delay={40} />
           </div>
+        }
+        actions={
+          <>
+            <span className="min-w-[70px]" />
+            <Skeleton className="h-8 w-[92px] rounded-md" delay={80} />
+          </>
+        }
+      />
+      <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6 py-2.5 flex flex-wrap items-end gap-x-5 gap-y-3">
+        <SettingsField label="Season"><Skeleton className="h-8 w-36 rounded-md" delay={100} /></SettingsField>
+        <SettingsField label="Deadline"><Skeleton className="h-8 w-44 rounded-md" delay={120} /></SettingsField>
+        <div className="hidden md:block w-px h-8 bg-border" aria-hidden />
+        <SettingsField label="RRP price list"><Skeleton className="h-8 w-[220px] rounded-md" delay={140} /></SettingsField>
+        <SettingsField label="Partner price list"><Skeleton className="h-8 w-[220px] rounded-md" delay={160} /></SettingsField>
+        <div className="flex items-center h-8">
+          <Button variant="outline" size="sm" className="h-8 bg-background" disabled>
+            <RefreshCw className="w-3.5 h-3.5" /> Re-price sheet
+          </Button>
         </div>
-      </header>
+      </div>
 
       <div className="flex-1 min-h-0 flex">
         <aside className="w-44 md:w-52 shrink-0 border-r border-border overflow-y-auto p-2 space-y-1">
@@ -1443,19 +1460,24 @@ function BuilderSkeleton() {
 
         <main className="flex-1 min-w-0 overflow-y-auto p-4 md:p-6">
           <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Skeleton className="h-9 w-full max-w-xs rounded-md" />
-              <Skeleton className="h-9 w-full max-w-xs rounded-md" delay={40} />
+            <div className="rounded-xl border border-border bg-surface px-4 py-3 flex flex-wrap items-end gap-x-5 gap-y-3">
+              <SettingsField label="Tab name"><Skeleton className="h-8 w-56 rounded-md" /></SettingsField>
+              <SettingsField label="Discount note"><Skeleton className="h-8 w-80 rounded-md" delay={40} /></SettingsField>
               <div className="flex-1" />
             </div>
             <div className="rounded-xl border border-border bg-surface">
-              <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-                <span className="flex items-center gap-1.5 text-[13px] font-medium text-foreground shrink-0">
-                  <ChevronRight className="w-3.5 h-3.5" />
-                  <Percent className="w-3.5 h-3.5 text-lime-600" />
-                  Volume discounts
+              <div className="flex items-center gap-3 px-4 py-3">
+                <span className="w-8 h-8 rounded-lg bg-lime-600/10 text-lime-700 dark:text-lime-300 flex items-center justify-center shrink-0">
+                  <Percent className="w-4 h-4" />
                 </span>
-                <SkeletonLine lh="h-[19.5px]" w="w-40" delay={60} />
+                <span className="min-w-0">
+                  <span className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
+                    Volume discounts <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                  </span>
+                  <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-48" delay={60} />
+                </span>
+                <div className="flex-1" />
+                <Button variant="outline" size="sm" className="h-8 bg-background" disabled><Plus className="w-3.5 h-3.5" /> Add tier</Button>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-border bg-muted/20 px-3 py-2.5">

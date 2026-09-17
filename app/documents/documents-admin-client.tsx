@@ -3,11 +3,11 @@ import { FileText } from "lucide-react";
 import CustomerHeader, { CustomerInfoStrip, CustomerInfoStripSkeleton } from "./customer-header";
 import { useSelectedCustomer } from "./use-customer";
 import { DocumentList, DocumentListSkeleton } from "./documents-shared";
-import { DOC_KIND_LABELS, type DocKind } from "@/types/documents";
+import { DOC_KIND_LABELS, DOC_KIND_SLUGS, type DocKind } from "@/types/documents";
 
 // Admin document list page (Invoices / Offers / Orders) for the selected customer.
 function slug(kind: DocKind): string {
-  return DOC_KIND_LABELS[kind].plural.toLowerCase();
+  return DOC_KIND_SLUGS[kind];
 }
 
 export default function DocumentsAdminClient({ kind }: { kind: DocKind }) {

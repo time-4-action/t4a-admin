@@ -9,10 +9,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Drawer, DrawerBody, DrawerHeader } from "@/components/ui/drawer";
 import { SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { MarketChip, SubmissionStageBadge } from "@/app/preorder/preorder-badges";
-import { flagEmoji } from "@/lib/countries-client";
+import { Flag } from "@/components/flag";
 import type { CustomerRow } from "@/lib/preorder-customers";
 import type { PreorderMarket } from "@/types/preorder";
-import type { MapCountryStat } from "./country-map";
+import type { CountryGeo } from "@/lib/preorder-customers";
+import { CustomerKindBadge } from "./tables";
 
 export function CountryDrawer({
   open,
@@ -31,7 +32,7 @@ export function CountryDrawer({
   iso: string | null;
   name: string;
   markets: PreorderMarket[];
-  stat: MapCountryStat | undefined;
+  stat: CountryGeo | undefined;
   onAssign: (marketId: string | null) => Promise<void>;
   onOpenCustomer: (partnerMkId: string) => void;
 }) {
@@ -67,8 +68,8 @@ export function CountryDrawer({
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerHeader
-        title={<span>{flagEmoji(iso)} {name}</span>}
-        description={stat ? `${stat.customers} customers · ${stat.unlocked} unlocked · ${stat.submitted} submitted` : "No customers in the directory"}
+        title={<span className="inline-flex items-center gap-2"><Flag iso={iso} className="text-[16px]" /> {name}</span>}
+        description={stat ? `${stat.customers} customers (${stat.business} companies, ${stat.person} individuals) · ${stat.unlocked} unlocked · ${stat.submitted} submitted` : "No customers in the directory"}
       />
       <DrawerBody className="space-y-4">
         <div className="rounded-lg border border-border bg-surface px-3 py-2.5">
@@ -123,6 +124,7 @@ export function CountryDrawer({
                         <div className="text-[12px] font-medium text-foreground truncate">{c.name}</div>
                         <div className="text-[11px] text-muted-foreground truncate">{[c.city, c.email].filter(Boolean).join(" · ") || c.countCode || c.partnerMkId}</div>
                       </div>
+                      <CustomerKindBadge kind={c.kind} compact />
                       {c.hasRule && <span className="rounded-full bg-lime-100 text-lime-700 dark:bg-lime-900/50 dark:text-lime-300 px-1.5 py-px text-[10px] font-medium">override</span>}
                       {c.stage ? <SubmissionStageBadge stage={c.stage} dot={false} /> : c.access ? <span className="text-[10px] text-muted-foreground">unlocked</span> : null}
                     </div>

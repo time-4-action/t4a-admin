@@ -48,16 +48,19 @@ function getCompanyId(): string {
 }
 
 // The raw MK doc_types behind each customer-facing family. Invoices span both
-// domestic and foreign sales bills ("invoices foreign" in the brief).
+// domestic and foreign sales bills ("invoices foreign" in the brief); credit
+// notes ("dobropis") are MK's `sales_bill_credit_note`.
 export const DOC_TYPES: Record<DocKind, string[]> = {
   offer: ["sales_offer"],
   order: ["sales_order"],
   invoice: ["sales_bill_domestic", "sales_bill_foreign"],
+  "credit-note": ["sales_bill_credit_note"],
 };
 
 function kindForDocType(docType: string): DocKind {
   if (docType === "sales_offer") return "offer";
   if (docType === "sales_order") return "order";
+  if (docType === "sales_bill_credit_note") return "credit-note";
   return "invoice";
 }
 
@@ -605,8 +608,11 @@ function reportIdForKind(kind: DocKind): string | undefined {
   // 38 (bill) and 37 (offer) are Metakocka's standard report templates and are
   // verified working on this account; both are env-overridable. Orders have no
   // reliable standard report, so order PDF is opt-in via MK_REPORT_ID_ORDER.
+  // Credit notes print through their own MK template, whose id is not fixed
+  // across accounts — opt in via MK_REPORT_ID_CREDIT_NOTE.
   if (kind === "invoice") return process.env.MK_REPORT_ID_INVOICE || "38";
   if (kind === "offer") return process.env.MK_REPORT_ID_OFFER || "37";
+  if (kind === "credit-note") return process.env.MK_REPORT_ID_CREDIT_NOTE || undefined;
   return process.env.MK_REPORT_ID_ORDER || undefined;
 }
 

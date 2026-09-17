@@ -39,6 +39,7 @@ import {
   Tags,
   FileText,
   ReceiptText,
+  FileMinus,
   ClipboardList,
   Building2,
   ShoppingCart,
@@ -129,6 +130,7 @@ const sections: NavSection[] = [
     links: [
       { href: "/documents/customer", label: "Customer", icon: Building2,     matchPrefix: true },
       { href: "/documents/invoices", label: "Invoices", icon: ReceiptText,   matchPrefix: true },
+      { href: "/documents/credit-notes", label: "Credit notes", icon: FileMinus, matchPrefix: true },
       { href: "/documents/offers",   label: "Offers",   icon: FileText,      matchPrefix: true },
       { href: "/documents/orders",   label: "Orders",   icon: ClipboardList, matchPrefix: true },
       { href: "/documents/access",   label: "Documents Access", icon: ShieldCheck, superAdminOnly: true },

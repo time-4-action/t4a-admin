@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import {
   DOC_KIND_LABELS,
+  isBillKind,
   type DocDetail,
   type DocKind,
   type DocLine,
@@ -79,6 +80,7 @@ export const KIND_ICON: Record<DocKind, React.ElementType> = {
   offer: FileText,
   order: ClipboardList,
   invoice: ReceiptText,
+  "credit-note": FileMinus,
 };
 
 // ── payment badge ────────────────────────────────────────────────────────────
@@ -204,7 +206,7 @@ export function DocumentList({
   hrefBase: string;
 }) {
   const state = useDocumentList(listUrl, kind);
-  const isInvoice = kind === "invoice";
+  const isBill = isBillKind(kind);
   const filters = useDocumentFilters(kind);
   const allItems = state.status === "ready" ? state.items : EMPTY_ITEMS;
   const sort = useDocumentSort(kind);
@@ -230,7 +232,7 @@ export function DocumentList({
     return (
       <div className="rounded-2xl border border-dashed border-border bg-surface px-4 py-12 text-center">
         <Icon className="mx-auto h-8 w-8 text-muted-foreground/40" />
-        <p className="mt-3 text-[13px] text-muted-foreground">No {kind}s yet.</p>
+        <p className="mt-3 text-[13px] text-muted-foreground">No {DOC_KIND_LABELS[kind].plural.toLowerCase()} yet.</p>
       </div>
     );
   }
@@ -239,7 +241,7 @@ export function DocumentList({
 
   return (
     <div className="space-y-4">
-      {isInvoice && <InvoiceSummary items={state.items} />}
+      {isBill && <BillSummary kind={kind} items={state.items} />}
       <div className="rounded-2xl border border-border bg-surface overflow-hidden">
         <DocumentFilterBar kind={kind} items={state.items} filters={filters} shown={filtered.length} />
 
@@ -248,7 +250,7 @@ export function DocumentList({
         <div className={cn(gridCols(kind), "hidden md:grid px-4 h-9 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border/60 bg-muted/25")}>
           <SortHeader col="doc" sort={sort}>{DOC_KIND_LABELS[kind].singular}</SortHeader>
           <SortHeader col="issued" sort={sort}>Issued</SortHeader>
-          {isInvoice && <SortHeader col="due" sort={sort}>Due</SortHeader>}
+          {isBill && <SortHeader col="due" sort={sort}>Due</SortHeader>}
           <SortHeader col="items" sort={sort} align="center">Items</SortHeader>
           <StatusHeader kind={kind} items={state.items} filters={filters} />
           <SortHeader col="amount" sort={sort} align="right">Amount</SortHeader>
@@ -283,7 +285,7 @@ export function DocumentList({
 // a table at any width — no single column swallows the slack. Mobile collapses
 // to document + amount; the hidden columns fold into the document cell.
 function gridCols(kind: DocKind): string {
-  return kind === "invoice"
+  return isBillKind(kind)
     ? "grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.5fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-4"
     : "grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,0.5fr)_minmax(0,1.2fr)_minmax(0,1fr)] items-center gap-x-4";
 }
@@ -345,12 +347,12 @@ function DocumentRow({
   activeStatus: string;
   onStatus: (key: string) => void;
 }) {
-  const isInvoice = d.kind === "invoice";
+  const isBill = isBillKind(d.kind);
   const fresh = isNewOrder(d);
   const key = statusKey(d);
   const status = (
     <StatusFilterTrigger active={activeStatus === key} label={statusLabel(d.kind, key)} onClick={() => onStatus(key)}>
-      {isInvoice ? (
+      {isBill ? (
         <PaymentBadge state={d.payment} />
       ) : d.kind === "order" ? (
         <OrderStatusPill d={d} />
@@ -359,8 +361,8 @@ function DocumentRow({
       )}
     </StatusFilterTrigger>
   );
-  const remaining = isInvoice ? amt(d.sumAll) - amt(d.sumPaid) : 0;
-  const partial = isInvoice && d.payment === "partial" && remaining > 0.005;
+  const remaining = isBill ? amt(d.sumAll) - amt(d.sumPaid) : 0;
+  const partial = isBill && d.payment === "partial" && remaining > 0.005;
 
   return (
     <Link
@@ -382,13 +384,13 @@ function DocumentRow({
           {fmtDate(d.docDate)}
           {d.title ? ` · ${d.title}` : ""}
         </p>
-        {isInvoice && (
+        {isBill && (
           <p className="md:hidden text-[12px] mt-1">
             <DueCell d={d} compact />
           </p>
         )}
         <div className="md:hidden mt-1.5 flex items-center gap-1.5">
-          {!isInvoice && isOnlineOrder(d) && <OnlineBadge />}
+          {!isBill && isOnlineOrder(d) && <OnlineBadge />}
           {status}
         </div>
       </div>
@@ -396,8 +398,8 @@ function DocumentRow({
       {/* Issued */}
       <p className="hidden md:block text-[13px] text-muted-foreground tabular-nums truncate">{fmtDate(d.docDate)}</p>
 
-      {/* Due (invoices) */}
-      {isInvoice && (
+      {/* Due (bills) */}
+      {isBill && (
         <div className="hidden md:block">
           <DueCell d={d} />
         </div>
@@ -408,7 +410,7 @@ function DocumentRow({
 
       {/* Status */}
       <div className="hidden md:flex items-center gap-1.5 min-w-0">
-        {!isInvoice && isOnlineOrder(d) && <OnlineBadge />}
+        {!isBill && isOnlineOrder(d) && <OnlineBadge />}
         {status}
       </div>
 
@@ -489,12 +491,12 @@ type DocFiltersApi = ReturnType<typeof useDocumentFilters>;
 // The status key a document is filtered by: invoices by payment state, orders
 // by MK's fulfilment status, anything else by its raw status text.
 function statusKey(d: DocSummary): string {
-  if (d.kind === "invoice") return d.payment ?? "na";
+  if (isBillKind(d.kind)) return d.payment ?? "na";
   return (d.statusDesc || d.statusCode || "").toLowerCase() || "unknown";
 }
 
 function statusLabel(kind: DocKind, key: string): string {
-  if (kind === "invoice") return key === "na" ? "Nothing due" : (PAYMENT_META[key as PaymentState]?.label ?? key);
+  if (isBillKind(kind)) return key === "na" ? "Nothing due" : (PAYMENT_META[key as PaymentState]?.label ?? key);
   if (kind === "order" && ORDER_STATUS_META[key]) return ORDER_STATUS_META[key].label;
   const pretty = key.replace(/_/g, " ");
   return pretty.charAt(0).toUpperCase() + pretty.slice(1);
@@ -722,12 +724,14 @@ function Pager({ total, paging, noun }: { total: number; paging: Paging; noun: s
   );
 }
 
-// Overview strip above an invoice list: total invoiced, paid, and outstanding
-// (with unpaid / overdue counts). Money tiles only render when every invoice
+// Overview strip above a bill list: total invoiced, paid, and outstanding
+// (with unpaid / overdue counts). Money tiles only render when every bill
 // shares one currency; otherwise counts are shown to avoid summing across
-// currencies.
-function InvoiceSummary({ items }: { items: DocSummary[] }) {
+// currencies. Credit notes are the mirror image — the amount credited, how
+// much of it has been refunded, and what is still open.
+function BillSummary({ kind, items }: { kind: DocKind; items: DocSummary[] }) {
   if (items.length === 0) return null;
+  const credit = kind === "credit-note";
   const currencies = Array.from(new Set(items.map((d) => d.currency).filter(Boolean)));
   const singleCurrency = currencies.length === 1 ? (currencies[0] as string) : undefined;
 
@@ -752,17 +756,17 @@ function InvoiceSummary({ items }: { items: DocSummary[] }) {
   return (
     <div className="grid grid-cols-3 rounded-2xl border border-border bg-surface overflow-hidden divide-x divide-border/60">
       <div className="px-4 py-3">
-        <p className="text-[11px] text-muted-foreground">Invoiced</p>
+        <p className="text-[11px] text-muted-foreground">{credit ? "Credited" : "Invoiced"}</p>
         <p className="text-[15px] font-bold text-foreground tabular-nums mt-0.5">{money(invoiced)}</p>
         <p className="text-[10px] text-muted-foreground mt-0.5">{items.length} total</p>
       </div>
       <div className="px-4 py-3">
-        <p className="text-[11px] text-muted-foreground">Paid</p>
+        <p className="text-[11px] text-muted-foreground">{credit ? "Refunded" : "Paid"}</p>
         <p className="text-[15px] font-bold text-emerald-600 dark:text-emerald-400 tabular-nums mt-0.5">{money(paid)}</p>
         <p className="text-[10px] text-muted-foreground mt-0.5">{items.length - unpaidCount} settled</p>
       </div>
       <div className="px-4 py-3">
-        <p className="text-[11px] text-muted-foreground">Outstanding</p>
+        <p className="text-[11px] text-muted-foreground">{credit ? "Open" : "Outstanding"}</p>
         <p
           className={cn(
             "text-[15px] font-bold tabular-nums mt-0.5",
@@ -776,7 +780,7 @@ function InvoiceSummary({ items }: { items: DocSummary[] }) {
           {money(outstanding)}
         </p>
         <p className="text-[10px] text-muted-foreground mt-0.5">
-          {unpaidCount} unpaid{overdueCount > 0 ? ` · ${overdueCount} overdue` : ""}
+          {unpaidCount} {credit ? "open" : "unpaid"}{overdueCount > 0 ? ` · ${overdueCount} overdue` : ""}
         </p>
       </div>
     </div>
@@ -923,9 +927,11 @@ function TotalRow({ label, value, strong }: { label: string; value?: string | nu
   );
 }
 
-// Invoice payment breakdown: paid so far, remaining balance, and the due date
-// (or the settled date once fully paid).
+// Bill payment breakdown: paid so far, remaining balance, and the due date
+// (or the settled date once fully paid). On a credit note the "payment" is the
+// refund owed to the customer, so the labels flip accordingly.
 function PaymentPanel({ detail }: { detail: DocDetail }) {
+  const credit = detail.kind === "credit-note";
   const remaining = Math.max(0, amt(detail.sumAll) - amt(detail.sumPaid));
   const fully = remaining <= 0.005;
   const overdue = detail.payment === "overdue";
@@ -933,12 +939,12 @@ function PaymentPanel({ detail }: { detail: DocDetail }) {
   return (
     <div className="rounded-2xl border border-border bg-surface overflow-hidden">
       <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
-        <span className="text-[12px] font-semibold text-foreground">Payment</span>
+        <span className="text-[12px] font-semibold text-foreground">{credit ? "Refund" : "Payment"}</span>
         <PaymentBadge state={detail.payment} />
       </div>
       <div className="grid grid-cols-3 divide-x divide-border/50">
         <div className="px-4 py-3">
-          <p className="text-[11px] text-muted-foreground">Paid</p>
+          <p className="text-[11px] text-muted-foreground">{credit ? "Refunded" : "Paid"}</p>
           <p className="text-[15px] font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums mt-0.5">
             {fmtMoney(detail.sumPaid ?? "0", c)}
           </p>
@@ -959,7 +965,7 @@ function PaymentPanel({ detail }: { detail: DocDetail }) {
           </p>
         </div>
         <div className="px-4 py-3">
-          <p className="text-[11px] text-muted-foreground">{fully ? "Paid on" : "Due date"}</p>
+          <p className="text-[11px] text-muted-foreground">{fully ? (credit ? "Refunded on" : "Paid on") : "Due date"}</p>
           <p
             className={cn(
               "text-[13px] font-medium mt-1",
@@ -991,12 +997,12 @@ export function DocumentDetail({
   showLinks?: boolean;
   wide?: boolean;
 }) {
-  const isInvoice = detail.kind === "invoice";
+  const isBill = isBillKind(detail.kind);
   const isOrder = detail.kind === "order";
   const currency = detail.currency;
   const online = isOnlineOrder(detail);
   const KindIcon = online ? Globe : KIND_ICON[detail.kind];
-  const kindLabel = online ? "Online order" : detail.kind.charAt(0).toUpperCase() + detail.kind.slice(1);
+  const kindLabel = online ? "Online order" : DOC_KIND_LABELS[detail.kind].singular;
   const productCount = detail.lines.filter((l) => !l.isText).length;
 
   return (
@@ -1021,12 +1027,12 @@ export function DocumentDetail({
               <span className="inline-flex items-center gap-1">
                 <Calendar className="h-3.5 w-3.5" /> Issued {fmtDate(detail.docDate)}
               </span>
-              {isInvoice && detail.dueDate && <span>· Due {fmtDate(detail.dueDate)}</span>}
+              {isBill && detail.dueDate && <span>· Due {fmtDate(detail.dueDate)}</span>}
               {detail.kind === "offer" && detail.validTo && <span>· Valid to {fmtDate(detail.validTo)}</span>}
             </div>
           </div>
           <div className="shrink-0">
-            {isInvoice ? (
+            {isBill ? (
               <PaymentBadge state={detail.payment} />
             ) : detail.kind === "order" ? (
               <OrderStatusPill d={detail} />
@@ -1066,8 +1072,8 @@ export function DocumentDetail({
         </div>
       )}
 
-      {/* Billing + delivery addresses (invoices and orders) */}
-      {(isInvoice || isOrder) && detail.partner && <AddressesCard detail={detail} />}
+      {/* Billing + delivery addresses (bills and orders) */}
+      {(isBill || isOrder) && detail.partner && <AddressesCard detail={detail} />}
 
       {/* Line items */}
       {detail.lines.length > 0 && (
@@ -1164,8 +1170,8 @@ export function DocumentDetail({
         </div>
       </div>
 
-      {/* Payment (invoices) */}
-      {isInvoice && <PaymentPanel detail={detail} />}
+      {/* Payment (bills) */}
+      {isBill && <PaymentPanel detail={detail} />}
 
       {/* Additional instructions (MK notes_header; rendered HTML, sanitized server-side) */}
       {detail.notes && (
@@ -1286,10 +1292,10 @@ function AddressesCard({ detail }: { detail: DocDetail }) {
 // shape between "loading" and "loaded".
 
 export function DocumentListSkeleton({ kind, rows = 8 }: { kind: DocKind; rows?: number }) {
-  const isInvoice = kind === "invoice";
+  const isBill = isBillKind(kind);
   return (
     <div className="space-y-4">
-      {isInvoice && (
+      {isBill && (
         <div className="grid grid-cols-3 rounded-2xl border border-border bg-surface overflow-hidden divide-x divide-border/60">
           {["Invoiced", "Paid", "Outstanding"].map((label, i) => (
             <div key={label} className="px-4 py-3">
@@ -1310,7 +1316,7 @@ export function DocumentListSkeleton({ kind, rows = 8 }: { kind: DocKind; rows?:
         <div className={cn(gridCols(kind), "hidden md:grid px-4 h-9 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border/60 bg-muted/25")}>
           <span className="self-center">{DOC_KIND_LABELS[kind].singular}</span>
           <span className="self-center">Issued</span>
-          {isInvoice && <span className="self-center">Due</span>}
+          {isBill && <span className="self-center">Due</span>}
           <span className="self-center text-center">Items</span>
           <span className="self-center">Status</span>
           <span className="self-center text-right">Amount</span>
@@ -1325,7 +1331,7 @@ export function DocumentListSkeleton({ kind, rows = 8 }: { kind: DocKind; rows?:
                 <div className="md:hidden mt-1.5"><Skeleton className="h-[20.5px] w-16 rounded-full" delay={stagger(i, 80, 60)} /></div>
               </div>
               <div className="hidden md:block"><SkeletonLine lh="h-[19.5px]" h="h-3" w="w-24" delay={stagger(i, 80, 30)} /></div>
-              {isInvoice && (
+              {isBill && (
                 <div className="hidden md:block">
                   {/* text-[15px] leading-tight → 18px; text-[11px] → 14px */}
                   <SkeletonLine lh="h-[18px]" h="h-3.5" w="w-28" delay={stagger(i, 80, 40)} />
@@ -1354,10 +1360,10 @@ export function DocumentDetailSkeleton({
   wide?: boolean;
   lines?: number;
 }) {
-  const isInvoice = kind === "invoice";
+  const isBill = isBillKind(kind);
   const isOrder = kind === "order";
   const KindIcon = KIND_ICON[kind];
-  const kindLabel = kind.charAt(0).toUpperCase() + kind.slice(1);
+  const kindLabel = DOC_KIND_LABELS[kind].singular;
   return (
     <div className={cn("px-4 md:px-8 py-6 md:py-8 space-y-4 overflow-y-auto h-full", wide ? "" : "max-w-5xl mx-auto")}>
       <span className="inline-block text-[12px] text-muted-foreground">← Back</span>
@@ -1373,7 +1379,7 @@ export function DocumentDetailSkeleton({
             <SkeletonLine lh="h-7 md:h-8" h="h-5 md:h-6" w="w-40" className="mt-1" delay={40} />
             <div className="mt-2 flex items-center gap-x-3">
               <SkeletonLine lh="h-[18px]" w="w-32" delay={80} />
-              {isInvoice && <SkeletonLine lh="h-[18px]" w="w-24" delay={100} />}
+              {isBill && <SkeletonLine lh="h-[18px]" w="w-24" delay={100} />}
             </div>
           </div>
           <Skeleton className="h-[20.5px] w-16 rounded-full shrink-0" delay={60} />
@@ -1401,8 +1407,8 @@ export function DocumentDetailSkeleton({
         </div>
       )}
 
-      {/* Addresses (invoices and orders) */}
-      {(isInvoice || isOrder) && (
+      {/* Addresses (bills and orders) */}
+      {(isBill || isOrder) && (
         <div className="rounded-2xl border border-border bg-surface overflow-hidden">
           <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center gap-2">
             <MapPin className="h-3.5 w-3.5 text-teal-500" />
@@ -1473,8 +1479,8 @@ export function DocumentDetailSkeleton({
         </div>
       </div>
 
-      {/* Payment (invoices) */}
-      {isInvoice && (
+      {/* Payment (bills) */}
+      {isBill && (
         <div className="rounded-2xl border border-border bg-surface overflow-hidden">
           <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
             <span className="text-[12px] font-semibold text-foreground">Payment</span>

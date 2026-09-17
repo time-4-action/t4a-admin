@@ -10,6 +10,7 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const res = await listMkCustomers({
     q: sp.get("q") ?? undefined,
+    kind: sp.get("kind") === "business" || sp.get("kind") === "person" ? (sp.get("kind") as "business" | "person") : null,
     countryIso: sp.get("country") || null,
     page: Number(sp.get("page") ?? 1) || 1,
     pageSize: Number(sp.get("pageSize") ?? 30) || 30,

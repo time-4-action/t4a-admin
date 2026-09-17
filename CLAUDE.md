@@ -13,7 +13,6 @@ npm run start    # Run the production build
 ```bash
 npm test             # vitest (preorder business logic; Mongo tests use mongodb-memory-server)
 npm run typecheck    # tsc --noEmit
-npm run geo:build    # regenerate public/geo/*.json from world-atlas (output is committed)
 ```
 
 No linter is configured.
@@ -78,7 +77,7 @@ MongoDB connection is cached on `global._mongooseConn` to survive Next.js hot-re
 | `PreorderCampaign` | `preordercampaigns` | One master order sheet (`tabs` → groups → rows) + embedded `markets[]`, `customerRules[]`, `priceBooks[]`, invite `shareToken`. See the Preorder module. |
 | `PreorderSubmission` | `preordersubmissions` | One partner's response per campaign (unique `(campaignId, partnerMkId)`): lines, totals, frozen `snapshot`, MK order reference `mkSalesOrder` + sync state `mkOrder`, publication flags, detached-order history. Indexes on `partnerMkId + mkOrder.state`, `mkSalesOrder.mkId`, `mkOrder.buyerOrder`. |
 | `PreorderAccess` | `preorderaccesses` | The invite grant (`(campaignId, partnerMkId)` unique) — the campaign access boundary. |
-| `MkCustomer` | `mkcustomers` | Directory of Metakocka partners (address, resolved country, manual country/pin, stale flag) feeding Markets & Customers; `MkCustomerSyncState` (singleton) tracks the full sync. |
+| `MkCustomer` | `mkcustomers` | Directory of Metakocka partners (address, tax id, resolved country, manual country, stale flag) feeding Markets & Customers; `MkCustomerSyncState` (singleton) tracks the full sync. |
 
 ### Dev-User Filtering
 
@@ -523,17 +522,21 @@ own "Shipped" column shows; the REST API has no per-line figure and no
 line-level link, so a product added to the note before the order is the one
 known mismatch),
 `getDocumentPdf(kind, mkId)`
-(`/report`, needs a report_id). `DocKind` = `offer | order | invoice`. Server-side
+(`/report`, needs a report_id). `DocKind` = `offer | order | invoice | credit-note`
+(`credit-note` = MK `sales_bill_credit_note`; `BILL_KINDS` / `isBillKind` in
+`types/documents.ts` group invoices + credit notes as the bill-shaped families
+that carry a due date and payment state; `DOC_KIND_SLUGS` maps a kind to its URL
+segment). Server-side
 partner resolution for the portal lives in `lib/portal.ts` (`getSessionPartner`).
 
 | Page | Path | Notes |
 |---|---|---|
 | Portal (customer) | `/portal` → `/portal/invoices` | B2B shell; own docs only. |
-| Invoices / Orders | `/portal/{invoices,orders}` | List as one table card: toolbar (search by number/title + count), proportional grid columns (Issued / Due / Items / Status / Amount); column headings sort (click toggles direction), the **Status heading is the status select**, and clicking a row's status pill filters too; 25-per-page client-side pager. The API returns the complete list, so filtering + paging are purely client-side (`DocumentList` in `documents-shared.tsx`). The invoice **Due** column is the large, urgency-coloured cell (rose + "n days overdue", amber within 7 days). **Offers are never shown to customers** — no page, nav link, API `type`, or PDF; the whole **Related documents** card is admin-only (`showLinks={false}` in the portal) (`PORTAL_DOC_KINDS` / `isPortalDocKind` in `lib/portal.ts`); admins still browse them under `/documents`. |
+| Invoices / Credit notes / Orders | `/portal/{invoices,credit-notes,orders}` | List as one table card: toolbar (search by number/title + count), proportional grid columns (Issued / Due / Items / Status / Amount); column headings sort (click toggles direction), the **Status heading is the status select**, and clicking a row's status pill filters too; 25-per-page client-side pager. The API returns the complete list, so filtering + paging are purely client-side (`DocumentList` in `documents-shared.tsx`). The invoice **Due** column is the large, urgency-coloured cell (rose + "n days overdue", amber within 7 days). **Credit notes** render with the same bill layout (Due / payment badge / summary strip / payment panel) with refund wording (Credited / Refunded / Open). **Offers are never shown to customers** — no page, nav link, API `type`, or PDF; the whole **Related documents** card is admin-only (`showLinks={false}` in the portal) (`PORTAL_DOC_KINDS` / `isPortalDocKind` in `lib/portal.ts`); admins still browse them under `/documents`. |
 | Detail | `/portal/{…}/[mkId]` | Full doc + **Download PDF**. Ownership re-checked. Invoices and orders show a **Billing / Delivery address** card (MK `partner` / `receiver`; no `receiver` = same as billing). Order lines carry a **Shipped** column. |
 | No account | `/portal/no-account` | Email not matched to a partner. |
 | Customer picker (admin) | `/documents` | Search a partner by name/email/tax. |
-| Customer docs (admin) | `/documents/[partnerMkId]` | Offers/Orders/Invoices tabs. |
+| Customer docs (admin) | `/documents/[partnerMkId]` | Offers/Orders/Invoices/Credit notes tabs. |
 | Detail (admin) | `/documents/[partnerMkId]/[kind]/[mkId]` | Same detail view, any partner. |
 
 | Proxy route | Methods |
@@ -566,13 +569,14 @@ MK_REST_BASE=https://main.metakocka.si   # optional (default)
 MK_REPORT_ID_INVOICE=38   # optional — defaults to MK's standard bill report (verified)
 MK_REPORT_ID_OFFER=37     # optional — defaults to MK's standard offer report (verified)
 MK_REPORT_ID_ORDER=<id>   # optional — no default; set to enable the order PDF button
+MK_REPORT_ID_CREDIT_NOTE=<id>  # optional — no default; set to enable the credit note PDF button
 MK_REPORT_BACKGROUND_IMAGE_ID=<id>  # optional — pin a specific MK letterhead image
 MK_REPORT_LOCALE=en       # optional — force the report language; default: MK picks per document
 ```
 
-Invoice + offer PDF export work out of the box (report IDs 38 / 37). Orders have
-no reliable standard report, so the order PDF button only appears when
-`MK_REPORT_ID_ORDER` is set.
+Invoice + offer PDF export work out of the box (report IDs 38 / 37). Orders and
+credit notes have no reliable standard report, so their PDF buttons only appear
+when `MK_REPORT_ID_ORDER` / `MK_REPORT_ID_CREDIT_NOTE` are set.
 
 **Every PDF is rendered with the company's configured logo + letterhead.** The
 REST `/report` endpoint does not inherit the company's print defaults, so
@@ -606,9 +610,9 @@ from client input.
 | Page | Path | Notes |
 |---|---|---|
 | Campaigns | `/preorder` | List + create; `marketCount` / override badges. |
-| Overview | `/preorder/[id]` | KPIs (incl. In Metakocka / Published / Integration failures), latest preorders. Every campaign page carries the `CampaignNav` pills (Overview · Sheet · Markets & Customers · Preorders · Preview, `app/preorder/[campaignId]/campaign-nav.tsx`). |
+| Overview | `/preorder/[id]` | KPIs (incl. In Metakocka / Published / Integration failures), latest preorders. Every campaign page renders the shared `CampaignHeader` (`app/preorder/[campaignId]/campaign-nav.tsx`): a fixed-height title row (back · title + meta · actions) over the `CampaignNav` underline tab strip (Overview · Sheet · Markets & Customers · Preorders · Preview), so the tabs sit on the same pixels everywhere. Page-specific toolbars (sheet settings, preview sheet tabs) live **below** the header, never inside it; small view switchers go in `navExtra` (right end of the tab row). |
 | Sheet | `/preorder/[id]/edit` | Builder (autosaves `tabs`). Row eye toggle = **restricted** (not in the default assortment). Re-price also refreshes the price books. |
-| Markets & Customers | `/preorder/[id]/markets` | Map / Markets / Customers views + contextual right drawers (`components/ui/drawer.tsx`, non-modal). See below. |
+| Markets & Customers | `/preorder/[id]/markets` | List-based: summary strip + **Customers** view (directory table, company/individual split) and **Markets & countries** view (markets panel + Countries table for assignment) + contextual right drawers for markets and countries (`components/ui/drawer.tsx`, non-modal). A **customer opens in a large two-column editor modal** (`customer-modal.tsx` on `components/ui/editor-modal.tsx`: context on the left — identity, access, inheritance ladder, effective config — editor on the right — placement + commercial overrides). See below. |
 | Preorders | `/preorder/[id]/submissions` | Full table with stage / Metakocka / visibility columns, filters incl. integration failures. |
 | Preorder detail | `/preorder/[id]/submissions/[sid]` | Three panels: **Requested preorder** (frozen snapshot), **Current Metakocka order** (live, compared line by line), **Customer visibility** (Show/Hide order to customer). Unlock detaches the MK order (optionally deletes it). |
 | Preview | `/preorder/[id]/preview` | Pick a partner (`?partner=<mkId>` deep link) → the sheet renders their **effective** campaign with an admin-only "Effective configuration" card (market, pricing, assortment, discounts, sources, warnings). "Fill for customer" submits through the same service as the portal. |
@@ -717,32 +721,51 @@ and exposes `registration: { state, canRetry }` + `published`.
 #### Markets & Customers (`app/preorder/[campaignId]/markets/`)
 
 - `models/mk-customer.ts` — the **customer directory**: every Metakocka partner
-  (`partnerMkId` unique, address, resolved `countryIso`, admin `countryIsoManual`,
-  `manualGeo` pin, `stale`). Filled by `POST /api/admin/preorder/customers/sync`
+  (`partnerMkId` unique, address, `taxId`, resolved `countryIso`, admin
+  `countryIsoManual`, `stale`). Filled by `POST /api/admin/preorder/customers/sync`
   (one `get_partner { partner_name: "" }` pull, 120 s budget, `bulkWrite` in
   batches; `MK_PARTNER_SYNC_MODE=sharded` falls back to per-letter queries) and
   kept warm by cheap upserts on join / portal load / picker (`lib/mk-customers.ts`).
-  Metakocka is never called on a page render.
-- Map (`country-map.tsx`, d3-geo, loaded with `next/dynamic` `ssr:false`):
-  GeoJSON from `public/geo/{europe-50m,world-110m}.json` (built once by
-  `npm run geo:build` → `scripts/build-geo.ts` from `world-atlas`, ISO-2 ids +
-  largest-polygon centroids; commit the output). Countries painted per market
-  (`MARKET_COLORS` in `app/preorder/preorder-badges.tsx`), click / shift-click /
-  shift-drag selection, per-country customer bubbles, manual pins clustered in
-  screen space, hand-rolled pan/zoom (wheel listener attached non-passively).
-  **No geocoding provider**: MK has no coordinates; customers sit at the country
-  centroid unless an admin sets a pin (`PATCH /api/admin/preorder/customers/[id]`).
+  Metakocka is never called on a page render. Rows stamp
+  `countryResolverVersion`; bump `COUNTRY_RESOLVER_VERSION` in `lib/countries.ts`
+  whenever the resolver learns new spellings and stale rows re-resolve from their
+  stored `address.countryRaw` on the next directory read
+  (`ensureCountriesResolved`, once per process, no MK call). The resolver also
+  sees through decorated register names ("Združeno kraljestvo (UK)",
+  "Deutschland / Germany") and maps regions (Canary Islands, Madeira, …) to
+  their parent state. (`manualGeo` survives in the schema
+  from the retired map; nothing reads it.)
+- **Customer kind** — `customerKind()` in `lib/mk-customers.ts` is the one
+  definition: a partner with a non-empty MK tax / VAT id is a **company** (legal
+  person), anything else an **individual** (natural person). MK's own
+  `business_entity` flag is stored but deliberately not consulted. `kind` +
+  `taxId` ride on `MkCustomerView`; `?kind=business|person` filters the directory
+  (`listMkCustomers`) and the campaign customers route; `countMkCustomersByCountry`
+  splits every country into `business` / `person` (`CountryGeo`).
+- **No map.** The page is list-first (`markets-client.tsx`): a summary strip (stat
+  tiles are shortcuts that push a filter preset into the Customers table), a
+  **Customers** view (`CustomersTable` in `tables.tsx`: search incl. VAT id,
+  company/individual segment with counts, country/market/access/preorder/override
+  selects, Type column) and a **Markets & countries** view (`MarketsPanel` +
+  `CountriesTable`: every country with customers or in a market, company /
+  individual / unlocked counts, an inline market select per row and checkbox
+  bulk-assign — `POST …/markets {assign}`). The market drawer picks countries with
+  `country-picker.tsx` (searchable, customer counts, warns when a country is moved
+  from another market, one-click "add every unassigned European country with
+  customers"). Country names for the pickers come from the geo endpoint
+  (`allCountryNames()` in `lib/countries.ts`); the client never loads locale tables.
 - Config API under `/api/admin/preorder/campaigns/[id]/`: `markets` (GET, PUT
   replace, POST create or `{assign:{marketId,countries}}`), `markets/[marketId]`
   (PATCH, DELETE — rules pointing at it fall back to country), `customers`
-  (GET joined rows, `lib/preorder-customers.ts`), `customers/[partnerMkId]`
+  (GET joined rows incl. `?kind=`, `lib/preorder-customers.ts`), `customers/[partnerMkId]`
   (GET detail + effective, PUT upsert rule, DELETE), `customers/geo` (per-country
-  aggregates + pins + sync state), `effective?partnerMkId=`,
+  aggregates split by kind + `kinds` totals + `countries` names + sync state),
+  `effective?partnerMkId=`,
   `price-books/refresh`. Global: `/api/admin/preorder/customers` (directory
   search), `…/customers/sync` (GET status / POST start),
-  `…/customers/[partnerMkId]` (GET, PATCH manual pin / country, POST refresh from MK).
+  `…/customers/[partnerMkId]` (GET, PATCH manual country, POST refresh from MK).
 - `commercial-config-form.tsx` is the inheritance-aware editor shared by the
-  market and customer drawers: every field shows the inherited value + source
+  market drawer and the customer modal: every field shows the inherited value + source
   badge with **Override / Reset to inherited**; the inherited baseline is computed
   client-side with the same pure resolver (campaign without that layer).
 

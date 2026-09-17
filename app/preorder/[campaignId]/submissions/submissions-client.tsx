@@ -4,13 +4,13 @@ import Link from "next/link";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, ChevronRight, Users, LockOpen, Mail, Search, AlertTriangle, ExternalLink } from "lucide-react";
+import { ChevronRight, Users, LockOpen, Mail, Search, AlertTriangle, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
 import { CampaignStatusBadge, SubmissionStageBadge, VisibilityBadge } from "@/app/preorder/preorder-badges";
-import { CampaignNav } from "@/app/preorder/[campaignId]/campaign-nav";
-import { flagEmoji } from "@/lib/countries-client";
+import { CampaignHeader } from "@/app/preorder/[campaignId]/campaign-nav";
+import { Flag } from "@/components/flag";
 import {
   SUBMISSION_STAGE_LABELS,
   totalsNet,
@@ -84,7 +84,7 @@ export function PreordersTable({
               </Link>
             </TableCell>
             <TableCell className="text-[12px] whitespace-nowrap">
-              <span className="text-muted-foreground">{s.countryIso ? `${flagEmoji(s.countryIso)} ${s.countryIso}` : "—"}</span>
+              <span className="text-muted-foreground inline-flex items-center gap-1">{s.countryIso ? <><Flag iso={s.countryIso} /> {s.countryIso}</> : "—"}</span>
               {s.marketName && <span className="ml-1.5 text-foreground">{s.marketName}</span>}
             </TableCell>
             <TableCell>
@@ -137,7 +137,7 @@ export function PreordersTable({
               <div className="text-[13px] font-medium text-foreground truncate">{u.partnerName}</div>
               {u.partnerEmail && <div className="text-[11px] text-muted-foreground truncate">{u.partnerEmail}</div>}
             </TableCell>
-            <TableCell className="text-[12px] text-muted-foreground">{u.countryIso ? `${flagEmoji(u.countryIso)} ${u.countryIso}` : "—"}</TableCell>
+            <TableCell className="text-[12px] text-muted-foreground">{u.countryIso ? <span className="inline-flex items-center gap-1"><Flag iso={u.countryIso} /> {u.countryIso}</span> : "—"}</TableCell>
             <TableCell>
               <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 px-2 py-0.5 text-[11px] font-medium">
                 <Mail className="w-2.5 h-2.5" /> Invited
@@ -200,14 +200,16 @@ export function PreordersTableSkeleton({ rows = 6 }: { rows?: number }) {
   );
 }
 
-export default function SubmissionsClient({ campaignId }: { campaignId: string }) {
+const STAGE_VALUES = new Set<string>(STAGE_FILTERS.map((f) => f.value));
+
+export default function SubmissionsClient({ campaignId, initialStage }: { campaignId: string; initialStage?: string }) {
   const [campaign, setCampaign] = useState<PreorderCampaign | null>(null);
   const [subs, setSubs] = useState<PreorderSubmissionSummary[]>([]);
   const [unlocked, setUnlocked] = useState<PreorderAccessSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
-  const [stage, setStage] = useState<StageFilter>("all");
+  const [stage, setStage] = useState<StageFilter>(initialStage && STAGE_VALUES.has(initialStage) ? (initialStage as StageFilter) : "all");
   const [market, setMarket] = useState<string>("all");
 
   useEffect(() => {
@@ -242,31 +244,12 @@ export default function SubmissionsClient({ campaignId }: { campaignId: string }
 
   return (
     <div className="flex flex-col h-full">
-      <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="flex items-center gap-3 px-4 md:px-6 h-14">
-          <Link href="/preorder" className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back">
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
-          <div className="min-w-0">
-            {campaign ? (
-              <>
-                <h1 className="text-[15px] font-semibold text-foreground truncate leading-tight">{campaign.title}</h1>
-                <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><CampaignStatusBadge status={campaign.status} /> Preorders</div>
-              </>
-            ) : (
-              <>
-                <SkeletonLine lh="h-[19px]" h="h-3.5" w="w-48" />
-                <SkeletonLine lh="h-[19.5px]" w="w-24" delay={40} />
-              </>
-            )}
-          </div>
-          <div className="flex-1" />
-          <CampaignNav campaignId={campaignId} active="preorders" compact className="hidden md:flex" />
-        </div>
-        <div className="px-4 md:px-6 pb-2 md:hidden">
-          <CampaignNav campaignId={campaignId} active="preorders" compact />
-        </div>
-      </header>
+      <CampaignHeader
+        campaignId={campaignId}
+        active="preorders"
+        title={campaign ? campaign.title : <SkeletonLine lh="h-[19px]" h="h-3.5" w="w-48" />}
+        meta={campaign ? <><CampaignStatusBadge status={campaign.status} /> Preorders</> : <Skeleton className="h-2.5 w-24" delay={40} />}
+      />
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
         {error ? (

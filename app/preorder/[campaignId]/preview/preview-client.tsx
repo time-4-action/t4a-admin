@@ -37,15 +37,15 @@ import {
   PreorderGuidedTab,
   OrderSummaryPanel,
   PreorderReviewModal,
-  SheetHeaderSkeleton,
+  TabBarSkeleton,
   PreorderGridSkeleton,
   OrderSummaryPanelSkeleton,
 } from "@/app/preorder/preorder-shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { CampaignNav } from "@/app/preorder/[campaignId]/campaign-nav";
+import { CampaignHeader } from "@/app/preorder/[campaignId]/campaign-nav";
 import { MarketChip, SourceBadge } from "@/app/preorder/preorder-badges";
-import { flagEmoji } from "@/lib/countries-client";
+import { Flag } from "@/components/flag";
 import { type EffectiveCampaign, type PreorderCampaign, type PreorderTerms } from "@/types/preorder";
 import type { MkPartner } from "@/types/documents";
 
@@ -199,22 +199,24 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
   if (loading) {
     return (
       <div className="flex flex-col h-full">
-        <SheetHeaderSkeleton
+        <CampaignHeader
+          campaignId={campaignId}
+          active="preview"
           backHref={`/preorder/${campaignId}`}
-          right={
-            <>
-              <Button size="sm" className="h-8" disabled><UserPlus className="w-3.5 h-3.5" /> Fill for customer</Button>
-              <Button variant="outline" size="sm" className="h-8" disabled><Pencil className="w-3.5 h-3.5" /> Edit sheet</Button>
-              <div className="hidden sm:flex items-center gap-0.5 rounded-lg border border-border p-0.5">
-                <span className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] bg-muted text-foreground font-medium"><Table2 className="w-3.5 h-3.5" /> Grid</span>
-                <span className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-muted-foreground"><LayoutGrid className="w-3.5 h-3.5" /> Store</span>
-              </div>
-            </>
+          title={<SkeletonLine lh="h-[19px]" h="h-3.5" w="w-48" />}
+          meta={<Skeleton className="h-2.5 w-64" delay={40} />}
+          actions={<Button size="sm" className="h-8" disabled><UserPlus className="w-3.5 h-3.5" /> Fill for customer</Button>}
+          navExtra={
+            <div className="flex items-center gap-0.5 rounded-lg border border-border p-0.5">
+              <span className="flex items-center gap-1 rounded-md px-2 py-0.5 text-[12px] bg-muted text-foreground font-medium"><Table2 className="w-3.5 h-3.5" /> Grid</span>
+              <span className="flex items-center gap-1 rounded-md px-2 py-0.5 text-[12px] text-muted-foreground"><LayoutGrid className="w-3.5 h-3.5" /> Store</span>
+            </div>
           }
         />
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
             <div className="min-w-0">
+              <div className="mb-4"><TabBarSkeleton /></div>
               <PreorderGridSkeleton />
             </div>
             <aside className="lg:sticky lg:top-4 space-y-3">
@@ -247,61 +249,60 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
 
   return (
     <div className="flex flex-col h-full">
-      <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-20">
-        <div className="flex items-center gap-3 px-4 md:px-6 h-14">
-          <Link href={`/preorder/${campaignId}`} className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back">
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
-          <div className="min-w-0">
-            <h1 className="text-[15px] font-semibold text-foreground truncate leading-tight flex items-center gap-2">
-              {campaign.title}
-              <span className="inline-flex items-center gap-1 rounded-full bg-lime-600/10 text-lime-700 dark:text-lime-300 px-2 py-0.5 text-[10px] font-medium">
-                <Eye className="w-3 h-3" /> {partner ? "Fill" : "Preview"}
-              </span>
-            </h1>
-            <div className="text-[11px] text-muted-foreground">
-              {partner ? `Filling for ${partner.name} — submits a real preorder` : "How partners fill this sheet — pick a partner to submit on their behalf"}
-            </div>
-          </div>
-          <div className="flex-1" />
-          {partner ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-lime-600/10 text-lime-700 dark:text-lime-300 pl-2.5 pr-1 py-1 text-[12px] font-medium">
-              <UserRound className="w-3.5 h-3.5" />
-              <span className="max-w-[140px] truncate">{partner.name}</span>
-              <button onClick={() => setPickerOpen(true)} className="p-0.5 rounded hover:bg-lime-600/20" title="Change customer"><Pencil className="w-3 h-3" /></button>
-              <button onClick={clearPartner} className="p-0.5 rounded hover:bg-lime-600/20" title="Clear"><X className="w-3 h-3" /></button>
+      <CampaignHeader
+        campaignId={campaignId}
+        active="preview"
+        backHref={`/preorder/${campaignId}`}
+        title={
+          <h1 className="text-[15px] font-semibold text-foreground truncate leading-tight flex items-center gap-2">
+            {campaign.title}
+            <span className="inline-flex items-center gap-1 rounded-full bg-lime-600/10 text-lime-700 dark:text-lime-300 px-2 py-0.5 text-[10px] font-medium">
+              <Eye className="w-3 h-3" /> {partner ? "Fill" : "Preview"}
             </span>
-          ) : (
-            <Button size="sm" className="h-8" onClick={() => setPickerOpen(true)}>
-              <UserPlus className="w-3.5 h-3.5" /> Fill for customer
-            </Button>
-          )}
-          {Object.keys(quantities).length > 0 && (
-            <Button variant="ghost" size="sm" className="h-8" onClick={() => setQuantities({})}>
-              <RotateCcw className="w-3.5 h-3.5" /> Reset
-            </Button>
-          )}
-          <Link href={`/preorder/${campaignId}/edit`}>
-            <Button variant="outline" size="sm" className="h-8"><Pencil className="w-3.5 h-3.5" /> Edit sheet</Button>
-          </Link>
-          <div className="hidden sm:flex items-center gap-0.5 rounded-lg border border-border p-0.5">
-            <button onClick={() => setMode("grid")} className={cn("flex items-center gap-1 rounded-md px-2 py-1 text-[12px]", mode === "grid" ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:text-foreground")}>
+          </h1>
+        }
+        meta={partner ? `Filling for ${partner.name} — submits a real preorder` : "How partners fill this sheet — pick a partner to submit on their behalf"}
+        actions={
+          <>
+            {Object.keys(quantities).length > 0 && (
+              <Button variant="ghost" size="sm" className="h-8" onClick={() => setQuantities({})}>
+                <RotateCcw className="w-3.5 h-3.5" /> Reset
+              </Button>
+            )}
+            {partner ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-lime-600/10 text-lime-700 dark:text-lime-300 pl-2.5 pr-1 py-1 text-[12px] font-medium">
+                <UserRound className="w-3.5 h-3.5" />
+                <span className="max-w-[140px] truncate">{partner.name}</span>
+                <button onClick={() => setPickerOpen(true)} className="p-0.5 rounded hover:bg-lime-600/20" title="Change customer"><Pencil className="w-3 h-3" /></button>
+                <button onClick={clearPartner} className="p-0.5 rounded hover:bg-lime-600/20" title="Clear"><X className="w-3 h-3" /></button>
+              </span>
+            ) : (
+              <Button size="sm" className="h-8" onClick={() => setPickerOpen(true)}>
+                <UserPlus className="w-3.5 h-3.5" /> Fill for customer
+              </Button>
+            )}
+          </>
+        }
+        navExtra={
+          <div className="flex items-center gap-0.5 rounded-lg border border-border p-0.5">
+            <button onClick={() => setMode("grid")} className={cn("flex items-center gap-1 rounded-md px-2 py-0.5 text-[12px]", mode === "grid" ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:text-foreground")}>
               <Table2 className="w-3.5 h-3.5" /> Grid
             </button>
-            <button onClick={() => setMode("guided")} className={cn("flex items-center gap-1 rounded-md px-2 py-1 text-[12px]", mode === "guided" ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:text-foreground")}>
+            <button onClick={() => setMode("guided")} className={cn("flex items-center gap-1 rounded-md px-2 py-0.5 text-[12px]", mode === "guided" ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:text-foreground")}>
               <LayoutGrid className="w-3.5 h-3.5" /> Store
             </button>
           </div>
-        </div>
-        <div className="px-4 md:px-6 pb-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-          <CampaignNav campaignId={campaignId} active="preview" compact />
-          <TabBar tabs={campaign.tabs} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
-        </div>
-      </header>
+        }
+      />
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
           <div className="min-w-0">
+            {campaign.tabs.length > 0 && (
+              <div className="mb-4">
+                <TabBar tabs={campaign.tabs} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
+              </div>
+            )}
             {activeTab && (
               <TabTierBanner tab={activeTab} quantities={quantities} currency={currency} className="mb-4" />
             )}
@@ -420,7 +421,7 @@ function EffectiveConfigCard({ effective, loading, campaignId, partnerMkId }: { 
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground w-20 shrink-0">Market</span>
             {m.market ? <MarketChip name={m.market.name} color={m.market.color} /> : <span className="text-foreground">none</span>}
-            <span className="ml-auto text-[10px] text-muted-foreground">{m.marketSource === "manual" ? "assigned" : m.countryIso ? `${flagEmoji(m.countryIso)} ${m.countryIso}` : "no country"}</span>
+            <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-muted-foreground">{m.marketSource === "manual" ? "assigned" : m.countryIso ? <><Flag iso={m.countryIso} /> {m.countryIso}</> : "no country"}</span>
           </div>
           <Line label="Pricing" value={effective.partnerPricelist ?? "sheet prices"} source={m.sources.pricelist} />
           <Line
