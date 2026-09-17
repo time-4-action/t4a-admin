@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ChevronRight, Users, LockOpen, Mail, Search, AlertTriangle, ExternalLink } from "lucide-react";
+import { HeaderFilter } from "@/components/ui/header-filter";
+import { ChevronRight, Users, LockOpen, Mail, Search, AlertTriangle, ExternalLink, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
@@ -42,6 +42,17 @@ const STAGE_FILTERS: { value: StageFilter; label: string }[] = [
 
 // The preorders table — shared by the full Preorders page and the overview (which
 // shows the latest few with a "view all" link).
+// Column filters (Stage, Market) live in the headings when `filters` is given —
+// the full page passes them, the overview's short list does not.
+export type PreorderTableFilters = {
+  stage: StageFilter;
+  onStage: (s: StageFilter) => void;
+  market: string;
+  onMarket: (m: string) => void;
+  markets: string[];
+  failures: number;
+};
+
 export function PreordersTable({
   campaignId,
   currency,
@@ -49,6 +60,7 @@ export function PreordersTable({
   unlocked,
   limit,
   emptyHint,
+  filters,
 }: {
   campaignId: string;
   currency: string;
@@ -56,6 +68,7 @@ export function PreordersTable({
   unlocked: PreorderAccessSummary[];
   limit?: number;
   emptyHint?: string;
+  filters?: PreorderTableFilters;
 }) {
   const th = "text-[10px] uppercase tracking-wider font-semibold text-muted-foreground h-9";
   const rows = limit ? subs.slice(0, limit) : subs;
@@ -65,8 +78,34 @@ export function PreordersTable({
       <TableHeader>
         <TableRow className="hover:bg-transparent border-b border-border">
           <TableHead className={cn(th, "pl-5")}>Partner</TableHead>
-          <TableHead className={th}>Market</TableHead>
-          <TableHead className={th}>Stage</TableHead>
+          <TableHead className={th}>
+            {filters ? (
+              <HeaderFilter
+                label="Market"
+                value={filters.market}
+                onChange={filters.onMarket}
+                options={[{ value: "none", label: "No market" }, ...filters.markets.map((m) => ({ value: m, label: m }))]}
+              />
+            ) : (
+              "Market"
+            )}
+          </TableHead>
+          <TableHead className={th}>
+            {filters ? (
+              <HeaderFilter
+                label="Stage"
+                value={filters.stage}
+                onChange={(v) => filters.onStage(v as StageFilter)}
+                options={STAGE_FILTERS.filter((f) => f.value !== "all").map((f) => ({
+                  value: f.value,
+                  label: f.value === "failures" ? <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400"><AlertTriangle className="w-3 h-3" /> {f.label}</span> : f.label,
+                  count: f.value === "failures" && filters.failures > 0 ? filters.failures : undefined,
+                }))}
+              />
+            ) : (
+              "Stage"
+            )}
+          </TableHead>
           <TableHead className={cn(th, "text-right")}>Requested</TableHead>
           <TableHead className={th}>Metakocka</TableHead>
           <TableHead className={th}>Visibility</TableHead>
@@ -264,28 +303,17 @@ export default function SubmissionsClient({ campaignId, initialStage }: { campai
                 <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search partner…" className="h-8 w-56 pl-8 text-[12px]" />
               </div>
-              <Select value={stage} onValueChange={(v) => setStage(v as StageFilter)}>
-                <SelectTrigger size="sm" className="h-8 w-44 text-[12px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {STAGE_FILTERS.map((f) => (
-                    <SelectItem key={f.value} value={f.value} className="text-[12px]">
-                      {f.label}
-                      {f.value === "failures" && failures > 0 ? ` (${failures})` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {markets.length > 0 && (
-                <Select value={market} onValueChange={setMarket}>
-                  <SelectTrigger size="sm" className="h-8 w-40 text-[12px]"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" className="text-[12px]">All markets</SelectItem>
-                    <SelectItem value="none" className="text-[12px]">No market</SelectItem>
-                    {markets.map((m) => (
-                      <SelectItem key={m} value={m} className="text-[12px]">{m}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              {(stage !== "all" || market !== "all") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStage("all");
+                    setMarket("all");
+                  }}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-3 h-3" /> Reset filters
+                </button>
               )}
               {failures > 0 && stage !== "failures" && (
                 <button onClick={() => setStage("failures")} className="ml-auto inline-flex items-center gap-1 rounded-full bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300 px-2 py-0.5 text-[11px] font-medium">
@@ -301,6 +329,7 @@ export default function SubmissionsClient({ campaignId, initialStage }: { campai
                 currency={campaign?.currency ?? "EUR"}
                 subs={filtered.rows}
                 unlocked={filtered.invited}
+                filters={{ stage, onStage: setStage, market, onMarket: setMarket, markets, failures }}
                 emptyHint={subs.length === 0 && unlocked.length === 0 ? "No one has unlocked this preorder yet. Copy the invite link from the overview and share it." : `No preorders match ${stage !== "all" ? SUBMISSION_STAGE_LABELS[stage as SubmissionStage] ?? stage : "the search"}.`}
               />
             )}

@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { HeaderFilter } from "@/components/ui/header-filter";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { Search, ChevronLeft, ChevronRight, Plus, Globe2, Pencil, RefreshCw, Loader2, AlertTriangle, Building2, User, X, Layers, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -341,60 +342,6 @@ export type CustomerFilters = {
   override: "all" | "yes" | "no";
 };
 export const DEFAULT_CUSTOMER_FILTERS: CustomerFilters = { q: "", kind: "all", country: "", market: "all", access: "all", stage: "all", override: "all" };
-
-// A column heading that IS the column's filter: borderless select in the header
-// row, heading text when nothing is picked, the picked value (accent-coloured)
-// otherwise. "all" always resets.
-function HeaderFilter({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: React.ReactNode; count?: number }[];
-}) {
-  const active = value !== "all";
-  const picked = options.find((o) => o.value === value);
-  return (
-    <Select value={value} onValueChange={onChange}>
-      {/* Custom trigger content: the heading alone when unfiltered, heading + the
-          pick when filtered. (SelectValue would echo the "all" item's row.) */}
-      <SelectTrigger
-        size="sm"
-        aria-label={`Filter by ${label.toLowerCase()}`}
-        className={cn(
-          "group/h h-7 max-w-full gap-1 rounded-md border-0 bg-transparent px-1.5 -ml-1.5 shadow-none",
-          "hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring dark:bg-transparent dark:hover:bg-muted",
-          "[&>svg]:size-3 [&>svg]:opacity-0 hover:[&>svg]:opacity-60 data-[state=open]:[&>svg]:opacity-60",
-          active ? "[&>svg]:opacity-60" : "",
-        )}
-      >
-        <span className={cn("text-[10px] font-semibold uppercase tracking-wider", active ? "text-lime-700 dark:text-lime-400" : "text-muted-foreground group-hover/h:text-foreground")}>
-          {label}
-        </span>
-        {active && picked && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-lime-500/12 text-lime-700 dark:text-lime-400 px-1.5 h-5 text-[11px] font-medium normal-case tracking-normal max-w-[10rem] truncate">
-            {picked.label}
-          </span>
-        )}
-      </SelectTrigger>
-      <SelectContent align="start">
-        <SelectItem value="all" className="text-[12px]">
-          <span className="text-muted-foreground">All</span>
-        </SelectItem>
-        {options.map((o) => (
-          <SelectItem key={o.value} value={o.value} className="text-[12px]">
-            {o.label}
-            {o.count !== undefined && <span className="ml-1 text-muted-foreground tabular-nums">· {o.count}</span>}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
 
 export function CustomersTable({
   campaignId,

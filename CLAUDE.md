@@ -113,6 +113,17 @@ The per-role permissions dialog (`app/roles/page.tsx`) shows a flat searchable l
 
 The sidebar "Access" section also uses drag-and-drop (same `@dnd-kit/core` pattern) to assign/remove access types for a single user.
 
+### Column-heading filters
+
+Per-column list filters live **in the column heading**, never in a separate
+filter row: `components/ui/header-filter.tsx` (`<HeaderFilter label value
+onChange options>`). It reads as a normal heading with a faint funnel glyph,
+opens a popper dropdown below the heading, and shows the pick as a green chip
+once filtered (`value === "all"` = unfiltered; the first item always clears).
+Used by the documents list (Status), the preorder customers table (Type,
+Country, Market, Access, Overrides, Preorder) and the preorders table (Market,
+Stage). Free-text search and a "Reset filters" link stay in the card's top row.
+
 ### UI Loading Patterns
 
 All data-loading states use a **shimmer skeleton** system — never plain "Loading…" text.

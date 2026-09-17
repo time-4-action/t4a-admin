@@ -4,7 +4,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { HeaderFilter } from "@/components/ui/header-filter";
 import {
   Download,
   Search,
@@ -586,42 +586,22 @@ function SortHeader({
   );
 }
 
-// The "Status" heading doubles as the status filter: a borderless select in
-// the header row, listing only the statuses present (with counts).
+// The "Status" heading doubles as the status filter (shared HeaderFilter look),
+// listing only the statuses present, with counts.
 function StatusHeader({ kind, items, filters }: { kind: DocKind; items: DocSummary[]; filters: DocFiltersApi }) {
   const statuses = useMemo(() => {
     const seen = new Map<string, number>();
     for (const d of items) seen.set(statusKey(d), (seen.get(statusKey(d)) ?? 0) + 1);
     return Array.from(seen.entries()).sort((a, b) => b[1] - a[1]);
   }, [items]);
-  const active = filters.value.status !== "all";
   return (
     <div className="min-w-0 flex items-center">
-      <Select value={filters.value.status} onValueChange={(v) => filters.set("status", v)}>
-        <SelectTrigger
-          size="sm"
-          aria-label="Filter by status"
-          className={cn(
-            "h-6 max-w-full gap-1 rounded-md border-0 bg-transparent px-1.5 -ml-1.5 shadow-none text-[10px] font-semibold uppercase tracking-wide",
-            "hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring dark:bg-transparent dark:hover:bg-muted [&_svg]:size-3",
-            active ? "text-teal-600 dark:text-teal-400" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <SelectValue placeholder="Status" />
-        </SelectTrigger>
-        <SelectContent align="start">
-          <SelectItem value="all" className="text-xs">
-            <span className="uppercase tracking-wide font-semibold">Status</span>
-            <span className="ml-1 normal-case tracking-normal font-normal text-muted-foreground">all</span>
-          </SelectItem>
-          {statuses.map(([key, n]) => (
-            <SelectItem key={key} value={key} className="text-xs">
-              <span className="uppercase tracking-wide font-semibold">{statusLabel(kind, key)}</span>
-              <span className="ml-1 normal-case tracking-normal font-normal text-muted-foreground tabular-nums">{n}</span>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <HeaderFilter
+        label="Status"
+        value={filters.value.status}
+        onChange={(v) => filters.set("status", v)}
+        options={statuses.map(([key, n]) => ({ value: key, label: statusLabel(kind, key), count: n }))}
+      />
     </div>
   );
 }
