@@ -27,7 +27,7 @@ import { CustomerModal } from "./customer-modal";
 import { CountryDrawer } from "./country-drawer";
 import { CountriesTable, CustomersTable, MarketsPanel, type CustomerFilters } from "./tables";
 
-type View = "customers" | "markets";
+type View = "customers" | "markets" | "countries";
 type DrawerState =
   | { type: "market"; id: string | null; seed: string[] }
   | { type: "customer"; partnerMkId: string }
@@ -56,7 +56,7 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
 
-  const [view, setView] = useState<View>(params.get("view") === "markets" ? "markets" : "customers");
+  const [view, setView] = useState<View>(params.get("view") === "markets" ? "markets" : params.get("view") === "countries" ? "countries" : "customers");
   const [drawer, setDrawer] = useState<DrawerState>(params.get("customer") ? { type: "customer", partnerMkId: params.get("customer")! } : null);
   const [customersReload, setCustomersReload] = useState(0);
   const [preset, setPreset] = useState<{ key: number; filters: Partial<CustomerFilters> }>({ key: 0, filters: {} });
@@ -191,12 +191,9 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
     toast(draft.id ? "Market saved" : "Market created");
     return null;
   };
-  const moveMarket = async (id: string, dir: -1 | 1) => {
-    const ids = markets.map((m) => m.id);
-    const i = ids.indexOf(id);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= ids.length) return;
-    [ids[i], ids[j]] = [ids[j], ids[i]];
+  const reorderMarkets = async (ids: string[]) => {
+    // Optimistic: show the new order at once, the server confirms on refresh.
+    setCampaign((c) => (c ? { ...c, markets: ids.map((id) => c.markets.find((m) => m.id === id)!).filter(Boolean) } : c));
     const r = await fetch(`/api/admin/preorder/campaigns/${campaignId}/markets`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -295,7 +292,8 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
             {(
               [
                 ["customers", Users, "Customers"],
-                ["markets", Layers, "Markets & countries"],
+                ["markets", Layers, "Markets"],
+                ["countries", Globe2, "Countries"],
               ] as const
             ).map(([v, Icon, label]) => (
               <button key={v} onClick={() => switchView(v)} className={cn("flex items-center gap-1 rounded-md px-2 py-0.5 text-[12px]", view === v ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:text-foreground")}>
@@ -365,7 +363,6 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
         )}
 
         {view === "markets" && (
-          <div className="grid grid-cols-1 xl:grid-cols-[380px_minmax(0,1fr)] gap-4 items-start">
             <MarketsPanel
               markets={markets}
               stats={stats}
@@ -376,10 +373,12 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
               onEdit={(id) => openMarket(id)}
               onCreate={() => openMarket(null)}
               onShowCustomers={(id) => showCustomers({ market: id })}
-              onMove={moveMarket}
+              onReorder={reorderMarkets}
             />
-            <CountriesTable stats={stats} markets={markets} countryNames={countryNames} onAssign={assignCountries} onOpenCountry={openCountry} />
-          </div>
+        )}
+
+        {view === "countries" && (
+          <CountriesTable stats={stats} markets={markets} countryNames={countryNames} onAssign={assignCountries} onOpenCountry={openCountry} />
         )}
       </div>
 

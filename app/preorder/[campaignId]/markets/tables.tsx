@@ -11,7 +11,10 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { HeaderFilter } from "@/components/ui/header-filter";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
-import { Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Plus, Globe2, Pencil, RefreshCw, Loader2, AlertTriangle, Building2, User, X, Layers, Users } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Plus, Globe2, Pencil, RefreshCw, Loader2, AlertTriangle, Building2, User, X, Layers, Users, GripVertical } from "lucide-react";
+import { DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, useSortable, arrayMove, verticalListSortingStrategy, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { cn } from "@/lib/utils";
 import { MARKET_COLORS, MarketChip, SourceBadge, SubmissionStageBadge } from "@/app/preorder/preorder-badges";
 import { Flag } from "@/components/flag";
@@ -58,7 +61,10 @@ export function CustomerKindBadge({ kind, taxId, compact }: { kind: CustomerKind
   );
 }
 
-// ── markets panel ─────────────────────────────────────────────────────────────
+// ── markets list: full width, drag to set priority ────────────────────────────
+//
+// One row per market in priority order (index 0 wins). Drag the handle to
+// reorder; the parent persists the new order.
 
 export function MarketsPanel({
   markets,
@@ -67,7 +73,7 @@ export function MarketsPanel({
   onEdit,
   onCreate,
   onShowCustomers,
-  onMove,
+  onReorder,
 }: {
   markets: PreorderMarket[];
   stats: Record<string, CountryGeo>;
@@ -76,106 +82,172 @@ export function MarketsPanel({
   onEdit: (id: string) => void;
   onCreate: () => void;
   onShowCustomers: (id: string) => void;
-  /** Move a market one step up / down the priority list. */
-  onMove?: (id: string, dir: -1 | 1) => void;
+  /** The full id list in its new priority order. */
+  onReorder?: (ids: string[]) => void;
 }) {
   const assigned = new Set(markets.flatMap((m) => m.countries));
   const unassigned = Object.entries(stats).filter(([iso, s]) => !assigned.has(iso) && s.customers > 0);
   const unassignedCustomers = unassigned.reduce((n, [, s]) => n + s.customers, 0);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
+
   return (
-    <div className="rounded-xl border border-border bg-surface overflow-hidden flex flex-col">
-      <div className="px-4 py-2.5 border-b border-border flex items-center gap-2">
+    <div className="rounded-xl border border-border bg-surface overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-border flex flex-wrap items-center gap-2">
         <Layers className="w-4 h-4 text-muted-foreground" />
         <span className="text-[13px] font-semibold text-foreground">Markets</span>
         <span className="text-[11px] text-muted-foreground tabular-nums">{markets.length}</span>
         {markets.length > 1 && (
           <span className="ml-2 text-[11px] text-muted-foreground" title="A customer who fits several markets lands in the one listed first.">
-            in priority order — first match wins
+            Drag to set priority — the first market that matches a customer wins.
           </span>
         )}
         <div className="flex-1" />
-        <Button size="sm" variant="outline" className="h-7 text-[12px]" onClick={onCreate}><Plus className="w-3.5 h-3.5" /> New</Button>
+        <Button size="sm" variant="outline" className="h-7 text-[12px]" onClick={onCreate}><Plus className="w-3.5 h-3.5" /> New market</Button>
       </div>
-      <div className="divide-y divide-border/60">
-        {markets.map((m, i) => {
-          const kinds = m.kinds ?? [];
-          const kindLabel = kinds.length === 0 || kinds.length === 2 ? null : kinds[0] === "business" ? "companies only" : "individuals only";
-          const customers = m.countries.reduce((n, iso) => n + (stats[iso]?.customers ?? 0), 0);
-          const unlocked = m.countries.reduce((n, iso) => n + (stats[iso]?.unlocked ?? 0), 0);
-          const ov = overrideSummary(m.config);
-          return (
-            <div key={m.id} className="group flex gap-3 px-4 py-3 hover:bg-muted/30 transition-colors">
-              {/* priority rank + nudge */}
-              <div className="flex flex-col items-center gap-0.5 shrink-0 pt-0.5">
-                <button
-                  type="button"
-                  onClick={() => onMove?.(m.id, -1)}
-                  disabled={!onMove || i === 0}
-                  className="flex h-4 w-5 items-center justify-center rounded text-muted-foreground/50 hover:text-foreground hover:bg-muted disabled:opacity-20 disabled:hover:bg-transparent"
-                  aria-label="Higher priority"
-                  title="Higher priority"
-                >
-                  <ChevronUp className="w-3.5 h-3.5" />
-                </button>
-                <span className="flex size-5 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground tabular-nums">{i + 1}</span>
-                <button
-                  type="button"
-                  onClick={() => onMove?.(m.id, 1)}
-                  disabled={!onMove || i === markets.length - 1}
-                  className="flex h-4 w-5 items-center justify-center rounded text-muted-foreground/50 hover:text-foreground hover:bg-muted disabled:opacity-20 disabled:hover:bg-transparent"
-                  aria-label="Lower priority"
-                  title="Lower priority"
-                >
-                  <ChevronDown className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              <div className="min-w-0 flex-1">
-              <button type="button" onClick={() => onEdit(m.id)} className="w-full text-left">
-                <div className="flex items-center gap-2">
-                  <span className="size-2.5 rounded-full shrink-0" style={{ background: MARKET_COLORS[m.color].hex }} />
-                  <span className="text-[13px] font-semibold text-foreground truncate">{m.name}</span>
-                  {kindLabel && (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-border px-1.5 py-px text-[10px] text-muted-foreground shrink-0">
-                      {kinds[0] === "business" ? <Building2 className="w-3 h-3" /> : <User className="w-3 h-3" />} {kindLabel}
-                    </span>
-                  )}
-                  <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ml-auto shrink-0" />
-                </div>
-                <div className="mt-1 text-[11px] text-muted-foreground tabular-nums">
-                  {m.countries.length === 0 ? "any country" : `${m.countries.length} countr${m.countries.length === 1 ? "y" : "ies"}`} · {num.format(customers)} customer{customers === 1 ? "" : "s"}{pinned?.[m.id] ? ` + ${pinned[m.id]} hand-picked` : ""}{unlocked ? ` · ${unlocked} unlocked` : ""}
-                </div>
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  {m.countries.slice(0, 10).map((iso) => (
-                    <Flag key={iso} iso={iso} className="text-[13px]" />
-                  ))}
-                  {m.countries.length > 10 && <span className="text-[10px] text-muted-foreground">+{m.countries.length - 10}</span>}
-                  {m.countries.length === 0 && kinds.length === 0 && <span className="text-[11px] text-amber-600 dark:text-amber-400">matches no one automatically — only hand-picked customers</span>}
-                  {m.countries.length === 0 && kinds.length > 0 && <span className="text-[11px] text-muted-foreground">every {kindLabel ? kindLabel.replace(" only", "") : "customer"}, anywhere</span>}
-                </div>
-                <div className="mt-1.5 text-[11px] text-muted-foreground truncate">{ov.length ? ov.join(" · ") : <span className="italic">inherits campaign defaults</span>}</div>
-              </button>
-              <button type="button" onClick={() => onShowCustomers(m.id)} className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-lime-700 dark:text-lime-400 hover:underline">
-                <Users className="w-3 h-3" /> Show customers <ChevronRight className="w-3 h-3" />
-              </button>
-              </div>
-            </div>
-          );
-        })}
-        {markets.length === 0 && (
-          <div className="px-4 py-10 text-center text-[12px] text-muted-foreground">
-            <Globe2 className="w-5 h-5 mx-auto mb-2 text-muted-foreground/50" />
-            No markets yet — every customer gets the campaign defaults.
-            <div className="mt-2">
-              <Button size="sm" onClick={onCreate}><Plus className="w-3.5 h-3.5" /> Create the first market</Button>
-            </div>
-          </div>
-        )}
-      </div>
-      {unassigned.length > 0 && (
-        <div className="mt-auto px-4 py-2.5 border-t border-border bg-muted/30 text-[11px] text-muted-foreground">
-          <span className="font-medium text-foreground">{unassigned.length}</span> countr{unassigned.length === 1 ? "y" : "ies"} with customers ({num.format(unassignedCustomers)}) in no market → campaign defaults.
+
+      {markets.length > 0 && (
+        <div className="hidden md:grid grid-cols-[28px_28px_minmax(0,1.4fr)_minmax(0,1.6fr)_120px_minmax(0,1.2fr)_150px] items-center gap-3 px-4 h-9 text-[11px] text-muted-foreground border-b border-border/60 bg-muted/20">
+          <span />
+          <span>#</span>
+          <span>Market</span>
+          <span>Countries</span>
+          <span className="text-right">Customers</span>
+          <span>Overrides</span>
+          <span />
         </div>
       )}
+
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={(e: DragEndEvent) => {
+          const { active, over } = e;
+          if (!over || active.id === over.id || !onReorder) return;
+          const ids = markets.map((m) => m.id);
+          const from = ids.indexOf(String(active.id));
+          const to = ids.indexOf(String(over.id));
+          if (from < 0 || to < 0) return;
+          onReorder(arrayMove(ids, from, to));
+        }}
+      >
+        <SortableContext items={markets.map((m) => m.id)} strategy={verticalListSortingStrategy}>
+          <div className="divide-y divide-border/60">
+            {markets.map((m, i) => (
+              <MarketRow
+                key={m.id}
+                market={m}
+                index={i}
+                customers={m.countries.reduce((n, iso) => n + (stats[iso]?.customers ?? 0), 0)}
+                pinned={pinned?.[m.id] ?? 0}
+                onEdit={() => onEdit(m.id)}
+                onShowCustomers={() => onShowCustomers(m.id)}
+                draggable={!!onReorder && markets.length > 1}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+
+      {markets.length === 0 && (
+        <div className="px-4 py-12 text-center">
+          <Globe2 className="w-6 h-6 mx-auto mb-3 text-muted-foreground/40" />
+          <p className="text-[13px] font-medium text-foreground">No markets yet</p>
+          <p className="mt-1 text-[12px] text-muted-foreground">Every customer gets the campaign defaults. A market groups countries — or all companies, or all individuals — that share prices, terms and assortment.</p>
+          <div className="mt-4">
+            <Button size="sm" onClick={onCreate}><Plus className="w-3.5 h-3.5" /> Create the first market</Button>
+          </div>
+        </div>
+      )}
+      {unassigned.length > 0 && (
+        <div className="px-4 py-2.5 border-t border-border bg-muted/30 text-[11px] text-muted-foreground">
+          <span className="font-medium text-foreground">{unassigned.length}</span> countr{unassigned.length === 1 ? "y" : "ies"} with customers ({num.format(unassignedCustomers)}) sit in no market → campaign defaults. Assign them under Countries.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MarketRow({
+  market: m,
+  index,
+  customers,
+  pinned,
+  onEdit,
+  onShowCustomers,
+  draggable,
+}: {
+  market: PreorderMarket;
+  index: number;
+  customers: number;
+  pinned: number;
+  onEdit: () => void;
+  onShowCustomers: () => void;
+  draggable: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: m.id, disabled: !draggable });
+  const style = { transform: CSS.Transform.toString(transform), transition, ...(isDragging ? { zIndex: 10, position: "relative" as const } : {}) };
+  const kinds = m.kinds ?? [];
+  const kindLabel = kinds.length === 0 || kinds.length === 2 ? null : kinds[0] === "business" ? "companies only" : "individuals only";
+  const ov = overrideSummary(m.config);
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "group grid grid-cols-[28px_28px_minmax(0,1fr)] md:grid-cols-[28px_28px_minmax(0,1.4fr)_minmax(0,1.6fr)_120px_minmax(0,1.2fr)_150px] items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors",
+        isDragging && "bg-surface shadow-lg ring-1 ring-border",
+      )}
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        disabled={!draggable}
+        className="flex h-7 w-6 items-center justify-center rounded cursor-grab active:cursor-grabbing touch-none text-muted-foreground/40 hover:text-foreground disabled:opacity-0"
+        aria-label="Drag to change priority"
+        title="Drag to change priority"
+      >
+        <GripVertical className="w-4 h-4" />
+      </button>
+      <span className="flex size-6 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground tabular-nums">{index + 1}</span>
+
+      <button type="button" onClick={onEdit} className="min-w-0 text-left">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="size-2.5 rounded-full shrink-0" style={{ background: MARKET_COLORS[m.color].hex }} />
+          <span className="text-[13px] font-semibold text-foreground truncate group-hover:underline decoration-border underline-offset-4">{m.name}</span>
+          {kindLabel && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-border px-1.5 py-px text-[10px] text-muted-foreground shrink-0">
+              {kinds[0] === "business" ? <Building2 className="w-3 h-3" /> : <User className="w-3 h-3" />} {kindLabel}
+            </span>
+          )}
+        </div>
+        <div className="md:hidden mt-1 text-[11px] text-muted-foreground">{num.format(customers)} customers · {ov.length ? ov.join(" · ") : "inherits campaign defaults"}</div>
+      </button>
+
+      <div className="hidden md:flex flex-wrap items-center gap-1 min-w-0">
+        {m.countries.slice(0, 12).map((iso) => (
+          <Flag key={iso} iso={iso} className="text-[14px]" />
+        ))}
+        {m.countries.length > 12 && <span className="text-[11px] text-muted-foreground tabular-nums">+{m.countries.length - 12}</span>}
+        {m.countries.length === 0 && kinds.length > 0 && <span className="text-[11px] text-muted-foreground">any country</span>}
+        {m.countries.length === 0 && kinds.length === 0 && <span className="text-[11px] text-amber-600 dark:text-amber-400">no automatic match — pinned customers only</span>}
+      </div>
+
+      <div className="hidden md:block text-right tabular-nums">
+        <span className="text-[13px] font-semibold text-foreground">{num.format(customers)}</span>
+        {pinned > 0 && <span className="block text-[10px] text-muted-foreground">+{pinned} pinned</span>}
+      </div>
+
+      <div className="hidden md:block text-[11px] text-muted-foreground truncate">{ov.length ? ov.join(" · ") : <span className="italic">inherits campaign defaults</span>}</div>
+
+      <div className="hidden md:flex items-center justify-end gap-1">
+        <Button size="xs" variant="ghost" onClick={onShowCustomers} className="h-7 text-muted-foreground">
+          <Users className="w-3.5 h-3.5" /> Customers
+        </Button>
+        <Button size="xs" variant="ghost" onClick={onEdit} className="h-7 text-muted-foreground">
+          <Pencil className="w-3.5 h-3.5" /> Edit
+        </Button>
+      </div>
     </div>
   );
 }
