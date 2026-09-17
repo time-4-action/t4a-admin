@@ -496,27 +496,11 @@ export default function FillClient({ campaignId, customerStrip }: { campaignId: 
           <div className="min-w-0">
             {/* Who is ordering — the same strip the document lists open with. */}
             {customerStrip && <div className="mb-4">{customerStrip}</div>}
-            {locked && submitted && (
-              <RegistrationBanner registration={registration} published={published} busy={busy === "retry"} onRetry={retryRegistration} />
-            )}
 
             {published && allocation && (
               <YourOrderCard allocation={allocation} currency={currency} orderMkId={orderMkId} pricing={sheet?.pricing} />
             )}
 
-            {locked && !submitted && (
-              <div className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground flex items-center gap-2">
-                <Lock className="w-4 h-4 shrink-0" />
-                This campaign is closed. You&rsquo;re viewing your preorder as it was saved.
-              </div>
-            )}
-
-            {locked && submitted && !confirmedShown && (
-              <h2 className="text-[13px] font-semibold text-foreground mb-2 flex items-center gap-2">
-                Your preorder request
-                <span className="text-[11px] font-normal text-muted-foreground">what you submitted{submission?.submittedAt ? ` on ${fmtDate(submission.submittedAt)}` : ""}</span>
-              </h2>
-            )}
             {confirmedShown && (
               <button
                 type="button"
@@ -528,10 +512,27 @@ export default function FillClient({ campaignId, customerStrip }: { campaignId: 
               </button>
             )}
 
-            {/* One quiet frame for everything the customer needs to know while filling:
-                how they are priced, and how far they are from the section's discount. */}
-            {(!confirmedShown || showRequest) && (sheet.pricing || orphanLines.length > 0 || unpricedFilled.length > 0 || (activeTab && (activeTab.tiers?.length ?? 0) > 0)) && (
-              <div className="mb-4 rounded-xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
+            {/* The order document: status → how you are priced / discount progress →
+                the products. One frame, rows divided, nothing floating. */}
+            {(!confirmedShown || showRequest) && (
+            <div className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
+              {locked && submitted && !confirmedShown && (
+                <RegistrationBanner registration={registration} published={published} busy={busy === "retry"} onRetry={retryRegistration} />
+              )}
+              {locked && !submitted && (
+                <div className="bg-muted/30 px-4 py-2.5 text-[13px] text-muted-foreground flex items-center gap-2">
+                  <Lock className="w-4 h-4 shrink-0" />
+                  This campaign is closed. You&rsquo;re viewing your preorder as it was saved.
+                </div>
+              )}
+              {locked && submitted && (
+                <div className="px-4 py-2.5 flex items-baseline gap-2">
+                  <h2 className="text-[13px] font-semibold text-foreground">Your preorder request</h2>
+                  <span className="text-[11px] text-muted-foreground">what you submitted{submission?.submittedAt ? ` on ${fmtDate(submission.submittedAt)}` : ""}</span>
+                </div>
+              )}
+              {(sheet.pricing || orphanLines.length > 0 || unpricedFilled.length > 0 || (activeTab && (activeTab.tiers?.length ?? 0) > 0)) && (
+              <div className="divide-y divide-border/60 bg-muted/10">
                 <PricingBanner pricing={sheet.pricing} bare />
                 {orphanLines.length > 0 && (
                   <div className="px-4 py-2.5 text-[12px] text-amber-800 dark:text-amber-300 flex items-start gap-2.5 bg-amber-50/70 dark:bg-amber-950/30">
@@ -561,8 +562,8 @@ export default function FillClient({ campaignId, customerStrip }: { campaignId: 
                 )}
                 {activeTab && <TabTierBanner tab={activeTab} quantities={quantities} currency={currency} pricing={sheet.pricing} bare />}
               </div>
-            )}
-            {confirmedShown && !showRequest ? null : !activeTab ? (
+              )}
+            {!activeTab ? (
               <div className="text-center text-[13px] text-muted-foreground py-16">
                 {locked ? "No items in this preorder." : "This sheet has no tabs yet."}
               </div>
@@ -579,21 +580,25 @@ export default function FillClient({ campaignId, customerStrip }: { campaignId: 
                   extraHeader={<th className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-2 text-left w-32">Status</th>}
                   renderExtraCell={renderStatusCell}
                   pricing={sheet.pricing}
+                  bare
                 />
               ) : (
-                <PreorderGridTab tab={activeTab} quantities={quantities} currency={currency} readOnly onlyFilled pricing={sheet.pricing} />
+                <PreorderGridTab tab={activeTab} quantities={quantities} currency={currency} readOnly onlyFilled pricing={sheet.pricing} bare />
               )
             ) : mode === "grid" ? (
-              <PreorderGridTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={sheet.pricing} />
+              <PreorderGridTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={sheet.pricing} bare />
             ) : (
-              <PreorderGuidedTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={sheet.pricing} />
+              <div className="p-4">
+                <PreorderGuidedTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={sheet.pricing} />
+              </div>
             )}
-
+            </div>
+            )}
           </div>
 
           {/* Sidebar */}
-          <aside className="lg:sticky lg:top-4 space-y-3">
-            <div className="rounded-xl border border-border bg-surface overflow-hidden">
+          <aside className="lg:sticky lg:top-4">
+            <div className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
             {confirmedShown && allocation && allocation.state === "ok" ? (
               <div className="p-4 space-y-2">
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Your order</div>
@@ -627,7 +632,7 @@ export default function FillClient({ campaignId, customerStrip }: { campaignId: 
               </p>
             )}
             {locked ? (
-              <div className="border-t border-border/60 p-3 space-y-2">
+              <div className="p-3 space-y-2">
                 <div className="text-[12px] text-muted-foreground flex items-start gap-2">
                   <Lock className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   {submitted ? "This preorder is submitted and locked." : "This campaign is closed."}
@@ -659,8 +664,8 @@ export default function FillClient({ campaignId, customerStrip }: { campaignId: 
                 )}
               </div>
             ) : (
-              <div className="border-t border-border/60 p-3 space-y-2">
-                <Button className="w-full bg-lime-600 hover:bg-lime-700 text-white" onClick={() => setReviewOpen(true)} disabled={busy !== null || vatMissing || unpricedFilled.length > 0}>
+              <div className="p-3 space-y-2">
+                <Button className="w-full" onClick={() => setReviewOpen(true)} disabled={busy !== null || vatMissing || unpricedFilled.length > 0}>
                   <Eye className="w-4 h-4" /> Preview &amp; submit
                 </Button>
                 {vatMissing && (
@@ -679,11 +684,10 @@ export default function FillClient({ campaignId, customerStrip }: { campaignId: 
                 )}
               </div>
             )}
-            </div>
 
             {/* The only two things the customer fills in besides quantities. */}
             {!locked && (
-              <div className="rounded-xl border border-border bg-surface p-3 space-y-2.5">
+              <div className="p-3 space-y-2.5">
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Delivery &amp; note</div>
                 <div>
                   <label className="text-[11px] font-medium text-muted-foreground">Requested delivery <span className="font-normal">(optional)</span></label>
@@ -708,22 +712,23 @@ export default function FillClient({ campaignId, customerStrip }: { campaignId: 
             )}
 
             {!locked && campaign.effective.note && (
-              <div className="rounded-xl border border-lime-300/60 bg-lime-50 dark:border-lime-800/50 dark:bg-lime-950/30 px-3 py-2.5 text-[12px] text-lime-900 dark:text-lime-200 flex items-start gap-2">
-                <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <div className="px-3 py-2.5 text-[12px] text-foreground flex items-start gap-2 bg-muted/20">
+                <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-muted-foreground" />
                 <div className="min-w-0">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-lime-700 dark:text-lime-400">Your terms</div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Your terms</div>
                   <p className="whitespace-pre-line mt-0.5">{campaign.effective.note}</p>
                 </div>
               </div>
             )}
 
             {locked && (terms.deliveryDate || terms.comment) && (
-              <div className="rounded-xl border border-border bg-surface p-3 space-y-1.5">
+              <div className="p-3 space-y-1.5">
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Delivery &amp; note</div>
                 {terms.deliveryDate && <ViewRow label="Requested delivery" value={fmtDate(terms.deliveryDate)} />}
                 {terms.comment && <ViewRow label="Comment" value={terms.comment} />}
               </div>
             )}
+            </div>
           </aside>
         </div>
       </div>
@@ -791,7 +796,7 @@ function RegistrationBanner({
   if (published) return null;
   if (registration.state === "pending") {
     return (
-      <div className="mb-4 rounded-xl border border-sky-200/70 bg-sky-50 dark:border-sky-800/50 dark:bg-sky-950/30 px-4 py-3 text-[13px] text-sky-800 dark:text-sky-200 flex items-center gap-2">
+      <div className="bg-sky-50/70 dark:bg-sky-950/30 px-4 py-2.5 text-[13px] text-sky-800 dark:text-sky-200 flex items-center gap-2">
         <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
         Registering your preorder with our order system…
       </div>
@@ -799,7 +804,7 @@ function RegistrationBanner({
   }
   if (registration.state === "failed") {
     return (
-      <div className="mb-4 rounded-xl border border-amber-300/70 bg-amber-50 dark:border-amber-800/50 dark:bg-amber-950/30 px-4 py-3 text-[13px] text-amber-900 dark:text-amber-200">
+      <div className="bg-amber-50/80 dark:bg-amber-950/30 px-4 py-3 text-[13px] text-amber-900 dark:text-amber-200">
         <div className="flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
           <div className="min-w-0 flex-1">
@@ -816,7 +821,7 @@ function RegistrationBanner({
     );
   }
   return (
-    <div className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground flex items-center gap-2">
+    <div className="bg-muted/30 px-4 py-2.5 text-[13px] text-muted-foreground flex items-center gap-2">
       <Lock className="w-4 h-4 shrink-0" />
       This preorder is submitted and being processed. You&rsquo;ll see your confirmed order here once it is ready.
     </div>
@@ -866,8 +871,8 @@ function YourOrderCard({
   const totalSplit = total != null ? split(total) : null;
   const changed = a.lines.filter((l) => l.status !== "full").length;
   return (
-    <section className="mb-5 rounded-2xl border border-emerald-300/60 bg-emerald-50/60 dark:border-emerald-800/50 dark:bg-emerald-950/20 overflow-hidden">
-      <div className="px-4 py-3 flex items-center gap-3 border-b border-emerald-200/60 dark:border-emerald-800/40">
+    <section className="mb-4 rounded-2xl border border-border bg-surface overflow-hidden">
+      <div className="px-4 py-3 flex items-center gap-3 border-b border-border/60 bg-muted/20">
         <PackageCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
         <div className="min-w-0 flex-1">
           <h2 className="text-[14px] font-semibold text-foreground">Your confirmed order</h2>
@@ -923,7 +928,7 @@ function YourOrderCard({
                         : null;
               const lineSplit = l.lineTotal != null ? split(l.lineTotal) : null;
               return (
-                <tr key={l.code} className={cn("border-t border-emerald-200/40 dark:border-emerald-800/30", !same && "bg-amber-50/50 dark:bg-amber-950/15")}>
+                <tr key={l.code} className={cn("border-t border-border/40", !same && "bg-amber-50/50 dark:bg-amber-950/15")}>
                   <td className="px-4 py-2">
                     <div className="font-medium text-foreground truncate max-w-[28rem]">{l.name}</div>
                     <div className="text-[10px] text-muted-foreground font-mono">
@@ -943,7 +948,7 @@ function YourOrderCard({
             })}
           </tbody>
           {total != null && (
-            <tfoot className="border-t border-emerald-200/60 dark:border-emerald-800/40">
+            <tfoot className="border-t border-border/60 bg-muted/10">
               {totalSplit && rate != null && rate > 0 && (
                 <>
                   <tr>

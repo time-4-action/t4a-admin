@@ -95,7 +95,7 @@ export function TabBar({
             className={cn(
               "shrink-0 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-all",
               active
-                ? "bg-lime-600 text-white shadow-sm"
+                ? "bg-foreground text-background shadow-sm"
                 : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
           >
@@ -201,7 +201,7 @@ export function PricingBanner({ pricing, className, bare }: { pricing: PricingCo
         className,
       )}
     >
-      <Icon className={cn("w-4 h-4 shrink-0 mt-px", missing ? "text-amber-600" : "text-lime-600")} />
+      <Icon className={cn("w-4 h-4 shrink-0 mt-px", missing ? "text-amber-600" : "text-muted-foreground")} />
       <div className="min-w-0">
         {missing ? (
           <>
@@ -238,7 +238,7 @@ function priceHeader(label: string, sub: string, active: boolean) {
   return (
     <span className={cn("inline-flex flex-col items-end leading-tight", active ? "text-foreground" : "")}>
       <span>{label}</span>
-      <span className={cn("text-[9px] normal-case tracking-normal font-medium", active ? "text-lime-700 dark:text-lime-400" : "text-muted-foreground/70")}>
+      <span className={cn("text-[9px] normal-case tracking-normal font-medium", active ? "text-foreground/70" : "text-muted-foreground/60")}>
         {active ? `your price · ${sub}` : sub}
       </span>
     </span>
@@ -258,6 +258,7 @@ export function PreorderGridTab({
   qtyHeader,
   renderQty,
   pricing,
+  bare = false,
 }: {
   tab: PreorderTab;
   quantities: QtyMap;
@@ -270,6 +271,7 @@ export function PreorderGridTab({
   qtyHeader?: string; // custom Qty column label
   renderQty?: (rowId: string, qty: number) => ReactNode; // custom read-only qty cell
   pricing?: PricingContext | null; // the customer's price basis (campaign.pricing); partner when absent
+  bare?: boolean; // no border / radius — the caller frames it
 }) {
   const th = "text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-2";
   const basis: PriceBasis = pricing?.basis ?? "partner";
@@ -279,10 +281,10 @@ export function PreorderGridTab({
         .filter((g) => g.rows.length > 0)
     : tab.groups;
   return (
-    <div className="rounded-xl border border-border bg-surface overflow-x-auto">
+    <div className={cn("overflow-x-auto", !bare && "rounded-xl border border-border bg-surface")}>
       <table className="w-full text-[12px] border-collapse">
         <thead className="sticky top-0 z-10 bg-surface">
-          <tr className="border-b border-border">
+          <tr className="border-b border-border bg-muted/20">
             <th className={cn(th, "text-left pl-4 min-w-[220px]")}>Product</th>
             <th className={cn(th, "text-left")}>SKU</th>
             <th className={cn(th, "text-right")}>{priceHeader("RRP", "incl. VAT", basis === "rrp")}</th>
@@ -348,8 +350,8 @@ function GroupRows({
   const span = 6 + (hasExtra ? 1 : 0);
   return (
     <>
-      <tr className="bg-muted/40">
-        <td colSpan={span} className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-foreground/70">
+      <tr className="bg-muted/15">
+        <td colSpan={span} className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           {groupName}
         </td>
       </tr>
@@ -390,7 +392,7 @@ function GroupRows({
           );
         }
         return (
-          <tr key={r.id} className={cn("border-b border-border/40 hover:bg-muted/20", qty > 0 && "bg-lime-50/40 dark:bg-lime-950/10")}>
+          <tr key={r.id} className={cn("border-b border-border/40 hover:bg-muted/20", qty > 0 && "bg-muted/25")}>
             <td className="pl-4 pr-2 py-1.5">
               <div className="flex items-center gap-2 min-w-0">
                 <RowThumb row={r} />
@@ -529,7 +531,7 @@ function ProductCard({
       onClick={onOpen}
       className={cn(
         "group text-left rounded-xl border bg-surface overflow-hidden transition-colors flex flex-col",
-        cart > 0 ? "border-lime-400 dark:border-lime-600" : "border-border hover:border-foreground/20",
+        cart > 0 ? "border-foreground/50" : "border-border hover:border-foreground/20",
       )}
     >
       <div className="relative aspect-square bg-muted flex items-center justify-center overflow-hidden">
@@ -824,7 +826,7 @@ export function TabTierBanner({
       className={cn(
         "px-4 py-3",
         !bare && "rounded-xl border",
-        reached ? cn("bg-lime-50/60 dark:bg-lime-950/20", !bare && "border-lime-300 dark:border-lime-800") : !bare && "border-border bg-surface",
+        !bare && "border-border bg-surface",
         className,
       )}
     >
@@ -870,10 +872,10 @@ export function TabTierBanner({
               className={cn(
                 "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
                 current
-                  ? "bg-lime-600 text-white font-semibold"
+                  ? "bg-foreground text-background font-semibold"
                   : hit
-                    ? "bg-lime-100 dark:bg-lime-900/40 text-lime-700 dark:text-lime-300"
-                    : "bg-muted text-muted-foreground",
+                    ? "bg-muted text-foreground"
+                    : "bg-muted/60 text-muted-foreground",
               )}
             >
               {current && <Check className="w-2.5 h-2.5" />}
