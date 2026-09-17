@@ -28,11 +28,6 @@ import {
   ExternalLink,
   Info,
   ChevronRight,
-  User,
-  Building2,
-  Phone,
-  MapPin,
-  Truck,
 } from "lucide-react";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
 import { computeConfirmedTotals, flattenRows } from "@/types/preorder";
@@ -87,7 +82,7 @@ type LoadData = {
   partner?: { name: string };
 };
 
-export default function FillClient({ campaignId }: { campaignId: string }) {
+export default function FillClient({ campaignId, customerStrip }: { campaignId: string; customerStrip?: React.ReactNode }) {
   const [campaign, setCampaign] = useState<PortalCampaign | null>(null);
   const [frozen, setFrozen] = useState<PreorderCampaign | null>(null);
   const [allocation, setAllocation] = useState<AllocationResult | null>(null);
@@ -500,22 +495,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
           {/* Sheet */}
           <div className="min-w-0">
             {/* Who is ordering — the same strip the document lists open with. */}
-            <div className="mb-4 rounded-2xl border border-border bg-surface px-4 py-3 flex items-start gap-3">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-lime-600/10 shrink-0">
-                {sheet.pricing?.kind === "person" ? <User className="h-4 w-4 text-lime-600" /> : <Building2 className="h-4 w-4 text-lime-600" />}
-              </span>
-              <div className="min-w-0">
-                <p className="text-[14px] font-semibold text-foreground truncate">{partnerName}</p>
-                <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-muted-foreground">
-                  {terms.phone && <span className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 shrink-0" /> {terms.phone}</span>}
-                  {terms.invoiceAddress && <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 shrink-0" /> {terms.invoiceAddress}</span>}
-                  {terms.shippingAddress && terms.shippingAddress !== terms.invoiceAddress && (
-                    <span className="inline-flex items-center gap-1.5"><Truck className="h-3.5 w-3.5 shrink-0" /> ships to {terms.shippingAddress}</span>
-                  )}
-                </div>
-              </div>
-              <span className="ml-auto text-[10px] text-muted-foreground shrink-0 hidden sm:inline">from our records · contact us if wrong</span>
-            </div>
+            {customerStrip && <div className="mb-4">{customerStrip}</div>}
             {locked && submitted && (
               <RegistrationBanner registration={registration} published={published} busy={busy === "retry"} onRetry={retryRegistration} />
             )}
