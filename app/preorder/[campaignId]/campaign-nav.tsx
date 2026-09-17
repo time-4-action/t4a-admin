@@ -147,6 +147,7 @@ export function CampaignHeader({
   beforeActions,
   actions,
   navExtra,
+  hideNav = false,
   className,
 }: {
   campaignId: string;
@@ -158,6 +159,8 @@ export function CampaignHeader({
   beforeActions?: React.ReactNode;
   actions?: React.ReactNode;
   navExtra?: React.ReactNode;
+  /** Title row only — for detail pages that are one level below the campaign tabs. */
+  hideNav?: boolean;
   className?: string;
 }) {
   return (
@@ -183,9 +186,11 @@ export function CampaignHeader({
           {actions}
         </div>
       </div>
-      <CampaignNav campaignId={campaignId} active={active}>
-        {navExtra}
-      </CampaignNav>
+      {!hideNav && (
+        <CampaignNav campaignId={campaignId} active={active}>
+          {navExtra}
+        </CampaignNav>
+      )}
     </header>
   );
 }
