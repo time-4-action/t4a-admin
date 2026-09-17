@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Trash2, Check, Globe2, Wallet, Percent, Boxes, X, Building2, User } from "lucide-react";
 import { Flag } from "@/components/flag";
+import { TagField } from "@/components/ui/tag-field";
 import type { MkCustomerView } from "@/lib/mk-customers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -229,10 +230,10 @@ export function MarketModal({
 
               <div>
                 <div className="flex items-center gap-2">
-                  <label className="text-[12px] font-medium text-foreground">Customers</label>
+                  <label className="text-[12px] font-medium text-foreground">Market customers</label>
                   <span className="text-[12px] text-muted-foreground tabular-nums">{draft.customers.length}</span>
                   <div className="flex-1" />
-                  <span className="text-[11px] text-muted-foreground">Pinned customers are in regardless of country, kind or priority.</span>
+                  <span className="text-[11px] text-muted-foreground">Customers placed in this market by hand — they stay here whatever their country, kind or the priority order.</span>
                 </div>
                 <div className="mt-2">
                   <CustomerPicker
@@ -396,45 +397,50 @@ function CustomerPicker({
 
   return (
     <div ref={rootRef} className="relative">
-      <div
-        onClick={() => inputRef.current?.focus()}
-        className="flex flex-wrap items-center gap-1.5 min-h-[40px] rounded-lg border border-input bg-background px-2 py-1.5 cursor-text focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50"
-      >
-        {value.map((c) => (
-          <span key={c.partnerMkId} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 h-6 text-[11px] font-medium text-foreground">
-            {c.partnerName || c.partnerMkId}
-            <button type="button" onClick={(e) => { e.stopPropagation(); remove(c.partnerMkId); }} className="opacity-60 hover:opacity-100" aria-label={`Remove ${c.partnerName}`}>
-              <X className="w-3 h-3" />
-            </button>
-          </span>
-        ))}
-        <input
-          ref={inputRef}
-          value={q}
-          onChange={(e) => {
-            setQ(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          onKeyDown={(e) => {
-            if (e.key === "ArrowDown") {
-              e.preventDefault();
-              setActive((a) => Math.min(options.length - 1, a + 1));
-            } else if (e.key === "ArrowUp") {
-              e.preventDefault();
-              setActive((a) => Math.max(0, a - 1));
-            } else if (e.key === "Enter" && q.trim() && options[active]) {
-              e.preventDefault();
-              add(options[active]);
-            } else if (e.key === "Backspace" && q === "" && value.length > 0) {
-              e.preventDefault();
-              remove(value[value.length - 1].partnerMkId);
-            } else if (e.key === "Escape") setOpen(false);
-          }}
-          placeholder={value.length === 0 ? "Type a name, email or VAT id…" : "Add another…"}
-          className="h-6 min-w-[200px] flex-1 bg-transparent px-1 text-[12.5px] outline-none placeholder:text-muted-foreground/60"
-        />
-      </div>
+      <TagField
+        inputRef={inputRef}
+        chips={value.map((c) => ({
+          key: c.partnerMkId,
+          node: (
+            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 h-6 text-[11px] font-medium text-foreground">
+              {c.partnerName || c.partnerMkId}
+              <button type="button" onClick={(e) => { e.stopPropagation(); remove(c.partnerMkId); }} className="opacity-60 hover:opacity-100" aria-label={`Remove ${c.partnerName}`}>
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          ),
+        }))}
+        onRemoveAt={(i) => remove(value[i].partnerMkId)}
+        value={q}
+        onChange={(v) => {
+          setQ(v);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setActive((a) => Math.min(options.length - 1, a + 1));
+            return true;
+          }
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setActive((a) => Math.max(0, a - 1));
+            return true;
+          }
+          if (e.key === "Enter" && q.trim() && options[active]) {
+            e.preventDefault();
+            add(options[active]);
+            return true;
+          }
+          if (e.key === "Escape") {
+            setOpen(false);
+            return true;
+          }
+          return false;
+        }}
+        placeholder="Type a name, email or VAT id…"
+      />
       <div className="relative">
         {open && q.trim().length >= 2 && (
           <div className="absolute left-0 right-0 top-full mt-1 z-20 rounded-lg border border-border bg-background shadow-lg overflow-hidden">

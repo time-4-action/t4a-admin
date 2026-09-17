@@ -15,6 +15,7 @@ import { Plus, X, Search, Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EUROPE_ISO } from "@/lib/countries-client";
 import { Flag } from "@/components/flag";
+import { TagField } from "@/components/ui/tag-field";
 import { MARKET_COLORS } from "@/app/preorder/preorder-badges";
 import type { PreorderMarket } from "@/types/preorder";
 import type { CountryGeo } from "@/lib/preorder-customers";
@@ -79,52 +80,56 @@ export function CountryPicker({
 
   return (
     <div ref={rootRef} className="relative">
-      {/* One field: the picked countries as chips, then the search caret right after them. */}
-      <div
-        onClick={() => inputRef.current?.focus()}
-        className="flex flex-wrap items-center gap-1.5 min-h-[40px] rounded-lg border border-input bg-background px-2 py-1.5 cursor-text focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50"
-      >
-        {value.map((iso) => {
+      {/* One field: the picked countries as chips with a movable caret between them. */}
+      <TagField
+        inputRef={inputRef}
+        chips={value.map((iso) => {
           const other = marketOf.get(iso);
           const moved = other && other.id !== currentMarketId;
-          return (
-            <span key={iso} className={cn("inline-flex items-center gap-1 rounded-full px-2 h-6 text-[11px] font-medium", moved ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200" : "bg-muted text-foreground")} title={moved ? `Also in ${other.name} — the market with higher priority wins` : undefined}>
-              <Flag iso={iso} /> {countryNames[iso] ?? iso}
-              <span className="text-[10px] font-normal opacity-70 tabular-nums">{stats[iso]?.customers ?? 0}</span>
-              <button type="button" onClick={(e) => { e.stopPropagation(); remove(iso); }} className="opacity-60 hover:opacity-100" aria-label={`Remove ${iso}`}>
-                <X className="w-3 h-3" />
-              </button>
-            </span>
-          );
+          return {
+            key: iso,
+            node: (
+              <span className={cn("inline-flex items-center gap-1 rounded-full px-2 h-6 text-[11px] font-medium", moved ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200" : "bg-muted text-foreground")} title={moved ? `Also in ${other.name} — the market with higher priority wins` : undefined}>
+                <Flag iso={iso} /> {countryNames[iso] ?? iso}
+                <span className="text-[10px] font-normal opacity-70 tabular-nums">{stats[iso]?.customers ?? 0}</span>
+                <button type="button" onClick={(e) => { e.stopPropagation(); remove(iso); }} className="opacity-60 hover:opacity-100" aria-label={`Remove ${iso}`}>
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ),
+          };
         })}
-        <input
-          ref={inputRef}
-          value={q}
-          onChange={(e) => {
-            setQ(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          onKeyDown={(e) => {
-            if (e.key === "ArrowDown") {
-              e.preventDefault();
-              setActive((a) => Math.min(options.length - 1, a + 1));
-            } else if (e.key === "ArrowUp") {
-              e.preventDefault();
-              setActive((a) => Math.max(0, a - 1));
-            } else if (e.key === "Enter" && q.trim() && options[active]) {
-              e.preventDefault();
-              add(options[active].iso);
-            } else if (e.key === "Backspace" && q === "" && value.length > 0) {
-              // Nothing typed: Backspace takes the last chip, like any tag field.
-              e.preventDefault();
-              remove(value[value.length - 1]);
-            } else if (e.key === "Escape") setOpen(false);
-          }}
-          placeholder={value.length === 0 ? "Type a country name or ISO code…" : "Add another…"}
-          className="h-6 min-w-[160px] flex-1 bg-transparent px-1 text-[12.5px] outline-none placeholder:text-muted-foreground/60"
-        />
-      </div>
+        onRemoveAt={(i) => remove(value[i])}
+        value={q}
+        onChange={(v) => {
+          setQ(v);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setActive((a) => Math.min(options.length - 1, a + 1));
+            return true;
+          }
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setActive((a) => Math.max(0, a - 1));
+            return true;
+          }
+          if (e.key === "Enter" && q.trim() && options[active]) {
+            e.preventDefault();
+            add(options[active].iso);
+            return true;
+          }
+          if (e.key === "Escape") {
+            setOpen(false);
+            return true;
+          }
+          return false;
+        }}
+        placeholder="Type a country name or ISO code…"
+      />
 
       <div className="relative">
         {open && options.length > 0 && (
