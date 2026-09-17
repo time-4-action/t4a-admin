@@ -217,8 +217,14 @@ function MarketRow({
     <div
       ref={setNodeRef}
       style={style}
+      role="button"
+      tabIndex={0}
+      onClick={onEdit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onEdit();
+      }}
       className={cn(
-        "group grid grid-cols-[28px_28px_minmax(0,1fr)] md:grid-cols-[28px_28px_minmax(0,1.4fr)_minmax(0,1.6fr)_120px_minmax(0,1.2fr)_150px] items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors",
+        "group grid grid-cols-[28px_28px_minmax(0,1fr)] md:grid-cols-[28px_28px_minmax(0,1.4fr)_minmax(0,1.6fr)_120px_minmax(0,1.2fr)_150px] items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors cursor-pointer outline-none focus-visible:bg-muted/30",
         isDragging && "bg-surface shadow-lg ring-1 ring-border",
       )}
     >
@@ -227,6 +233,7 @@ function MarketRow({
         {...attributes}
         {...listeners}
         disabled={!draggable}
+        onClick={(e) => e.stopPropagation()}
         className="flex h-7 w-6 items-center justify-center rounded cursor-grab active:cursor-grabbing touch-none text-muted-foreground/40 hover:text-foreground disabled:opacity-0"
         aria-label="Drag to change priority"
         title="Drag to change priority"
@@ -235,7 +242,7 @@ function MarketRow({
       </button>
       <span className="flex size-6 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground tabular-nums">{index + 1}</span>
 
-      <button type="button" onClick={onEdit} className="min-w-0 text-left">
+      <div className="min-w-0 text-left">
         <div className="flex items-center gap-2 min-w-0">
           <span className="size-2.5 rounded-full shrink-0" style={{ background: MARKET_COLORS[m.color].hex }} />
           <span className="text-[13px] font-semibold text-foreground truncate group-hover:underline decoration-border underline-offset-4">{m.name}</span>
@@ -246,7 +253,7 @@ function MarketRow({
           )}
         </div>
         <div className="md:hidden mt-1 text-[11px] text-muted-foreground">{num.format(customers)} customers · {ov.length ? ov.join(" · ") : "inherits campaign defaults"}</div>
-      </button>
+      </div>
 
       <div className="hidden md:flex flex-wrap items-center gap-1 min-w-0">
         {m.countries.slice(0, 12).map((iso) => (
@@ -265,10 +272,10 @@ function MarketRow({
       <div className="hidden md:block text-[11px] text-muted-foreground truncate">{ov.length ? ov.join(" · ") : <span className="italic">inherits campaign defaults</span>}</div>
 
       <div className="hidden md:flex items-center justify-end gap-1">
-        <Button size="xs" variant="ghost" onClick={onShowCustomers} className="h-7 text-muted-foreground">
+        <Button size="xs" variant="ghost" onClick={(e) => { e.stopPropagation(); onShowCustomers(); }} className="h-7 text-muted-foreground">
           <Users className="w-3.5 h-3.5" /> Customers
         </Button>
-        <Button size="xs" variant="ghost" onClick={onEdit} className="h-7 text-muted-foreground">
+        <Button size="xs" variant="outline" onClick={(e) => { e.stopPropagation(); onEdit(); }} className="h-7 bg-background">
           <Pencil className="w-3.5 h-3.5" /> Edit
         </Button>
       </div>

@@ -25,7 +25,7 @@ import type { CountryGeo } from "@/lib/preorder-customers";
 import { MarketModal, type MarketDraft } from "./market-modal";
 import { CustomerModal } from "./customer-modal";
 import { CountryDrawer } from "./country-drawer";
-import { CountriesTable, CustomersTable, MarketsPanel, type CustomerFilters } from "./tables";
+import { CountriesTable, CustomersTable, MarketsPanel, marketCustomerCounts, type CustomerFilters } from "./tables";
 
 type View = "customers" | "markets" | "countries";
 type DrawerState =
@@ -280,7 +280,7 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
   const openCustomer = (partnerMkId: string) => setDrawer({ type: "customer", partnerMkId });
   const openCountry = (iso: string) => setDrawer({ type: "country", iso });
   const drawerMarket = drawer?.type === "market" && drawer.id ? markets.find((m) => m.id === drawer.id) ?? null : null;
-  const drawerCustomerCount = drawerMarket ? drawerMarket.countries.reduce((n, iso) => n + (stats[iso]?.customers ?? 0), 0) : 0;
+  const drawerCustomerCount = drawerMarket ? (marketCustomerCounts(markets, stats)[drawerMarket.id] ?? 0) : 0;
 
   const assignedCountries = new Set(markets.flatMap((m) => m.countries));
   const countriesWithCustomers = Object.entries(stats).filter(([, s]) => s.customers > 0);
