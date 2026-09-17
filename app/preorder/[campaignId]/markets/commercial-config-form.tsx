@@ -624,7 +624,7 @@ function BulkButtons({ onShow, onHide, onReset, small }: { onShow: () => void; o
 }
 
 // The per-row control: a labelled switch that always reads as the customer sees
-// it — green "Visible" or grey "Hidden".
+// it. Plain track + knob, eased motion, no pill around it.
 function VisibilitySwitch({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
@@ -632,17 +632,25 @@ function VisibilitySwitch({ on, onChange }: { on: boolean; onChange: (v: boolean
       role="switch"
       aria-checked={on}
       onClick={() => onChange(!on)}
-      className={cn(
-        "inline-flex items-center gap-2 rounded-full border pl-1 pr-2.5 h-7 text-[11px] font-semibold transition-colors shrink-0",
-        on
-          ? "border-lime-500/40 bg-lime-500/12 text-lime-700 dark:text-lime-400"
-          : "border-border bg-muted text-muted-foreground",
-      )}
+      className="group inline-flex items-center gap-2.5 h-8 rounded-full pl-0.5 pr-2 shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
     >
-      <span className={cn("relative h-5 w-9 rounded-full transition-colors", on ? "bg-lime-500" : "bg-muted-foreground/30")}>
-        <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all", on ? "left-[18px]" : "left-0.5")} />
+      <span
+        className={cn(
+          "relative h-[22px] w-10 rounded-full transition-colors duration-300 ease-out",
+          on ? "bg-lime-500" : "bg-muted-foreground/25 group-hover:bg-muted-foreground/35",
+        )}
+      >
+        <span
+          className={cn(
+            "absolute top-[3px] left-[3px] h-4 w-4 rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.25)]",
+            "transition-transform duration-300 [transition-timing-function:cubic-bezier(0.2,0.8,0.2,1)]",
+            on ? "translate-x-[18px]" : "translate-x-0",
+          )}
+        />
       </span>
-      <span className="w-11 text-left">{on ? "Visible" : "Hidden"}</span>
+      <span className={cn("w-11 text-left text-[12px] font-medium transition-colors duration-300", on ? "text-lime-700 dark:text-lime-400" : "text-muted-foreground")}>
+        {on ? "Visible" : "Hidden"}
+      </span>
     </button>
   );
 }
