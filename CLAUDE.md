@@ -623,7 +623,7 @@ from client input.
 | Campaigns | `/preorder` | List + create; `marketCount` / override badges. |
 | Overview | `/preorder/[id]` | KPIs (incl. In Metakocka / Published / Integration failures), latest preorders. Every campaign page renders the shared `CampaignHeader` (`app/preorder/[campaignId]/campaign-nav.tsx`): a fixed-height title row (back · title + meta · actions) over the `CampaignNav` underline tab strip (Overview · Sheet · Markets & Customers · Preorders · Preview), so the tabs sit on the same pixels everywhere. Page-specific toolbars (sheet settings, preview sheet tabs) live **below** the header, never inside it; small view switchers go in `navExtra` (right end of the tab row). |
 | Sheet | `/preorder/[id]/edit` | Builder (autosaves `tabs`). Row eye toggle = **restricted** (not in the default assortment). Re-price also refreshes the price books. |
-| Markets & Customers | `/preorder/[id]/markets` | List-based: summary strip + **Customers** view (directory table, company/individual split) and **Markets & countries** view (markets panel + Countries table for assignment) + contextual right drawers for markets and countries (`components/ui/drawer.tsx`, non-modal). A **customer opens in a large two-column editor modal** (`customer-modal.tsx` on `components/ui/editor-modal.tsx`: context on the left — identity, access, inheritance ladder, effective config — editor on the right — placement + commercial overrides). See below. |
+| Markets & Customers | `/preorder/[id]/markets` | List-based: summary strip + **Customers** view (directory table, company/individual split) and **Markets & countries** view (markets panel + Countries table for assignment) + a contextual right drawer for a country (`components/ui/drawer.tsx`, non-modal). **Markets and customers open in the large tabbed editor modal** (`market-modal.tsx`, `customer-modal.tsx` on `components/ui/editor-modal.tsx`): header + tab strip — a customer gets Overview · Placement · Pricing & terms · Volume discounts · Assortment, a market gets Market · Pricing & terms · Volume discounts · Assortment — the config tabs are slices of `commercial-config-form.tsx` (`section` prop). See below. |
 | Preorders | `/preorder/[id]/submissions` | Full table with stage / Metakocka / visibility columns, filters incl. integration failures. |
 | Preorder detail | `/preorder/[id]/submissions/[sid]` | Three panels: **Requested preorder** (frozen snapshot), **Current Metakocka order** (live, compared line by line), **Customer visibility** (Show/Hide order to customer). Unlock detaches the MK order (optionally deletes it). |
 | Preview | `/preorder/[id]/preview` | Pick a partner (`?partner=<mkId>` deep link) → the sheet renders their **effective** campaign with an admin-only "Effective configuration" card (market, pricing, assortment, discounts, sources, warnings). "Fill for customer" submits through the same service as the portal. |
@@ -776,7 +776,7 @@ and exposes `registration: { state, canRetry }` + `published`.
   search), `…/customers/sync` (GET status / POST start),
   `…/customers/[partnerMkId]` (GET, PATCH manual country, POST refresh from MK).
 - `commercial-config-form.tsx` is the inheritance-aware editor shared by the
-  market drawer and the customer modal: every field shows the inherited value + source
+  market and customer modals: every field shows the inherited value + source
   badge with **Override / Reset to inherited**; the inherited baseline is computed
   client-side with the same pure resolver (campaign without that layer).
 

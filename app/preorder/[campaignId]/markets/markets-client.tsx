@@ -22,7 +22,7 @@ import { CampaignStatusBadge } from "@/app/preorder/preorder-badges";
 import type { MkPricelist } from "@/types/documents";
 import type { PreorderCampaignAdmin, PreorderMarket } from "@/types/preorder";
 import type { CountryGeo } from "@/lib/preorder-customers";
-import { MarketDrawer, type MarketDraft } from "./market-drawer";
+import { MarketModal, type MarketDraft } from "./market-modal";
 import { CustomerModal } from "./customer-modal";
 import { CountryDrawer } from "./country-drawer";
 import { CountriesTable, CustomersTable, MarketsPanel, type CustomerFilters } from "./tables";
@@ -322,7 +322,7 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
       </div>
 
       {/* drawers */}
-      <MarketDrawer
+      <MarketModal
         open={drawer?.type === "market"}
         onOpenChange={(o) => !o && setDrawer(null)}
         campaign={campaign}
