@@ -305,7 +305,7 @@ export default function SubmissionClient({
   const t = submission.terms;
   const snap = submission.snapshot;
   const mkDocHref = submission.mkSalesOrder
-    ? `/documents/${encodeURIComponent(submission.partnerMkId)}/order/${encodeURIComponent(submission.mkSalesOrder.mkId)}`
+    ? `/documents/orders/${encodeURIComponent(submission.mkSalesOrder.mkId)}`
     : null;
 
   const renderLegacyCell = (rowId: string) => {
@@ -561,7 +561,7 @@ export default function SubmissionClient({
                   <ul className="space-y-0.5">
                     {submission.mkSalesOrderHistory!.map((h) => (
                       <li key={h.mkId} className="text-[11px] flex items-center gap-1.5">
-                        <Link href={`/documents/${encodeURIComponent(submission.partnerMkId)}/order/${encodeURIComponent(h.mkId)}`} className="font-mono text-foreground hover:text-lime-600">{h.countCode || h.mkId}</Link>
+                        <Link href={`/documents/orders/${encodeURIComponent(h.mkId)}`} className="font-mono text-foreground hover:text-lime-600">{h.countCode || h.mkId}</Link>
                         <span className="text-muted-foreground">{h.deletedInMk ? "deleted in MK" : "detached"} · {fmtDateTime(h.detachedAt)}</span>
                       </li>
                     ))}

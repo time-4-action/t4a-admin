@@ -569,8 +569,8 @@ fed by `GET /api/admin/preorder/customers?activity=1`, which the `customers`
 section gates together with `/api/admin/portal/*`),
 the preorder customer modal and the Documents customer header.
 | Customer picker (admin) | `/documents` | Search a partner by name/email/tax. |
-| Customer docs (admin) | `/documents/[partnerMkId]` | Offers/Orders/Invoices/Credit notes tabs. |
-| Detail (admin) | `/documents/[partnerMkId]/[kind]/[mkId]` | Same detail view, any partner. |
+| Customer docs (admin) | `/documents/{offers,orders,invoices,credit-notes}` | Per-family lists for the picked customer (customer kept in localStorage via `use-customer.ts`). |
+| Detail (admin) | `/documents/{offers,orders,invoices,credit-notes}/[mkId]` | Same detail view, any partner. |
 
 | Proxy route | Methods |
 |---|---|

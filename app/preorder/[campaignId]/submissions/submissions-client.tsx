@@ -147,7 +147,7 @@ export function PreordersTable({
             </TableCell>
             <TableCell className="text-[12px] whitespace-nowrap">
               {s.mkCountCode && s.mkId ? (
-                <Link href={`/documents/${encodeURIComponent(s.partnerMkId)}/order/${encodeURIComponent(s.mkId)}`} className="inline-flex items-center gap-1 font-mono text-foreground hover:text-lime-600">
+                <Link href={`/documents/orders/${encodeURIComponent(s.mkId)}`} className="inline-flex items-center gap-1 font-mono text-foreground hover:text-lime-600">
                   {s.mkCountCode} <ExternalLink className="w-3 h-3" />
                 </Link>
               ) : s.mkState === "failed" ? (
