@@ -288,6 +288,7 @@ export function CountriesTable({
   onAssign,
   onOpenCountry,
   onOpenCustomer,
+  onPinCustomer,
 }: {
   campaignId: string;
   stats: Record<string, CountryGeo>;
@@ -296,6 +297,8 @@ export function CountriesTable({
   onAssign: (marketId: string | null, isos: string[]) => Promise<void>;
   onOpenCountry: (iso: string) => void;
   onOpenCustomer: (partnerMkId: string) => void;
+  /** Pin one customer to a market (null = back to automatic). Resolves when saved. */
+  onPinCustomer: (partnerMkId: string, marketId: string | null) => Promise<void>;
 }) {
   const [q, setQ] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set()); // countries showing their customers
@@ -495,11 +498,14 @@ export function CountriesTable({
               </TableCell>
             </TableRow>
             {isOpen && (
-              <TableRow className="border-b border-border/60 hover:bg-transparent">
-                <TableCell colSpan={8} className="p-0">
-                  <CountryCustomers campaignId={campaignId} iso={r.iso} total={r.s.customers} onOpen={onOpenCustomer} />
-                </TableCell>
-              </TableRow>
+              <CountryCustomers
+                campaignId={campaignId}
+                iso={r.iso}
+                total={r.s.customers}
+                markets={markets}
+                onOpen={onOpenCustomer}
+                onPin={onPinCustomer}
+              />
             )}
             </Fragment>
             );
@@ -517,9 +523,27 @@ export function CountriesTable({
   );
 }
 
-// The customers of one country, shown inline under its row (first 50).
-function CountryCustomers({ campaignId, iso, total, onOpen }: { campaignId: string; iso: string; total: number; onOpen: (partnerMkId: string) => void }) {
+// The customers of one country, shown as rows under the country — same columns
+// as the table, so nothing shifts. Each row's Market select pins that customer
+// to a market (or sets it back to automatic).
+function CountryCustomers({
+  campaignId,
+  iso,
+  total,
+  markets,
+  onOpen,
+  onPin,
+}: {
+  campaignId: string;
+  iso: string;
+  total: number;
+  markets: PreorderMarket[];
+  onOpen: (partnerMkId: string) => void;
+  onPin: (partnerMkId: string, marketId: string | null) => Promise<void>;
+}) {
   const [rows, setRows] = useState<CustomerRow[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [gen, setGen] = useState(0);
   useEffect(() => {
     let alive = true;
     fetch(`/api/admin/preorder/campaigns/${campaignId}/customers?country=${encodeURIComponent(iso)}&pageSize=50`, { cache: "no-store" })
@@ -529,46 +553,91 @@ function CountryCustomers({ campaignId, iso, total, onOpen }: { campaignId: stri
     return () => {
       alive = false;
     };
-  }, [campaignId, iso]);
+  }, [campaignId, iso, gen]);
+
+  const sub = "bg-muted/15";
+  if (rows === null) {
+    return (
+      <>
+        {[0, 1, 2].map((i) => (
+          <TableRow key={i} className={cn("border-b border-border/40", sub)}>
+            <TableCell className="pl-3 pr-0" />
+            <TableCell />
+            <TableCell className="py-2 pl-8"><SkeletonLine lh="h-[18px]" h="h-3" w={["w-44", "w-36", "w-52"][i]} delay={stagger(i, 60)} /></TableCell>
+            <TableCell colSpan={5} />
+          </TableRow>
+        ))}
+      </>
+    );
+  }
   return (
-    <div className="bg-muted/20 border-l-2 border-l-lime-500/50 ml-6 my-1.5 mr-4 rounded-r-lg overflow-hidden">
-      {rows === null ? (
-        <div className="px-4 py-3 space-y-2">
-          {[0, 1, 2].map((i) => <SkeletonLine key={i} lh="h-[18px]" h="h-3" w={["w-56", "w-44", "w-64"][i]} delay={stagger(i, 60)} />)}
-        </div>
-      ) : rows.length === 0 ? (
-        <div className="px-4 py-3 text-[12px] text-muted-foreground">No customers in this country.</div>
-      ) : (
-        <div className="divide-y divide-border/40">
-          {rows.map((c) => (
-            <button
-              key={c.partnerMkId}
-              type="button"
-              onClick={() => onOpen(c.partnerMkId)}
-              className="w-full grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_110px_120px] items-center gap-3 px-4 py-1.5 text-left hover:bg-muted/40"
-            >
-              <span className="flex items-center gap-2 min-w-0">
+    <>
+      {rows.length === 0 && (
+        <TableRow className={cn("border-b border-border/40", sub)}>
+          <TableCell colSpan={8} className="pl-12 py-2 text-[12px] text-muted-foreground">No customers in this country.</TableCell>
+        </TableRow>
+      )}
+      {rows.map((c) => {
+        const pinned = c.market?.source === "manual";
+        return (
+          <TableRow key={c.partnerMkId} className={cn("border-b border-border/40 hover:bg-muted/30", sub)}>
+            <TableCell className="pl-3 pr-0" />
+            <TableCell />
+            <TableCell className="py-1.5 pl-8">
+              <button type="button" onClick={() => onOpen(c.partnerMkId)} className="flex items-center gap-2 min-w-0 text-left group/c">
                 <span className={cn("size-6 rounded-md flex items-center justify-center shrink-0", c.kind === "business" ? "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300" : "bg-muted text-muted-foreground")}>
                   {c.kind === "business" ? <Building2 className="w-3 h-3" /> : <User className="w-3 h-3" />}
                 </span>
-                <span className="text-[12.5px] font-medium text-foreground truncate">{c.name}</span>
-              </span>
-              <span className="text-[11px] text-muted-foreground truncate">{[c.city, c.email].filter(Boolean).join(" · ")}</span>
-              <span className="min-w-0">
-                {c.market ? (
-                  <span className="inline-flex items-center gap-1.5"><MarketChip name={c.market.name} color={c.market.color} />{c.market.source === "manual" && <span className="text-[10px] text-muted-foreground">pinned</span>}</span>
-                ) : (
-                  <span className="text-[11px] text-muted-foreground">no market</span>
-                )}
-              </span>
-              <span className="text-[11px]">{c.access ? <span className="text-lime-700 dark:text-lime-400 font-medium">Unlocked</span> : <span className="text-muted-foreground">Not unlocked</span>}</span>
-              <span className="text-[11px]">{c.stage ? <SubmissionStageBadge stage={c.stage} /> : <span className="text-muted-foreground">—</span>}</span>
-            </button>
-          ))}
-          {total > rows.length && <div className="px-4 py-1.5 text-[11px] text-muted-foreground">Showing {rows.length} of {total} — the Customers view has the rest.</div>}
-        </div>
+                <span className="min-w-0">
+                  <span className="block text-[12.5px] font-medium text-foreground truncate group-hover/c:underline decoration-border underline-offset-4">{c.name}</span>
+                  <span className="block text-[11px] text-muted-foreground truncate">{[c.city, c.email].filter(Boolean).join(" · ")}</span>
+                </span>
+              </button>
+            </TableCell>
+            <TableCell className="text-[11px] text-muted-foreground">{c.stage ? <SubmissionStageBadge stage={c.stage} /> : null}</TableCell>
+            <TableCell colSpan={2} className="text-right text-[11px] text-muted-foreground">{c.kind === "business" ? "Company" : "Individual"}</TableCell>
+            <TableCell className="text-right text-[11px]">{c.access ? <span className="text-lime-700 dark:text-lime-400 font-medium">Unlocked</span> : <span className="text-muted-foreground/60">—</span>}</TableCell>
+            <TableCell className="py-1">
+              <div className="flex items-center gap-2">
+                <Select
+                  value={pinned && c.market ? c.market.id : "__auto__"}
+                  disabled={busy !== null}
+                  onValueChange={async (v) => {
+                    setBusy(c.partnerMkId);
+                    try {
+                      await onPin(c.partnerMkId, v === "__auto__" ? null : v);
+                      setGen((g) => g + 1);
+                    } finally {
+                      setBusy(null);
+                    }
+                  }}
+                >
+                  <SelectTrigger size="sm" className={cn("h-8 w-full text-[12px]", !pinned && "text-muted-foreground")} title={pinned ? "Pinned by hand — beats country and priority" : "Follows the country"}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__auto__" className="text-[12px] text-muted-foreground">
+                      {c.market && !pinned ? `Automatic · ${c.market.name}` : "Automatic"}
+                    </SelectItem>
+                    {markets.map((m) => (
+                      <SelectItem key={m.id} value={m.id} className="text-[12px]">
+                        <span className="inline-flex items-center gap-1.5"><span className="size-1.5 rounded-full" style={{ background: MARKET_COLORS[m.color].hex }} /> {m.name}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {busy === c.partnerMkId && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+              </div>
+            </TableCell>
+          </TableRow>
+        );
+      })}
+      {total > rows.length && (
+        <TableRow className={cn("border-b border-border/40", sub)}>
+          <TableCell colSpan={8} className="pl-12 py-1.5 text-[11px] text-muted-foreground">Showing {rows.length} of {total} — the Customers view has the rest.</TableCell>
+        </TableRow>
       )}
-    </div>
+    </>
   );
 }
 

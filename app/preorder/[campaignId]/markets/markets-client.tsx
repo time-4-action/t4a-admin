@@ -206,6 +206,28 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
     }
     await refreshAll();
   };
+  // Pin ONE customer to a market (or back to automatic) from the countries view.
+  const pinCustomer = async (partnerMkId: string, marketId: string | null) => {
+    const existing = campaign?.customerRules.find((r) => r.partnerMkId === partnerMkId);
+    const url = `/api/admin/preorder/campaigns/${campaignId}/customers/${encodeURIComponent(partnerMkId)}`;
+    const bare = !existing?.countryIso && !existing?.note && Object.keys(existing?.config ?? {}).length === 0;
+    const r =
+      marketId === null && (!existing || bare)
+        ? existing
+          ? await fetch(url, { method: "DELETE" })
+          : null
+        : await fetch(url, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...(existing ?? { config: {} }), marketId }),
+          });
+    if (r && !r.ok) {
+      const j = await r.json().catch(() => ({}));
+      toast(j?.error ?? "Could not change the customer's market");
+      return;
+    }
+    await loadCampaign();
+  };
   const deleteMarket = async (id: string): Promise<string | null> => {
     const r = await fetch(`/api/admin/preorder/campaigns/${campaignId}/markets/${id}`, { method: "DELETE" });
     const j = await r.json().catch(() => ({}));
@@ -396,7 +418,7 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
         )}
 
         {view === "countries" && (
-          <CountriesTable campaignId={campaignId} stats={stats} markets={markets} countryNames={countryNames} onAssign={assignCountries} onOpenCountry={openCountry} onOpenCustomer={openCustomer} />
+          <CountriesTable campaignId={campaignId} stats={stats} markets={markets} countryNames={countryNames} onAssign={assignCountries} onOpenCountry={openCountry} onOpenCustomer={openCustomer} onPinCustomer={pinCustomer} />
         )}
       </div>
 
