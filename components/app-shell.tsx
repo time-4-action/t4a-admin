@@ -28,6 +28,12 @@ export default function AppShell({
   const pathname = usePathname();
   const isPortal = pathname === "/portal" || pathname.startsWith("/portal/");
 
+  // Logged-out visitor on the portal: the public landing page (app/portal/landing.tsx)
+  // renders on its own, without the customer sidebar.
+  if (isPortal && !user) {
+    return <main className="flex-1 min-w-0 overflow-y-auto bg-background">{children}</main>;
+  }
+
   return (
     <>
       {isPortal ? <PortalNav user={user} viewingAs={viewingAs} /> : <Nav user={user} roles={roles} />}

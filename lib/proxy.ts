@@ -22,8 +22,23 @@ export async function proxy(req: NextRequest) {
 
   const session = await auth0.getSession(req);
   if (!session) {
+    const pathname = req.nextUrl.pathname;
+    // The B2B portal has a public landing page: a logged-out visitor should
+    // learn what they are signing in for (preorders, orders, invoices) instead
+    // of being thrown straight at Auth0. Deep links (invite links, bookmarked
+    // documents) go to the landing too, carrying the destination so the sign-in
+    // button returns there.
+    if (pathname === "/portal") return res;
+    // The app root is the admin home, but a stranger landing on the bare domain
+    // is far more likely a customer: show them the B2B landing, not Auth0.
+    if (pathname === "/") return Response.redirect(new URL("/portal", req.nextUrl.origin));
+    if (isPortalPath(pathname) && !pathname.startsWith("/api/")) {
+      const landing = new URL("/portal", req.nextUrl.origin);
+      landing.searchParams.set("returnTo", pathname + req.nextUrl.search);
+      return Response.redirect(landing);
+    }
     const loginUrl = new URL("/auth/login", req.nextUrl.origin);
-    loginUrl.searchParams.set("returnTo", req.nextUrl.pathname);
+    loginUrl.searchParams.set("returnTo", pathname);
     return Response.redirect(loginUrl);
   }
 
