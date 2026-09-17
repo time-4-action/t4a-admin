@@ -116,7 +116,9 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
-  const [productPickerTab, setProductPickerTab] = useState<string | null>(null);
+  // The product picker either adds a NEW group to a tab, or appends a product's
+  // variants to an EXISTING group ("Add from catalogue" in the group footer).
+  const [picker, setPicker] = useState<{ tabId: string; groupId?: string; groupName?: string } | null>(null);
   const [csvTab, setCsvTab] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [pricelists, setPricelists] = useState<MkPricelist[]>([]);
@@ -217,6 +219,14 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   }
 
   // ── Rows ──
+  // Append a product's variants to an existing group, skipping SKUs already in it.
+  function appendRows(tabId: string, groupId: string, drafts: RowDraft[]) {
+    mutateGroup(tabId, groupId, (g) => {
+      const have = new Set(g.rows.map((r) => r.code));
+      const fresh = drafts.filter((r) => !r.code || !have.has(r.code));
+      return { ...g, rows: [...g.rows, ...fresh.map((r, i) => ({ ...r, id: uid(), order: g.rows.length + i }))] };
+    });
+  }
   function addManualRow(tabId: string, groupId: string) {
     mutateGroup(tabId, groupId, (g) => ({
       ...g,
@@ -574,7 +584,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
 
               {/* Primary add actions — a group is a parent product */}
               <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-border bg-muted/20 px-3 py-2.5">
-                <Button size="sm" onClick={() => setProductPickerTab(activeTab.id)}>
+                <Button size="sm" onClick={() => setPicker({ tabId: activeTab.id })}>
                   <Search className="w-3.5 h-3.5" /> Add product
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => setCsvTab(activeTab.id)}>
@@ -608,6 +618,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                         onRenameGroup={(name) => mutateGroup(activeTab.id, g.id, (gr) => ({ ...gr, name }))}
                         onDeleteGroup={() => deleteGroup(activeTab.id, g.id)}
                         onAddRow={() => addManualRow(activeTab.id, g.id)}
+                        onAddFromCatalogue={() => setPicker({ tabId: activeTab.id, groupId: g.id, groupName: g.name })}
                         onUpdateRow={(rowId, patch) => updateRow(activeTab.id, g.id, rowId, patch)}
                         onDeleteRow={(rowId) => deleteRow(activeTab.id, g.id, rowId)}
                         onReorderRows={(a, o) => reorderRows(activeTab.id, g.id, a, o)}
@@ -632,12 +643,13 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
         <div className="fixed bottom-4 right-4 z-30 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive shadow">{error}</div>
       )}
 
-      {productPickerTab && (
+      {picker && (
         <ProductPickerDialog
           rrpPricelist={campaign.rrpPricelist ?? null}
           partnerPricelist={campaign.partnerPricelist ?? null}
-          onClose={() => setProductPickerTab(null)}
-          onAddGroup={(g) => addGroups(productPickerTab, [g])}
+          targetGroupName={picker.groupName}
+          onClose={() => setPicker(null)}
+          onAddGroup={(g) => (picker.groupId ? appendRows(picker.tabId, picker.groupId, g.rows) : addGroups(picker.tabId, [g]))}
         />
       )}
       {csvTab && (
@@ -659,7 +671,43 @@ function numOrNull(v: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 function priceStr(n?: number | null): string {
-  return n === null || n === undefined ? "" : String(n);
+  return n === null || n === undefined ? "" : n.toFixed(2);
+}
+
+// A price cell: shows two decimals, edits as a plain number, commits on blur /
+// Enter (so typing never fights a formatter), and re-syncs when the row's value
+// changes underneath it (re-price).
+function PriceInput({ value, onCommit, placeholder = "—" }: { value?: number | null; onCommit: (n: number | null) => void; placeholder?: string }) {
+  const [text, setText] = useState(() => priceStr(value));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setText(priceStr(value));
+  }, [value, focused]);
+  const commit = () => {
+    const n = numOrNull(text);
+    onCommit(n);
+    setText(priceStr(n));
+  };
+  return (
+    <input
+      className={cn(
+        "h-8 w-full rounded-md border border-transparent bg-transparent px-2 text-[12.5px] text-right tabular-nums text-foreground",
+        "hover:border-border focus:border-ring focus:bg-background focus:outline-none placeholder:text-muted-foreground/50",
+      )}
+      value={text}
+      placeholder={placeholder}
+      inputMode="decimal"
+      onFocus={() => setFocused(true)}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => {
+        setFocused(false);
+        commit();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+      }}
+    />
+  );
 }
 
 const RowEditor = memo(function RowEditor({
@@ -675,19 +723,32 @@ const RowEditor = memo(function RowEditor({
     transition,
     ...(isDragging ? { position: "relative" as const, zIndex: 10, opacity: 0.9 } : {}),
   };
-  const cell = "px-2 py-1 border-b border-border/40";
-  const inp = "h-7 w-full rounded border border-transparent bg-transparent px-1.5 text-[12px] hover:border-border focus:border-ring focus:bg-background focus:outline-none";
+  const cell = "px-1.5 py-1 border-b border-border/40 align-middle";
+  const inp = "h-8 w-full rounded-md border border-transparent bg-transparent px-2 text-[12.5px] text-foreground hover:border-border focus:border-ring focus:bg-background focus:outline-none placeholder:text-muted-foreground/50";
   return (
-    <tr ref={setNodeRef} style={style} className={cn("hover:bg-muted/20", isDragging && "bg-surface shadow-lg")} {...attributes}>
-      <td className={cn(cell, "pl-3")}>
-        <div className="flex items-center gap-1.5">
+    <tr ref={setNodeRef} style={style} className={cn("group/row hover:bg-muted/25", isDragging && "bg-surface shadow-lg", row.restricted && "bg-amber-50/40 dark:bg-amber-950/10")} {...attributes}>
+      {/* drag handle */}
+      <td className={cn(cell, "pl-2 pr-0 w-7")}>
+        <button
+          type="button"
+          {...listeners}
+          className="flex h-8 w-5 items-center justify-center rounded cursor-grab active:cursor-grabbing touch-none text-muted-foreground/40 hover:text-foreground"
+          aria-label="Drag to reorder variant"
+          title="Drag to reorder"
+        >
+          <GripVertical className="w-3.5 h-3.5" />
+        </button>
+      </td>
+      {/* variant */}
+      <td className={cell}>
+        <div className="flex items-center gap-2 min-w-0">
           {row.image ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={row.image} alt="" className="w-6 h-6 rounded object-cover ring-1 ring-border shrink-0" />
+            <img src={row.image} alt="" className="w-8 h-8 rounded-md object-cover ring-1 ring-border shrink-0" />
           ) : (
-            <span className="w-6 h-6 rounded bg-muted flex items-center justify-center shrink-0"><Package className="w-3 h-3 text-muted-foreground" /></span>
+            <span className="w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0"><Package className="w-3.5 h-3.5 text-muted-foreground" /></span>
           )}
-          <input className={inp} value={row.name} placeholder="Variant name" onChange={(e) => onChange({ name: e.target.value })} />
+          <input className={cn(inp, "font-medium")} value={row.name} placeholder="Variant name" onChange={(e) => onChange({ name: e.target.value })} />
           {row.tag && (
             <span className="text-[9px] font-bold uppercase text-lime-700 bg-lime-100 dark:bg-lime-900/50 dark:text-lime-300 rounded px-1 shrink-0">
               {row.tag === "NEW" ? "NEW" : "PRE"}
@@ -695,32 +756,37 @@ const RowEditor = memo(function RowEditor({
           )}
         </div>
       </td>
-      <td className={cell}><input className={cn(inp, "font-mono text-[11px]")} value={row.code} placeholder="SKU" onChange={(e) => onChange({ code: e.target.value })} /></td>
+      <td className={cell}><input className={cn(inp, "font-mono text-[11.5px] text-muted-foreground focus:text-foreground")} value={row.code} placeholder="SKU" onChange={(e) => onChange({ code: e.target.value })} /></td>
       <td className={cell}><input className={inp} value={row.variantLabel ?? row.size ?? ""} placeholder="size / label" onChange={(e) => onChange({ variantLabel: e.target.value || null })} /></td>
-      <td className={cell}><input className={cn(inp, "text-right tabular-nums")} value={priceStr(row.rrp)} inputMode="decimal" onChange={(e) => onChange({ rrp: numOrNull(e.target.value) })} /></td>
-      <td className={cell}><input className={cn(inp, "text-right tabular-nums")} value={priceStr(row.partnerPrice)} inputMode="decimal" onChange={(e) => onChange({ partnerPrice: numOrNull(e.target.value) })} /></td>
-      <td className={cell}><input className={cn(inp, "text-right tabular-nums")} value={priceStr(row.discountedPrice)} inputMode="decimal" onChange={(e) => onChange({ discountedPrice: numOrNull(e.target.value) })} /></td>
-      <td className={cn(cell, "whitespace-nowrap")}>
+      <td className={cn(cell, "border-l border-l-border/40")}><PriceInput value={row.rrp} onCommit={(n) => onChange({ rrp: n })} /></td>
+      <td className={cell}><PriceInput value={row.partnerPrice} onCommit={(n) => onChange({ partnerPrice: n })} /></td>
+      <td className={cell}><PriceInput value={row.discountedPrice} onCommit={(n) => onChange({ discountedPrice: n })} /></td>
+      {/* actions */}
+      <td className={cn(cell, "pr-2 whitespace-nowrap")}>
         <div className="flex items-center justify-end gap-0.5">
           <button
             type="button"
-            {...listeners}
-            className="p-0.5 cursor-grab active:cursor-grabbing touch-none text-muted-foreground hover:text-foreground"
-            aria-label="Drag to reorder variant"
-            title="Drag to reorder"
-          >
-            <GripVertical className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
             onClick={() => onChange({ restricted: !row.restricted })}
-            className={cn("p-0.5", row.restricted ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground/50 hover:text-foreground")}
+            className={cn(
+              "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+              row.restricted
+                ? "text-amber-600 dark:text-amber-400 bg-amber-100/70 dark:bg-amber-900/30"
+                : "text-muted-foreground/40 hover:text-foreground hover:bg-muted opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100",
+            )}
             aria-label={row.restricted ? "Restricted — shown only where a market or customer exposes it" : "In the default assortment"}
             title={row.restricted ? "Restricted: not in the default assortment (only markets / customers that expose it see it)" : "In the default assortment — click to restrict"}
           >
-            {row.restricted ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+            {row.restricted ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           </button>
-          <button onClick={onDelete} className="p-0.5 text-muted-foreground hover:text-destructive" aria-label="Delete variant"><Trash2 className="w-3 h-3" /></button>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 transition-colors"
+            aria-label="Delete variant"
+            title="Delete variant"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
         </div>
       </td>
     </tr>
@@ -800,7 +866,7 @@ function SortableTab({
 
 // ── Sortable group (a parent product): header + variant table, drag via grip ──
 function GroupSection({
-  group, collapsed, sensors, onToggleCollapse, onRenameGroup, onDeleteGroup, onAddRow, onUpdateRow, onDeleteRow, onReorderRows,
+  group, collapsed, sensors, onToggleCollapse, onRenameGroup, onDeleteGroup, onAddRow, onAddFromCatalogue, onUpdateRow, onDeleteRow, onReorderRows,
 }: {
   group: PreorderGroup;
   collapsed: boolean;
@@ -809,6 +875,7 @@ function GroupSection({
   onRenameGroup: (name: string) => void;
   onDeleteGroup: () => void;
   onAddRow: () => void;
+  onAddFromCatalogue: () => void;
   onUpdateRow: (rowId: string, patch: Partial<PreorderRow>) => void;
   onDeleteRow: (rowId: string) => void;
   onReorderRows: (activeId: string, overId: string) => void;
@@ -825,12 +892,12 @@ function GroupSection({
       style={style}
       className={cn("rounded-xl border border-border bg-surface overflow-hidden", isDragging && "shadow-xl opacity-95")}
     >
-      <div className={cn("flex items-center gap-2 px-3 py-2 bg-muted/40", !collapsed && "border-b border-border")}>
+      <div className={cn("group/g flex items-center gap-1.5 pl-2 pr-3 py-2 bg-muted/40", !collapsed && "border-b border-border")}>
         <button
           type="button"
           {...attributes}
           {...listeners}
-          className="p-0.5 rounded cursor-grab active:cursor-grabbing touch-none text-muted-foreground/70 hover:text-foreground shrink-0"
+          className="flex h-7 w-5 items-center justify-center rounded cursor-grab active:cursor-grabbing touch-none text-muted-foreground/40 hover:text-foreground shrink-0"
           aria-label="Drag to reorder group"
           title="Drag to reorder"
         >
@@ -839,16 +906,31 @@ function GroupSection({
         <button
           type="button"
           onClick={onToggleCollapse}
-          className="p-0.5 rounded hover:bg-muted text-muted-foreground shrink-0"
+          className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-muted text-muted-foreground shrink-0"
           aria-label={collapsed ? "Expand group" : "Collapse group"}
           title={collapsed ? "Expand" : "Collapse"}
         >
-          {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
-        <Input value={group.name} onChange={(e) => onRenameGroup(e.target.value)} className="h-7 max-w-[280px] text-[13px] font-medium bg-background" aria-label="Group name" />
-        <span className="text-[11px] text-muted-foreground tabular-nums">{group.rows.length} variant{group.rows.length === 1 ? "" : "s"}</span>
+        <Input value={group.name} onChange={(e) => onRenameGroup(e.target.value)} className="h-8 max-w-[340px] text-[13.5px] font-semibold bg-background" aria-label="Group name" />
+        <span className="rounded-full bg-muted px-2 h-6 inline-flex items-center text-[11px] text-muted-foreground tabular-nums shrink-0">
+          {group.rows.length} variant{group.rows.length === 1 ? "" : "s"}
+        </span>
         <div className="flex-1" />
-        <button onClick={onDeleteGroup} className="p-1 rounded hover:bg-muted text-destructive" aria-label="Delete group"><Trash2 className="w-3.5 h-3.5" /></button>
+        {collapsed && (
+          <Button variant="ghost" size="xs" onClick={onToggleCollapse} className="text-muted-foreground">
+            Show variants
+          </Button>
+        )}
+        <button
+          type="button"
+          onClick={onDeleteGroup}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
+          aria-label="Delete group"
+          title="Delete group"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {!collapsed && group.rows.length > 0 && (
@@ -862,10 +944,15 @@ function GroupSection({
       )}
 
       {!collapsed && (
-        <div className="flex items-center gap-2 px-3 py-2 border-t border-border/60">
-          <Button variant="ghost" size="xs" onClick={onAddRow}>
-            <PencilLine className="w-3 h-3" /> Add variant manually
+        <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5 bg-muted/20">
+          <Button variant="ghost" size="xs" onClick={onAddFromCatalogue} className="text-muted-foreground hover:text-foreground">
+            <Search className="w-3 h-3" /> Add variants from catalogue
           </Button>
+          <span className="text-muted-foreground/40 text-[11px]">·</span>
+          <Button variant="ghost" size="xs" onClick={onAddRow} className="text-muted-foreground hover:text-foreground">
+            <PencilLine className="w-3 h-3" /> Add a variant manually
+          </Button>
+          {group.rows.length === 0 && <span className="ml-2 text-[11px] text-muted-foreground">This group is empty.</span>}
         </div>
       )}
     </section>
@@ -893,16 +980,27 @@ const VariantTable = memo(function VariantTable({
       }}
     >
       <div className="overflow-x-auto">
-        <table className="w-full text-[12px]">
+        <table className="w-full text-[12px] table-fixed min-w-[900px]">
+          <colgroup>
+            <col className="w-7" />
+            <col />
+            <col className="w-[170px]" />
+            <col className="w-[220px]" />
+            <col className="w-[120px]" />
+            <col className="w-[120px]" />
+            <col className="w-[120px]" />
+            <col className="w-[76px]" />
+          </colgroup>
           <thead>
-            <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60">
-              <th className="text-left font-semibold px-3 py-1.5 min-w-[200px]">Variant</th>
-              <th className="text-left font-semibold px-2 py-1.5">SKU</th>
-              <th className="text-left font-semibold px-2 py-1.5">Size / label</th>
-              <th className="text-right font-semibold px-2 py-1.5 w-20">RRP</th>
-              <th className="text-right font-semibold px-2 py-1.5 w-20">Partner</th>
-              <th className="text-right font-semibold px-2 py-1.5 w-20">Disc.</th>
-              <th className="px-2 py-1.5 w-14" />
+            <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60 bg-muted/15">
+              <th className="py-2" />
+              <th className="text-left font-semibold px-3 py-2">Variant</th>
+              <th className="text-left font-semibold px-3 py-2">SKU</th>
+              <th className="text-left font-semibold px-3 py-2">Size / label</th>
+              <th className="text-right font-semibold px-3 py-2 border-l border-l-border/40" title="Recommended retail price, incl. VAT">RRP</th>
+              <th className="text-right font-semibold px-3 py-2" title="Partner price, excl. VAT">Partner</th>
+              <th className="text-right font-semibold px-3 py-2" title="Discounted partner price — overrides the partner price when set">Discounted</th>
+              <th className="py-2" />
             </tr>
           </thead>
           <SortableContext items={rows.map((r) => r.id)} strategy={verticalListSortingStrategy}>
@@ -1204,10 +1302,12 @@ function PricelistSelect({
 type Hit = { code: string; name: string; image?: string | null };
 
 function ProductPickerDialog({
-  rrpPricelist, partnerPricelist, onClose, onAddGroup,
+  rrpPricelist, partnerPricelist, targetGroupName, onClose, onAddGroup,
 }: {
   rrpPricelist: string | null;
   partnerPricelist: string | null;
+  /** Set when the picked product's variants go INTO this group instead of forming a new one. */
+  targetGroupName?: string;
   onClose: () => void;
   onAddGroup: (g: GroupDraft) => void;
 }) {
@@ -1257,13 +1357,17 @@ function ProductPickerDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Search className="w-4 h-4 text-lime-600" /> Add product</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <Search className="w-4 h-4 text-lime-600" /> {targetGroupName !== undefined ? <>Add variants to <span className="truncate">{targetGroupName || "this group"}</span></> : "Add product"}
+          </DialogTitle>
         </DialogHeader>
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input autoFocus placeholder="Search by name, SKU or EAN…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-8 h-9" />
         </div>
-        <p className="text-[11px] text-muted-foreground">Adds the product as a group with all its variants.</p>
+        <p className="text-[11px] text-muted-foreground">
+          {targetGroupName !== undefined ? "Adds the product's variants to this group — SKUs already in it are skipped." : "Adds the product as a group with all its variants."}
+        </p>
         <div className="max-h-80 overflow-y-auto -mx-1 mt-1">
           {loading && <ProductRowsSkeleton />}
           {!loading && q.trim().length >= 2 && results.length === 0 && <div className="text-[12px] text-muted-foreground px-2 py-3">No matches.</div>}
