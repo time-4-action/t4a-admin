@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { HeaderFilter } from "@/components/ui/header-filter";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
-import { Search, ChevronLeft, ChevronRight, Plus, Globe2, Pencil, RefreshCw, Loader2, AlertTriangle, Building2, User, X, Layers, Users } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Plus, Globe2, Pencil, RefreshCw, Loader2, AlertTriangle, Building2, User, X, Layers, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MARKET_COLORS, MarketChip, SourceBadge, SubmissionStageBadge } from "@/app/preorder/preorder-badges";
 import { Flag } from "@/components/flag";
@@ -67,6 +67,7 @@ export function MarketsPanel({
   onEdit,
   onCreate,
   onShowCustomers,
+  onMove,
 }: {
   markets: PreorderMarket[];
   stats: Record<string, CountryGeo>;
@@ -75,6 +76,8 @@ export function MarketsPanel({
   onEdit: (id: string) => void;
   onCreate: () => void;
   onShowCustomers: (id: string) => void;
+  /** Move a market one step up / down the priority list. */
+  onMove?: (id: string, dir: -1 | 1) => void;
 }) {
   const assigned = new Set(markets.flatMap((m) => m.countries));
   const unassigned = Object.entries(stats).filter(([iso, s]) => !assigned.has(iso) && s.customers > 0);
@@ -85,37 +88,76 @@ export function MarketsPanel({
         <Layers className="w-4 h-4 text-muted-foreground" />
         <span className="text-[13px] font-semibold text-foreground">Markets</span>
         <span className="text-[11px] text-muted-foreground tabular-nums">{markets.length}</span>
+        {markets.length > 1 && (
+          <span className="ml-2 text-[11px] text-muted-foreground" title="A customer who fits several markets lands in the one listed first.">
+            in priority order — first match wins
+          </span>
+        )}
         <div className="flex-1" />
         <Button size="sm" variant="outline" className="h-7 text-[12px]" onClick={onCreate}><Plus className="w-3.5 h-3.5" /> New</Button>
       </div>
       <div className="divide-y divide-border/60">
-        {markets.map((m) => {
+        {markets.map((m, i) => {
+          const kinds = m.kinds ?? [];
+          const kindLabel = kinds.length === 0 || kinds.length === 2 ? null : kinds[0] === "business" ? "companies only" : "individuals only";
           const customers = m.countries.reduce((n, iso) => n + (stats[iso]?.customers ?? 0), 0);
           const unlocked = m.countries.reduce((n, iso) => n + (stats[iso]?.unlocked ?? 0), 0);
           const ov = overrideSummary(m.config);
           return (
-            <div key={m.id} className="group px-4 py-3 hover:bg-muted/30 transition-colors">
+            <div key={m.id} className="group flex gap-3 px-4 py-3 hover:bg-muted/30 transition-colors">
+              {/* priority rank + nudge */}
+              <div className="flex flex-col items-center gap-0.5 shrink-0 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => onMove?.(m.id, -1)}
+                  disabled={!onMove || i === 0}
+                  className="flex h-4 w-5 items-center justify-center rounded text-muted-foreground/50 hover:text-foreground hover:bg-muted disabled:opacity-20 disabled:hover:bg-transparent"
+                  aria-label="Higher priority"
+                  title="Higher priority"
+                >
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </button>
+                <span className="flex size-5 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground tabular-nums">{i + 1}</span>
+                <button
+                  type="button"
+                  onClick={() => onMove?.(m.id, 1)}
+                  disabled={!onMove || i === markets.length - 1}
+                  className="flex h-4 w-5 items-center justify-center rounded text-muted-foreground/50 hover:text-foreground hover:bg-muted disabled:opacity-20 disabled:hover:bg-transparent"
+                  aria-label="Lower priority"
+                  title="Lower priority"
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="min-w-0 flex-1">
               <button type="button" onClick={() => onEdit(m.id)} className="w-full text-left">
                 <div className="flex items-center gap-2">
                   <span className="size-2.5 rounded-full shrink-0" style={{ background: MARKET_COLORS[m.color].hex }} />
                   <span className="text-[13px] font-semibold text-foreground truncate">{m.name}</span>
+                  {kindLabel && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-border px-1.5 py-px text-[10px] text-muted-foreground shrink-0">
+                      {kinds[0] === "business" ? <Building2 className="w-3 h-3" /> : <User className="w-3 h-3" />} {kindLabel}
+                    </span>
+                  )}
                   <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ml-auto shrink-0" />
                 </div>
                 <div className="mt-1 text-[11px] text-muted-foreground tabular-nums">
-                  {m.countries.length} countr{m.countries.length === 1 ? "y" : "ies"} · {num.format(customers)} customer{customers === 1 ? "" : "s"}{pinned?.[m.id] ? ` + ${pinned[m.id]} hand-picked` : ""}{unlocked ? ` · ${unlocked} unlocked` : ""}
+                  {m.countries.length === 0 ? "any country" : `${m.countries.length} countr${m.countries.length === 1 ? "y" : "ies"}`} · {num.format(customers)} customer{customers === 1 ? "" : "s"}{pinned?.[m.id] ? ` + ${pinned[m.id]} hand-picked` : ""}{unlocked ? ` · ${unlocked} unlocked` : ""}
                 </div>
                 <div className="mt-1.5 flex flex-wrap gap-1">
                   {m.countries.slice(0, 10).map((iso) => (
                     <Flag key={iso} iso={iso} className="text-[13px]" />
                   ))}
                   {m.countries.length > 10 && <span className="text-[10px] text-muted-foreground">+{m.countries.length - 10}</span>}
-                  {m.countries.length === 0 && <span className="text-[11px] text-amber-600 dark:text-amber-400">no countries — assign some below</span>}
+                  {m.countries.length === 0 && kinds.length === 0 && <span className="text-[11px] text-amber-600 dark:text-amber-400">matches no one automatically — only hand-picked customers</span>}
+                  {m.countries.length === 0 && kinds.length > 0 && <span className="text-[11px] text-muted-foreground">every {kindLabel ? kindLabel.replace(" only", "") : "customer"}, anywhere</span>}
                 </div>
                 <div className="mt-1.5 text-[11px] text-muted-foreground truncate">{ov.length ? ov.join(" · ") : <span className="italic">inherits campaign defaults</span>}</div>
               </button>
               <button type="button" onClick={() => onShowCustomers(m.id)} className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-lime-700 dark:text-lime-400 hover:underline">
                 <Users className="w-3 h-3" /> Show customers <ChevronRight className="w-3 h-3" />
               </button>
+              </div>
             </div>
           );
         })}
@@ -177,6 +219,7 @@ export function CountriesTable({
       .sort((a, b) => b.s.customers - a.s.customers || a.name.localeCompare(b.name));
   }, [stats, countryNames, marketOf, filter, q]);
 
+  const maxCustomers = useMemo(() => Math.max(1, ...Object.values(stats).map((s) => s.customers)), [stats]);
   const counts = useMemo(() => {
     const all = Object.entries(stats).filter(([iso, s]) => s.customers > 0 || marketOf.has(iso));
     return { all: all.length, unassigned: all.filter(([iso]) => !marketOf.has(iso)).length };
@@ -276,11 +319,11 @@ export function CountriesTable({
               <input type="checkbox" checked={allVisibleSelected} onChange={toggleAll} aria-label="Select all" className="accent-lime-600" />
             </TableHead>
             <TableHead className={th}>Country</TableHead>
-            <TableHead className={cn(th, "text-right")}>Companies</TableHead>
-            <TableHead className={cn(th, "text-right")}>Individuals</TableHead>
-            <TableHead className={cn(th, "text-right")}>Customers</TableHead>
-            <TableHead className={cn(th, "text-right")}>Unlocked</TableHead>
-            <TableHead className={cn(th, "w-56")}>Market</TableHead>
+            <TableHead className={cn(th, "w-[220px]")}>Customers</TableHead>
+            <TableHead className={cn(th, "text-right w-[110px]")}>Companies</TableHead>
+            <TableHead className={cn(th, "text-right w-[110px]")}>Individuals</TableHead>
+            <TableHead className={cn(th, "text-right w-[100px]")}>Unlocked</TableHead>
+            <TableHead className={cn(th, "w-[220px]")}>Market</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -296,14 +339,21 @@ export function CountriesTable({
                   <span className="font-mono text-[10px] text-muted-foreground">{r.iso}</span>
                 </button>
               </TableCell>
-              <TableCell className="text-right tabular-nums text-[12px]">{num.format(r.s.business)}</TableCell>
-              <TableCell className="text-right tabular-nums text-[12px]">{num.format(r.s.person)}</TableCell>
-              <TableCell className="text-right tabular-nums text-[12px] font-medium">{num.format(r.s.customers)}</TableCell>
-              <TableCell className="text-right tabular-nums text-[12px]">{r.s.unlocked || <span className="text-muted-foreground">—</span>}</TableCell>
+              <TableCell className="py-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-12 text-right tabular-nums text-[13px] font-semibold text-foreground">{num.format(r.s.customers)}</span>
+                  <span className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden" aria-hidden>
+                    <span className="block h-full rounded-full bg-foreground/60" style={{ width: `${Math.max(2, Math.round((r.s.customers / maxCustomers) * 100))}%` }} />
+                  </span>
+                </div>
+              </TableCell>
+              <TableCell className="text-right tabular-nums text-[12px] text-muted-foreground">{num.format(r.s.business)}</TableCell>
+              <TableCell className="text-right tabular-nums text-[12px] text-muted-foreground">{num.format(r.s.person)}</TableCell>
+              <TableCell className="text-right tabular-nums text-[12px]">{r.s.unlocked ? <span className="text-lime-700 dark:text-lime-400 font-medium">{r.s.unlocked}</span> : <span className="text-muted-foreground/50">—</span>}</TableCell>
               <TableCell className="py-1.5">
                 <div className="flex items-center gap-2">
                   <Select value={r.market?.id ?? "__none__"} onValueChange={(v) => void assignOne(r.iso, v === "__none__" ? null : v)} disabled={busy !== null}>
-                    <SelectTrigger size="sm" className={cn("h-7 w-44 text-[12px]", !r.market && "text-muted-foreground")}>
+                    <SelectTrigger size="sm" className={cn("h-8 w-full text-[12px]", !r.market && "text-muted-foreground")}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>

@@ -105,7 +105,7 @@ export function CustomerModal({
       ? { ...base, customerRules: [...base.customerRules, { partnerMkId, partnerName: "", countryIso: draft.countryIso, config: {} }] }
       : base;
     const mkIso = customer?.countrySource === "manual" ? null : customer?.countryIso ?? null;
-    const ctx = resolvePartnerContext(withCountry, partnerMkId, mkIso, mkIso ? (customer?.countrySource === "home-fallback" ? "home-fallback" : "mk") : null);
+    const ctx = resolvePartnerContext(withCountry, partnerMkId, mkIso, mkIso ? (customer?.countrySource === "home-fallback" ? "home-fallback" : "mk") : null, customer?.kind ?? null);
     // A manual market assignment on the draft changes what is inherited from the market layer.
     const marketAssigned = draft.marketId
       ? { ...withCountry, customerRules: [...withCountry.customerRules.filter((r) => r.partnerMkId !== partnerMkId), { partnerMkId, partnerName: "", marketId: draft.marketId, countryIso: draft.countryIso, config: {} }] }

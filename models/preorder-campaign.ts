@@ -76,6 +76,7 @@ export interface IPreorderMarket {
   name: string;
   color: MarketColor;
   countries: string[];
+  kinds?: ("business" | "person")[];
   config: ICommercialConfig;
   updatedAt?: Date | null;
 }
@@ -213,6 +214,7 @@ const MarketSchema = new Schema<IPreorderMarket>(
       default: "sky",
     },
     countries: { type: [String], default: [] },
+    kinds: { type: [String], enum: ["business", "person"], default: [] },
     config: { type: CommercialConfigSchema, default: () => ({}) },
     updatedAt: { type: Date, default: null },
   },

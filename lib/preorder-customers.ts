@@ -80,6 +80,7 @@ function rowFor(campaignDoc: IPreorderCampaign, c: IMkCustomer, facts: CampaignF
     mkId: c.partnerMkId,
     countryIso: effectiveCountryIso(c),
     countrySource: c.countryIsoManual ? "manual" : c.countrySource ?? null,
+    kind: view.kind,
   });
   const prov = resolveProvenanceOnly(admin, ctx);
   const rule = admin.customerRules.find((r) => r.partnerMkId === c.partnerMkId) ?? null;

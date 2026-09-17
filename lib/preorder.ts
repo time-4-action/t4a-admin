@@ -48,6 +48,8 @@ import {
   type PreorderTab,
   type PreorderTier,
   type MarketColor,
+  MARKET_KINDS,
+  type MarketKind,
 } from "@/types/preorder";
 
 export { connectDB };
@@ -176,6 +178,7 @@ export function sanitizeMarket(raw: unknown, fallbackId?: string): PreorderMarke
     name: String(r.name ?? "").trim().slice(0, 80) || "Market",
     color: MARKET_COLOR_KEYS.includes(color) ? color : "sky",
     countries: Array.from(new Set((Array.isArray(r.countries) ? r.countries : []).map((c) => normalizeIso(String(c))).filter((c): c is string => !!c))),
+    kinds: Array.from(new Set((Array.isArray(r.kinds) ? r.kinds : []).map(String).filter((k): k is MarketKind => (MARKET_KINDS as readonly string[]).includes(k)))),
     config: sanitizeCommercialConfig(r.config),
     updatedAt: new Date().toISOString(),
   };
@@ -235,6 +238,7 @@ export function marketView(m: IPreorderMarket): PreorderMarket {
     name: m.name,
     color: m.color,
     countries: [...m.countries],
+    kinds: [...(m.kinds ?? [])],
     config: configView(rawConfig(m)),
     updatedAt: iso(m.updatedAt),
   };
@@ -548,7 +552,10 @@ export type PartnerFacts = {
   mkId: string;
   countryIso?: string | null;
   countrySource?: CountrySource;
-  mk?: Pick<MkPartner, "address" | "addresses" | "foreignCountry"> | null;
+  // Company vs individual — markets can target one kind. Derived from the tax id
+  // when not given (a live MkPartner carries taxId; the directory passes kind).
+  kind?: MarketKind | null;
+  mk?: Pick<MkPartner, "address" | "addresses" | "foreignCountry" | "taxId"> | null;
 };
 
 export function partnerContextFor(campaign: PreorderCampaignAdmin, partner: PartnerFacts): PartnerContext {
@@ -559,7 +566,8 @@ export function partnerContextFor(campaign: PreorderCampaignAdmin, partner: Part
     iso = r.iso;
     source = r.source;
   }
-  return resolvePartnerContext(campaign, partner.mkId, iso, source);
+  const kind: MarketKind | null = partner.kind ?? (partner.mk ? (partner.mk.taxId?.trim() ? "business" : "person") : null);
+  return resolvePartnerContext(campaign, partner.mkId, iso, source, kind);
 }
 
 export function loadEffectiveCampaignForPartner(campaignDoc: IPreorderCampaign, partner: PartnerFacts): EffectiveCampaign {

@@ -31,25 +31,40 @@ import {
   type PreorderTab,
   type PreorderTier,
   type PriceBook,
+  marketMatches,
+  type MarketKind,
 } from "@/types/preorder";
 
 export type PartnerContext = {
   partnerMkId: string;
   countryIso: string | null;
   countrySource: EffectiveMeta["countrySource"];
+  kind?: MarketKind | null; // company / individual, when known
 };
 
 export type ConfigLayers = { rule: CustomerRule | null; market: PreorderMarket | null; marketSource: "country" | "manual" | null; warnings: string[] };
 
-// The first market whose country list contains the ISO code (server-side validation
-// keeps countries unique across markets, so "first" is the only one).
-export function findMarketForCountry(
+// The first market (markets are ordered by priority) that matches the partner's
+// country and kind — see marketMatches. Several may match; the first wins.
+export function findMarketFor(
   campaign: Pick<PreorderCampaignAdmin, "markets">,
   iso: string | null | undefined,
+  kind: MarketKind | null | undefined,
 ): PreorderMarket | null {
-  if (!iso) return null;
-  const up = iso.toUpperCase();
-  return campaign.markets.find((m) => m.countries.some((c) => c.toUpperCase() === up)) ?? null;
+  return campaign.markets.find((m) => marketMatches(m, iso ?? null, kind ?? null)) ?? null;
+}
+
+// Every market the partner would match, in priority order (for "also matches…").
+export function findMarketsFor(
+  campaign: Pick<PreorderCampaignAdmin, "markets">,
+  iso: string | null | undefined,
+  kind: MarketKind | null | undefined,
+): PreorderMarket[] {
+  return campaign.markets.filter((m) => marketMatches(m, iso ?? null, kind ?? null));
+}
+
+export function findMarketForCountry(campaign: Pick<PreorderCampaignAdmin, "markets">, iso: string | null | undefined): PreorderMarket | null {
+  return findMarketFor(campaign, iso, null);
 }
 
 export function findCustomerRule(
@@ -65,12 +80,14 @@ export function resolvePartnerContext(
   partnerMkId: string,
   mkCountryIso: string | null,
   mkSource: EffectiveMeta["countrySource"],
+  kind: MarketKind | null = null,
 ): PartnerContext {
   const rule = findCustomerRule(campaign, partnerMkId);
+  const base = { partnerMkId, ...(kind ? { kind } : {}) };
   if (rule?.countryIso) {
-    return { partnerMkId, countryIso: rule.countryIso.toUpperCase(), countrySource: "manual" };
+    return { ...base, countryIso: rule.countryIso.toUpperCase(), countrySource: "manual" };
   }
-  return { partnerMkId, countryIso: mkCountryIso ? mkCountryIso.toUpperCase() : null, countrySource: mkCountryIso ? mkSource : null };
+  return { ...base, countryIso: mkCountryIso ? mkCountryIso.toUpperCase() : null, countrySource: mkCountryIso ? mkSource : null };
 }
 
 // Which layers apply to this partner (and why).
@@ -88,7 +105,7 @@ export function effectiveConfigLayers(
     else warnings.push(`market-missing:${rule.marketId}`);
   }
   if (!market) {
-    market = findMarketForCountry(campaign, ctx.countryIso);
+    market = findMarketFor(campaign, ctx.countryIso, ctx.kind ?? null);
     if (market) marketSource = "country";
   }
   return { rule, market, marketSource, warnings };

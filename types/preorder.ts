@@ -141,14 +141,33 @@ export type MarketColor = "sky" | "violet" | "amber" | "rose" | "emerald" | "ind
 export const MARKET_COLOR_KEYS: MarketColor[] = ["sky", "violet", "amber", "rose", "emerald", "indigo", "fuchsia", "teal"];
 
 // A named geographic market inside ONE campaign: a set of countries + a config layer.
+// Who a market is for. A partner is a "business" when Metakocka carries a tax id
+// for it, otherwise a "person" (lib/mk-customers.ts customerKind).
+export type MarketKind = "business" | "person";
+export const MARKET_KINDS: readonly MarketKind[] = ["business", "person"];
+
+// A market matches a partner when its countries (if any) contain the partner's
+// country AND its kinds (if any) contain the partner's kind. Markets are ordered
+// by priority — campaign.markets[0] is checked first and the first match wins —
+// so one partner may satisfy several markets. A market with neither countries
+// nor kinds only gets the customers pinned to it by hand.
 export type PreorderMarket = {
   id: string;
   name: string;
   color: MarketColor;
-  countries: string[]; // ISO 3166-1 alpha-2
+  countries: string[]; // ISO 3166-1 alpha-2; empty = any country
+  kinds?: MarketKind[]; // empty / absent = any kind
   config: CommercialConfig;
   updatedAt?: string | null;
 };
+
+export function marketMatches(m: Pick<PreorderMarket, "countries" | "kinds">, iso: string | null, kind: MarketKind | null): boolean {
+  const kinds = m.kinds ?? [];
+  if (m.countries.length === 0 && kinds.length === 0) return false;
+  if (m.countries.length > 0 && (!iso || !m.countries.some((c) => c.toUpperCase() === iso.toUpperCase()))) return false;
+  if (kinds.length > 0 && (!kind || !kinds.includes(kind))) return false;
+  return true;
+}
 
 // A customer-specific rule: manual placement + a config layer that beats the market.
 export type CustomerRule = {

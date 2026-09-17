@@ -82,7 +82,7 @@ export function CountryPicker({
           const other = marketOf.get(iso);
           const moved = other && other.id !== currentMarketId;
           return (
-            <span key={iso} className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium", moved ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200" : "bg-muted text-foreground")} title={moved ? `Currently in ${other.name} — saving moves it here` : undefined}>
+            <span key={iso} className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium", moved ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200" : "bg-muted text-foreground")} title={moved ? `Also in ${other.name} — the market with higher priority wins` : undefined}>
               <Flag iso={iso} /> {countryNames[iso] ?? iso}
               <span className="text-[10px] font-normal opacity-70 tabular-nums">{stats[iso]?.customers ?? 0}</span>
               <button type="button" onClick={() => remove(iso)} className="opacity-60 hover:opacity-100" aria-label={`Remove ${iso}`}>
@@ -133,7 +133,7 @@ export function CountryPicker({
                 <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">{o.customers} customer{o.customers === 1 ? "" : "s"}</span>
                 {o.market && o.market.id !== currentMarketId && (
                   <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-300">
-                    <span className="size-1.5 rounded-full" style={{ background: MARKET_COLORS[o.market.color].hex }} /> in {o.market.name}
+                    <span className="size-1.5 rounded-full" style={{ background: MARKET_COLORS[o.market.color].hex }} /> also in {o.market.name}
                   </span>
                 )}
               </button>

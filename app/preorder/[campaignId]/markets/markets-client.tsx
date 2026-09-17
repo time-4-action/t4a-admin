@@ -147,7 +147,7 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
     const r = await fetch(url, {
       method: draft.id ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: draft.name, color: draft.color, countries: draft.countries, config: draft.config }),
+      body: JSON.stringify({ name: draft.name, color: draft.color, countries: draft.countries, kinds: draft.kinds, config: draft.config }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
@@ -190,6 +190,24 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
     await refreshAll();
     toast(draft.id ? "Market saved" : "Market created");
     return null;
+  };
+  const moveMarket = async (id: string, dir: -1 | 1) => {
+    const ids = markets.map((m) => m.id);
+    const i = ids.indexOf(id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    const r = await fetch(`/api/admin/preorder/campaigns/${campaignId}/markets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ order: ids }),
+    });
+    if (!r.ok) {
+      const jj = await r.json().catch(() => ({}));
+      toast(jj?.error ?? "Could not reorder markets");
+      return;
+    }
+    await refreshAll();
   };
   const deleteMarket = async (id: string): Promise<string | null> => {
     const r = await fetch(`/api/admin/preorder/campaigns/${campaignId}/markets/${id}`, { method: "DELETE" });
@@ -347,7 +365,7 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
         )}
 
         {view === "markets" && (
-          <div className="grid grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)] gap-4 items-start">
+          <div className="grid grid-cols-1 xl:grid-cols-[380px_minmax(0,1fr)] gap-4 items-start">
             <MarketsPanel
               markets={markets}
               stats={stats}
@@ -358,6 +376,7 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
               onEdit={(id) => openMarket(id)}
               onCreate={() => openMarket(null)}
               onShowCustomers={(id) => showCustomers({ market: id })}
+              onMove={moveMarket}
             />
             <CountriesTable stats={stats} markets={markets} countryNames={countryNames} onAssign={assignCountries} onOpenCountry={openCountry} />
           </div>

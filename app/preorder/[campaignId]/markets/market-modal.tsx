@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { MARKET_COLORS } from "@/app/preorder/preorder-badges";
 import { resolveEffectiveCampaign } from "@/lib/preorder-effective";
 import type { CountryGeo } from "@/lib/preorder-customers";
-import { MARKET_COLOR_KEYS, type CommercialConfig, type MarketColor, type PreorderCampaignAdmin, type PreorderMarket } from "@/types/preorder";
+import { MARKET_COLOR_KEYS, type CommercialConfig, type MarketColor, type MarketKind, type PreorderCampaignAdmin, type PreorderMarket } from "@/types/preorder";
 import type { MkPricelist } from "@/types/documents";
 import { CommercialConfigForm, configSectionCounts } from "./commercial-config-form";
 import { CountryPicker } from "./country-picker";
@@ -30,6 +30,7 @@ export type MarketDraft = {
   name: string;
   color: MarketColor;
   countries: string[];
+  kinds: MarketKind[]; // [] = companies and individuals alike
   customers: MarketCustomer[];
   config: CommercialConfig;
 };
@@ -177,11 +178,42 @@ export function MarketModal({
               </div>
 
               <div>
+                <label className="text-[12px] font-medium text-foreground">Who is in this market</label>
+                <div className="mt-1.5 inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
+                  {(
+                    [
+                      ["all", "Everyone", null],
+                      ["business", "Companies only", Building2],
+                      ["person", "Individuals only", User],
+                    ] as ["all" | MarketKind, string, React.ElementType | null][]
+                  ).map(([key, label, Icon]) => {
+                    const on = key === "all" ? draft.kinds.length === 0 : draft.kinds.length === 1 && draft.kinds[0] === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setDraft({ ...draft, kinds: key === "all" ? [] : [key] })}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 h-8 rounded-md px-3 text-[12px] font-medium transition-colors",
+                          on ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {Icon && <Icon className="w-3.5 h-3.5" />} {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground">A company is a partner with a tax id in Metakocka; everyone else counts as an individual.</p>
+              </div>
+
+              <div>
                 <div className="flex items-center gap-2">
                   <label className="text-[12px] font-medium text-foreground">Countries</label>
                   <span className="text-[12px] text-muted-foreground tabular-nums">{draft.countries.length}</span>
                   <div className="flex-1" />
-                  <span className="text-[11px] text-muted-foreground">A country belongs to one market — adding it here moves it.</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {draft.countries.length === 0 && draft.kinds.length > 0 ? "None — any country." : "A customer who fits several markets lands in the one with higher priority."}
+                  </span>
                 </div>
                 <div className="mt-2">
                   <CountryPicker
@@ -200,7 +232,7 @@ export function MarketModal({
                   <label className="text-[12px] font-medium text-foreground">Customers</label>
                   <span className="text-[12px] text-muted-foreground tabular-nums">{draft.customers.length}</span>
                   <div className="flex-1" />
-                  <span className="text-[11px] text-muted-foreground">Everyone in the countries above is in already — add customers from elsewhere here.</span>
+                  <span className="text-[11px] text-muted-foreground">Pinned customers are in regardless of country, kind or priority.</span>
                 </div>
                 <div className="mt-2">
                   <CustomerPicker
@@ -281,11 +313,11 @@ function toDraft(market: PreorderMarket | null, seed: string[], campaign: Preord
     const customers = campaign.customerRules
       .filter((r) => r.marketId === market.id)
       .map((r) => ({ partnerMkId: r.partnerMkId, partnerName: r.partnerName }));
-    return { id: market.id, name: market.name, color: market.color, countries: [...market.countries], customers, config: { ...market.config } };
+    return { id: market.id, name: market.name, color: market.color, countries: [...market.countries], kinds: [...(market.kinds ?? [])], customers, config: { ...market.config } };
   }
   const used = new Set(campaign.markets.map((m) => m.color));
   const color = MARKET_COLOR_KEYS.find((c) => !used.has(c)) ?? MARKET_COLOR_KEYS[campaign.markets.length % MARKET_COLOR_KEYS.length];
-  return { id: null, name: "", color, countries: [...seed], customers: [], config: {} };
+  return { id: null, name: "", color, countries: [...seed], kinds: [], customers: [], config: {} };
 }
 
 // Searchable directory picker for the market's hand-picked customers. Mirrors

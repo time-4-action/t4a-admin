@@ -646,13 +646,18 @@ in `lib/preorder.ts` (portal GET, submit, admin preview, customer tables).
   means "no ladder on this tab", `hiddenIds: []` "hide nothing". Mongoose schemas
   default these to `undefined` on purpose; read layers through `marketView` /
   `customerRuleView`, never `"key" in subdoc` (sub-documents report every path).
-- **Market** = the rule's manual `marketId`, else the market whose `countries`
-  contain the partner's ISO code. The market modal's **Customers** picker edits
-  exactly those manual pins: saving a market reconciles `customerRules` —
-  added customers get `marketId` (an existing rule keeps its other fields),
-  removed ones lose it (a rule left empty is deleted). A country belongs to at most one market
-  (validated in `lib/preorder-markets.ts`). Deleted market on a rule ⇒ warning +
-  country fallback. Unknown country ⇒ campaign defaults.
+- **Market** = the rule's manual `marketId` (a "pin"), else the **first market
+  in `campaign.markets` order that matches** the partner — `marketMatches` in
+  `types/preorder.ts`: the market's `countries` (if any) contain the partner's
+  ISO code AND its `kinds` (if any; `business` = has a tax id, `person`
+  otherwise) contain the partner's kind. A market with neither only holds its
+  pins. Markets are therefore **ordered by priority** (`POST …/markets
+  { order: [ids] }` → `reorderMarkets`; up/down arrows in the Markets panel)
+  and a country may sit in several markets. The market modal's **Customers**
+  picker edits the pins: saving a market reconciles `customerRules` — added
+  customers get `marketId` (an existing rule keeps its other fields), removed
+  ones lose it (a rule left empty is deleted). Deleted market on a rule ⇒
+  warning + automatic match. Unknown country ⇒ campaign defaults.
 - **Country** comes from MK's localized country *name* (get_partner has no ISO
   code): `lib/countries.ts` (`i18n-iso-countries`, 13 locales + MK alias table,
   `foreign_county=false` ⇒ `MK_HOME_COUNTRY`, default `SI`). A rule's `countryIso`
