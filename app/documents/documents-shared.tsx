@@ -1174,7 +1174,8 @@ export function DocumentDetail({
               {detail.kind === "offer" && detail.validTo && <span>· Valid to {fmtDate(detail.validTo)}</span>}
             </div>
           </div>
-          <div className="shrink-0">
+          {/* State + the one action, top right — the total row below stays a number. */}
+          <div className="shrink-0 flex flex-col items-end gap-2">
             {isBill ? (
               <PaymentBadge state={detail.payment} />
             ) : detail.kind === "order" ? (
@@ -1182,25 +1183,23 @@ export function DocumentDetail({
             ) : (
               <StatusPill label={detail.statusDesc || detail.statusCode} />
             )}
+            {pdfHref && (
+              <a
+                href={pdfHref}
+                target="_blank"
+                rel="noopener"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1.5 text-[12px] font-medium text-foreground hover:border-foreground/40 hover:bg-muted/40 transition-colors"
+              >
+                <Download className="h-3.5 w-3.5 text-muted-foreground" /> PDF
+              </a>
+            )}
           </div>
         </div>
-        <div className="px-5 py-3 border-t border-border/60 bg-muted/20 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-[11px] text-muted-foreground">Total</p>
-            <p className="text-2xl font-bold text-foreground tabular-nums leading-none mt-0.5">
-              {fmtMoney(detail.sumAll, currency)}
-            </p>
-          </div>
-          {pdfHref && (
-            <a
-              href={pdfHref}
-              target="_blank"
-              rel="noopener"
-              className="inline-flex items-center gap-1.5 rounded-xl bg-teal-500 text-white px-3.5 py-2 text-[12px] font-semibold hover:bg-teal-600 transition-colors shrink-0"
-            >
-              <Download className="h-3.5 w-3.5" /> Download PDF
-            </a>
-          )}
+        <div className="px-5 py-3 border-t border-border/60 bg-muted/20 flex items-baseline justify-between gap-4">
+          <p className="text-[11px] text-muted-foreground">Total</p>
+          <p className="text-2xl font-bold text-foreground tabular-nums leading-none">
+            {fmtMoney(detail.sumAll, currency)}
+          </p>
         </div>
       </div>
 
@@ -1515,15 +1514,15 @@ export function DocumentDetailSkeleton({
               {isBill && <SkeletonLine lh="h-[18px]" w="w-24" delay={100} />}
             </div>
           </div>
-          <Skeleton className="h-[20.5px] w-16 rounded-full shrink-0" delay={60} />
-        </div>
-        <div className="px-5 py-3 border-t border-border/60 bg-muted/20 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-[11px] text-muted-foreground">Total</p>
-            {/* text-2xl leading-none → 24px */}
-            <Skeleton className="h-6 w-28 mt-0.5 rounded-md" delay={120} />
+          <div className="shrink-0 flex flex-col items-end gap-2">
+            <Skeleton className="h-[20.5px] w-16 rounded-full" delay={60} />
+            <Skeleton className="h-[30px] w-[58px] rounded-lg" delay={80} />
           </div>
-          <Skeleton className="h-[34px] w-[130px] rounded-xl shrink-0" delay={140} />
+        </div>
+        <div className="px-5 py-3 border-t border-border/60 bg-muted/20 flex items-baseline justify-between gap-4">
+          <p className="text-[11px] text-muted-foreground">Total</p>
+          {/* text-2xl leading-none → 24px */}
+          <Skeleton className="h-6 w-28 rounded-md" delay={120} />
         </div>
       </div>
 
