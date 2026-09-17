@@ -32,6 +32,8 @@ import {
   Package,
   PencilLine,
   Layers,
+  Tags,
+  Settings2,
   Rocket,
   Eye,
   EyeOff,
@@ -119,6 +121,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   // The product picker either adds a NEW group to a tab, or appends a product's
   // variants to an EXISTING group ("Add from catalogue" in the group footer).
   const [picker, setPicker] = useState<{ tabId: string; groupId?: string } | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [csvTab, setCsvTab] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [pricelists, setPricelists] = useState<MkPricelist[]>([]);
@@ -437,6 +440,9 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                 <><Check className="w-3.5 h-3.5 text-lime-600" /> Saved</>
               ) : null}
             </span>
+            <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)} className="h-8" title="Season, deadline">
+              <Settings2 className="w-3.5 h-3.5" /> Settings
+            </Button>
             {campaign.status === "open" ? (
               <Button variant="outline" size="sm" onClick={() => save("draft")} disabled={saving} className="h-8"><EyeOff className="w-3.5 h-3.5" /> Unpublish</Button>
             ) : (
@@ -445,64 +451,6 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
           </>
         }
       />
-      {/* Campaign settings toolbar — page-specific, so it sits below the shared header. */}
-      <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6 py-2.5 flex flex-wrap items-center gap-2">
-        <InlineField label="Season">
-          <input
-            value={campaign.season ?? ""}
-            onChange={(e) => mutate((c) => ({ ...c, season: e.target.value }))}
-            className={inlineInput}
-            placeholder="e.g. 2026"
-            size={10}
-          />
-        </InlineField>
-        <InlineField label="Deadline">
-          <DatePicker
-            value={campaign.deadline ?? null}
-            withTime
-            placeholder="Set deadline"
-            onChange={(iso) => mutate((c) => ({ ...c, deadline: iso }))}
-            triggerClassName="h-9 rounded-none border-0 bg-transparent px-2.5 text-[12.5px] shadow-none hover:bg-muted/40 focus-visible:ring-0 focus-visible:bg-muted/40"
-          />
-        </InlineField>
-        <span className="hidden md:block w-2" aria-hidden />
-        <InlineField label="RRP list" hint="Recommended retail prices shown next to the partner price">
-          <PricelistSelect
-            label="RRP list"
-            value={campaign.rrpPricelist ?? null}
-            pricelists={pricelists}
-            onChange={(v) => mutate((c) => ({ ...c, rrpPricelist: v }))}
-            className={inlineSelect}
-          />
-        </InlineField>
-        <InlineField label="Partner list" hint="The price list the sheet's row prices come from">
-          <PricelistSelect
-            label="Partner list"
-            value={campaign.partnerPricelist ?? null}
-            pricelists={pricelists}
-            onChange={(v) => mutate((c) => ({ ...c, partnerPricelist: v }))}
-            className={inlineSelect}
-          />
-        </InlineField>
-        <div className="flex-1" />
-        {repricedAt && !repricing && (
-          <span className="text-[11px] text-lime-600 dark:text-lime-400 inline-flex items-center gap-1">
-            <Check className="w-3 h-3" /> Repriced
-          </span>
-        )}
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-9 bg-background"
-          onClick={reprice}
-          disabled={repricing}
-          title="Re-apply the selected price lists to every catalogue row on the sheet"
-        >
-          {repricing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-          Re-price sheet
-        </Button>
-      </div>
-
       <div className="flex-1 min-h-0 flex">
         {/* Tab rail */}
         <aside className="w-44 md:w-52 shrink-0 border-r border-border overflow-y-auto p-2 space-y-1">
@@ -544,6 +492,53 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
             </div>
           ) : (
             <div className="space-y-4">
+              {/* Where the numbers in the RRP / Partner columns come from. */}
+              <div className="rounded-xl border border-border bg-surface px-4 py-3">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-lime-500/12 text-lime-700 dark:text-lime-400">
+                      <Tags className="size-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-semibold text-foreground">Prices</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Every row&rsquo;s RRP and partner price is read from these Metakocka price lists.
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex-1" />
+                  <InlineField label="RRP" hint="Recommended retail price list (incl. VAT), shown next to the partner price">
+                    <PricelistSelect
+                      label="RRP list"
+                      value={campaign.rrpPricelist ?? null}
+                      pricelists={pricelists}
+                      onChange={(v) => mutate((c) => ({ ...c, rrpPricelist: v }))}
+                      className={inlineSelect}
+                    />
+                  </InlineField>
+                  <InlineField label="Partner" hint="The price list the sheet's partner prices come from (excl. VAT)">
+                    <PricelistSelect
+                      label="Partner list"
+                      value={campaign.partnerPricelist ?? null}
+                      pricelists={pricelists}
+                      onChange={(v) => mutate((c) => ({ ...c, partnerPricelist: v }))}
+                      className={inlineSelect}
+                    />
+                  </InlineField>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 bg-background"
+                    onClick={reprice}
+                    disabled={repricing}
+                    title="Re-read both lists from Metakocka and refresh every catalogue row on the sheet"
+                  >
+                    {repricing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                    {repricedAt && !repricing ? "Repriced ✓" : "Re-price sheet"}
+                  </Button>
+                </div>
+              </div>
+
               <div className="rounded-xl border border-border bg-surface px-4 py-3 flex flex-wrap items-center gap-2">
                 <InlineField label="Tab">
                   <input
@@ -641,6 +636,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                         onDeleteGroup={() => deleteGroup(activeTab.id, g.id)}
                         onAddRow={() => addManualRow(activeTab.id, g.id)}
                         onAddFromCatalogue={() => setPicker({ tabId: activeTab.id, groupId: g.id })}
+                        pricing={{ rrp: campaign.rrpPricelist ?? null, partner: campaign.partnerPricelist ?? null }}
                         onUpdateRow={(rowId, patch) => updateRow(activeTab.id, g.id, rowId, patch)}
                         onDeleteRow={(rowId) => deleteRow(activeTab.id, g.id, rowId)}
                         onReorderRows={(a, o) => reorderRows(activeTab.id, g.id, a, o)}
@@ -665,6 +661,41 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
         <div className="fixed bottom-4 right-4 z-30 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive shadow">{error}</div>
       )}
 
+      {settingsOpen && (
+        <Dialog open onOpenChange={(o) => !o && setSettingsOpen(false)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><Settings2 className="w-4 h-4 text-lime-600" /> Campaign settings</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[12px] font-medium text-foreground">Season</label>
+                <Input
+                  value={campaign.season ?? ""}
+                  onChange={(e) => mutate((c) => ({ ...c, season: e.target.value }))}
+                  className="mt-1.5 h-9 text-[13px]"
+                  placeholder="e.g. 2026"
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">A label for your team — shown in the campaign list.</p>
+              </div>
+              <div>
+                <label className="text-[12px] font-medium text-foreground">Deadline</label>
+                <div className="mt-1.5">
+                  <DatePicker
+                    value={campaign.deadline ?? null}
+                    withTime
+                    placeholder="No deadline"
+                    onChange={(iso) => mutate((c) => ({ ...c, deadline: iso }))}
+                    triggerClassName="h-9 text-[13px]"
+                  />
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground">Shown to customers on their preorder page. Display only — it does not lock the sheet.</p>
+              </div>
+            </div>
+            <div className="flex justify-end pt-1"><Button size="sm" onClick={() => setSettingsOpen(false)}>Done</Button></div>
+          </DialogContent>
+        </Dialog>
+      )}
       {picker && !picker.groupId && (
         <ProductPickerDialog
           rrpPricelist={campaign.rrpPricelist ?? null}
@@ -896,7 +927,7 @@ function SortableTab({
 
 // ── Sortable group (a parent product): header + variant table, drag via grip ──
 function GroupSection({
-  group, collapsed, sensors, onToggleCollapse, onRenameGroup, onDeleteGroup, onAddRow, onAddFromCatalogue, onUpdateRow, onDeleteRow, onReorderRows,
+  group, collapsed, sensors, onToggleCollapse, onRenameGroup, onDeleteGroup, onAddRow, onAddFromCatalogue, onUpdateRow, onDeleteRow, onReorderRows, pricing,
 }: {
   group: PreorderGroup;
   collapsed: boolean;
@@ -909,6 +940,7 @@ function GroupSection({
   onUpdateRow: (rowId: string, patch: Partial<PreorderRow>) => void;
   onDeleteRow: (rowId: string) => void;
   onReorderRows: (activeId: string, overId: string) => void;
+  pricing: PricingLabels;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: group.id });
   const style = {
@@ -966,6 +998,7 @@ function GroupSection({
       {!collapsed && group.rows.length > 0 && (
         <VariantTable
           rows={group.rows}
+          pricing={pricing}
           sensors={sensors}
           onReorderRows={onReorderRows}
           onUpdateRow={onUpdateRow}
@@ -991,10 +1024,13 @@ function GroupSection({
 
 // ── Variant table: memoized so a group being dragged/reordered doesn't force
 // every *other* group to re-render its whole rows table on each drag frame. ──
+type PricingLabels = { rrp: string | null; partner: string | null };
+
 const VariantTable = memo(function VariantTable({
-  rows, sensors, onReorderRows, onUpdateRow, onDeleteRow,
+  rows, pricing, sensors, onReorderRows, onUpdateRow, onDeleteRow,
 }: {
   rows: PreorderRow[];
+  pricing: PricingLabels;
   sensors: ReturnType<typeof useSensors>;
   onReorderRows: (activeId: string, overId: string) => void;
   onUpdateRow: (rowId: string, patch: Partial<PreorderRow>) => void;
@@ -1027,9 +1063,18 @@ const VariantTable = memo(function VariantTable({
               <th className="text-left font-semibold px-3 py-2">Variant</th>
               <th className="text-left font-semibold px-3 py-2">SKU</th>
               <th className="text-left font-semibold px-3 py-2">Size / label</th>
-              <th className="text-right font-semibold px-3 py-2 border-l border-l-border/40" title="Recommended retail price, incl. VAT">RRP</th>
-              <th className="text-right font-semibold px-3 py-2" title="Partner price, excl. VAT">Partner</th>
-              <th className="text-right font-semibold px-3 py-2" title="Discounted partner price — overrides the partner price when set">Discounted</th>
+              <th className="text-right font-semibold px-3 py-2 border-l border-l-border/40" title={pricing.rrp ? `From “${pricing.rrp}” — incl. VAT` : "Recommended retail price, incl. VAT"}>
+                RRP
+                {pricing.rrp && <div className="text-[9px] font-normal normal-case tracking-normal text-muted-foreground/70 truncate max-w-[110px] ml-auto">{pricing.rrp}</div>}
+              </th>
+              <th className="text-right font-semibold px-3 py-2" title={pricing.partner ? `From “${pricing.partner}” — excl. VAT` : "Partner price, excl. VAT"}>
+                Partner
+                {pricing.partner && <div className="text-[9px] font-normal normal-case tracking-normal text-muted-foreground/70 truncate max-w-[110px] ml-auto">{pricing.partner}</div>}
+              </th>
+              <th className="text-right font-semibold px-3 py-2" title="Discounted partner price — overrides the partner price when set">
+                Discounted
+                <div className="text-[9px] font-normal normal-case tracking-normal text-muted-foreground/70">optional</div>
+              </th>
               <th className="py-2" />
             </tr>
           </thead>
@@ -1285,7 +1330,7 @@ const PL_NONE = "__none__";
 // so a row of them reads as one toolbar instead of a form.
 function InlineField({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <label
+    <div
       className="inline-flex items-stretch h-9 rounded-lg border border-border bg-background overflow-hidden focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/30 transition-shadow"
       title={hint}
     >
@@ -1293,7 +1338,7 @@ function InlineField({ label, hint, children }: { label: string; hint?: string; 
         {label}
       </span>
       {children}
-    </label>
+    </div>
   );
 }
 const inlineInput = "h-full min-w-0 bg-transparent px-2.5 text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/60";
@@ -1752,21 +1797,11 @@ function BuilderSkeleton({ campaignId }: { campaignId: string }) {
         actions={
           <>
             <span className="min-w-[70px]" />
+            <Button variant="outline" size="sm" className="h-8" disabled><Settings2 className="w-3.5 h-3.5" /> Settings</Button>
             <Skeleton className="h-8 w-[92px] rounded-md" delay={80} />
           </>
         }
       />
-      <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6 py-2.5 flex flex-wrap items-center gap-2">
-        <InlineField label="Season"><Skeleton className="h-full w-28 rounded-none" delay={100} /></InlineField>
-        <InlineField label="Deadline"><Skeleton className="h-full w-40 rounded-none" delay={120} /></InlineField>
-        <span className="hidden md:block w-2" aria-hidden />
-        <InlineField label="RRP list"><Skeleton className="h-full w-[230px] rounded-none" delay={140} /></InlineField>
-        <InlineField label="Partner list"><Skeleton className="h-full w-[230px] rounded-none" delay={160} /></InlineField>
-        <div className="flex-1" />
-        <Button variant="outline" size="sm" className="h-9 bg-background" disabled>
-          <RefreshCw className="w-3.5 h-3.5" /> Re-price sheet
-        </Button>
-      </div>
 
       <div className="flex-1 min-h-0 flex">
         <aside className="w-44 md:w-52 shrink-0 border-r border-border overflow-y-auto p-2 space-y-1">
@@ -1783,6 +1818,19 @@ function BuilderSkeleton({ campaignId }: { campaignId: string }) {
 
         <main className="flex-1 min-w-0 overflow-y-auto p-4 md:p-6">
           <div className="space-y-4">
+            <div className="rounded-xl border border-border bg-surface px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="flex items-center gap-2.5">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-lime-500/12 text-lime-700 dark:text-lime-400"><Tags className="size-4" /></span>
+                <div>
+                  <div className="text-[13px] font-semibold text-foreground">Prices</div>
+                  <div className="text-[11px] text-muted-foreground">Every row&rsquo;s RRP and partner price is read from these Metakocka price lists.</div>
+                </div>
+              </div>
+              <div className="flex-1" />
+              <InlineField label="RRP"><Skeleton className="h-full w-[230px] rounded-none" delay={100} /></InlineField>
+              <InlineField label="Partner"><Skeleton className="h-full w-[230px] rounded-none" delay={120} /></InlineField>
+              <Button variant="outline" size="sm" className="h-9 bg-background" disabled><RefreshCw className="w-3.5 h-3.5" /> Re-price sheet</Button>
+            </div>
             <div className="rounded-xl border border-border bg-surface px-4 py-3 flex flex-wrap items-center gap-2">
               <InlineField label="Tab"><Skeleton className="h-full w-56 rounded-none" /></InlineField>
               <InlineField label="Note to partners"><Skeleton className="h-full w-80 rounded-none" delay={40} /></InlineField>
