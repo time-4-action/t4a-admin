@@ -365,6 +365,51 @@ export type CustomerFilters = {
 };
 export const DEFAULT_CUSTOMER_FILTERS: CustomerFilters = { q: "", kind: "all", country: "", market: "all", access: "all", stage: "all", override: "all" };
 
+// A column heading that IS the column's filter: borderless select in the header
+// row, heading text when nothing is picked, the picked value (accent-coloured)
+// otherwise. "all" always resets.
+function HeaderFilter({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: React.ReactNode; count?: number }[];
+}) {
+  const active = value !== "all";
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger
+        size="sm"
+        aria-label={`Filter by ${label.toLowerCase()}`}
+        className={cn(
+          "h-6 max-w-full gap-1 rounded-md border-0 bg-transparent px-1.5 -ml-1.5 shadow-none text-[10px] font-semibold uppercase tracking-wider",
+          "hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring dark:bg-transparent dark:hover:bg-muted [&_svg]:size-3",
+          "*:data-[slot=select-value]:normal-case *:data-[slot=select-value]:tracking-normal",
+          active ? "text-lime-700 dark:text-lime-400" : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <SelectValue placeholder={label} />
+      </SelectTrigger>
+      <SelectContent align="start">
+        <SelectItem value="all" className="text-[12px]">
+          <span className="uppercase tracking-wider font-semibold text-[10px]">{label}</span>
+          <span className="ml-1 text-muted-foreground">all</span>
+        </SelectItem>
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value} className="text-[12px]">
+            {o.label}
+            {o.count !== undefined && <span className="ml-1 text-muted-foreground tabular-nums">· {o.count}</span>}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 export function CustomersTable({
   campaignId,
   markets,
@@ -447,7 +492,6 @@ export function CustomersTable({
   const activeFilters = [filters.country, filters.market !== "all", filters.access !== "all", filters.stage !== "all", filters.override !== "all"].filter(Boolean).length;
   const reset = () => setFilters({ ...DEFAULT_CUSTOMER_FILTERS });
 
-  const sel = "h-8 text-[12px] bg-background";
 
   return (
     <div className="rounded-xl border border-border bg-surface overflow-hidden">
@@ -461,70 +505,16 @@ export function CustomersTable({
           <Input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} placeholder="Name, email, VAT id, city…" className="h-8 w-64 pl-8 text-[12px]" />
         </div>
         <KindSegment value={filters.kind} onChange={(kind) => setFilters({ ...filters, kind })} counts={kinds} />
+        {(activeFilters > 0 || filters.kind !== "all" || filters.q) && (
+          <button type="button" onClick={reset} className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground ml-1">
+            <X className="w-3 h-3" /> Reset filters
+          </button>
+        )}
         <div className="flex-1" />
         {syncInfo && <span className="text-[11px] text-muted-foreground hidden xl:inline">{syncInfo}</span>}
         <Button size="sm" variant="outline" className="h-8" onClick={onSync} disabled={syncing}>
           {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Sync from Metakocka
         </Button>
-      </div>
-      {/* row 2: campaign-scoped filters */}
-      <div className="px-4 py-2 border-b border-border/60 bg-muted/20 flex flex-wrap items-center gap-2">
-        <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground mr-1">Filter</span>
-        <Select value={filters.country || "__all__"} onValueChange={(v) => setFilters({ ...filters, country: v === "__all__" ? "" : v })}>
-          <SelectTrigger size="sm" className={cn(sel, "w-44")}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__" className="text-[12px]">All countries</SelectItem>
-            <SelectItem value="none" className="text-[12px]"><span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300"><AlertTriangle className="w-3 h-3" /> Country unresolved</span></SelectItem>
-            {countryOptions.map(([iso, name, n]) => (
-              <SelectItem key={iso} value={iso} className="text-[12px]"><Flag iso={iso} /> {name} <span className="text-muted-foreground tabular-nums">· {n}</span></SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={filters.market} onValueChange={(v) => setFilters({ ...filters, market: v })}>
-          <SelectTrigger size="sm" className={cn(sel, "w-40")}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="text-[12px]">All markets</SelectItem>
-            <SelectItem value="none" className="text-[12px]">No market</SelectItem>
-            {markets.map((m) => (
-              <SelectItem key={m.id} value={m.id} className="text-[12px]">
-                <span className="inline-flex items-center gap-1.5"><span className="size-1.5 rounded-full" style={{ background: MARKET_COLORS[m.color].hex }} /> {m.name}</span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={filters.access} onValueChange={(v) => setFilters({ ...filters, access: v as CustomerFilters["access"] })}>
-          <SelectTrigger size="sm" className={cn(sel, "w-36")}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="text-[12px]">Any access</SelectItem>
-            <SelectItem value="unlocked" className="text-[12px]">Unlocked</SelectItem>
-            <SelectItem value="not-unlocked" className="text-[12px]">Not unlocked</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={filters.stage} onValueChange={(v) => setFilters({ ...filters, stage: v as CustomerFilters["stage"] })}>
-          <SelectTrigger size="sm" className={cn(sel, "w-44")}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="text-[12px]">Any preorder state</SelectItem>
-            <SelectItem value="any" className="text-[12px]">Has a preorder</SelectItem>
-            <SelectItem value="draft" className="text-[12px]">Draft</SelectItem>
-            <SelectItem value="submitted" className="text-[12px]">Submitted</SelectItem>
-            <SelectItem value="registered" className="text-[12px]">Registered</SelectItem>
-            <SelectItem value="registration-failed" className="text-[12px]">Registration failed</SelectItem>
-            <SelectItem value="published" className="text-[12px]">Published</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={filters.override} onValueChange={(v) => setFilters({ ...filters, override: v as CustomerFilters["override"] })}>
-          <SelectTrigger size="sm" className={cn(sel, "w-40")}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="text-[12px]">Any overrides</SelectItem>
-            <SelectItem value="yes" className="text-[12px]">With overrides</SelectItem>
-            <SelectItem value="no" className="text-[12px]">Without overrides</SelectItem>
-          </SelectContent>
-        </Select>
-        {(activeFilters > 0 || filters.kind !== "all" || filters.q) && (
-          <button type="button" onClick={reset} className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground ml-1">
-            <X className="w-3 h-3" /> Reset
-          </button>
-        )}
       </div>
 
       <Table>
@@ -532,11 +522,68 @@ export function CustomersTable({
           <TableRow className="hover:bg-transparent border-b border-border">
             <TableHead className={cn(th, "pl-5")}>Customer</TableHead>
             <TableHead className={th}>Type</TableHead>
-            <TableHead className={th}>Country</TableHead>
-            <TableHead className={th}>Market</TableHead>
-            <TableHead className={th}>Access</TableHead>
-            <TableHead className={th}>Overrides</TableHead>
-            <TableHead className={th}>Preorder</TableHead>
+            <TableHead className={th}>
+              <HeaderFilter
+                label="Country"
+                value={filters.country || "all"}
+                onChange={(v) => setFilters({ ...filters, country: v === "all" ? "" : v })}
+                options={[
+                  { value: "none", label: <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300"><AlertTriangle className="w-3 h-3" /> Unresolved</span> },
+                  ...countryOptions.map(([iso, name, n]) => ({ value: iso, label: <span className="inline-flex items-center gap-1.5"><Flag iso={iso} /> {name}</span>, count: n })),
+                ]}
+              />
+            </TableHead>
+            <TableHead className={th}>
+              <HeaderFilter
+                label="Market"
+                value={filters.market}
+                onChange={(v) => setFilters({ ...filters, market: v })}
+                options={[
+                  { value: "none", label: "No market" },
+                  ...markets.map((m) => ({
+                    value: m.id,
+                    label: <span className="inline-flex items-center gap-1.5"><span className="size-1.5 rounded-full" style={{ background: MARKET_COLORS[m.color].hex }} /> {m.name}</span>,
+                  })),
+                ]}
+              />
+            </TableHead>
+            <TableHead className={th}>
+              <HeaderFilter
+                label="Access"
+                value={filters.access}
+                onChange={(v) => setFilters({ ...filters, access: v as CustomerFilters["access"] })}
+                options={[
+                  { value: "unlocked", label: "Unlocked" },
+                  { value: "not-unlocked", label: "Not unlocked" },
+                ]}
+              />
+            </TableHead>
+            <TableHead className={th}>
+              <HeaderFilter
+                label="Overrides"
+                value={filters.override}
+                onChange={(v) => setFilters({ ...filters, override: v as CustomerFilters["override"] })}
+                options={[
+                  { value: "yes", label: "With overrides" },
+                  { value: "no", label: "Without overrides" },
+                ]}
+              />
+            </TableHead>
+            <TableHead className={th}>
+              <HeaderFilter
+                label="Preorder"
+                value={filters.stage}
+                onChange={(v) => setFilters({ ...filters, stage: v as CustomerFilters["stage"] })}
+                options={[
+                  { value: "any", label: "Has a preorder" },
+                  { value: "draft", label: "Draft" },
+                  { value: "submitted", label: "Submitted" },
+                  { value: "registered", label: "Registered" },
+                  { value: "registration-failed", label: "Registration failed" },
+                  { value: "published", label: "Published" },
+                ]}
+              />
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
