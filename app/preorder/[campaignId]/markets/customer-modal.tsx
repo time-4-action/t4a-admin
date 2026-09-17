@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { EditorModal, EditorModalBody, EditorModalFooter, EditorModalHeader } from "@/components/ui/editor-modal";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { MarketChip, SourceBadge, SubmissionStageBadge } from "@/app/preorder/preorder-badges";
+import { MarketChip, SubmissionStageBadge } from "@/app/preorder/preorder-badges";
 import { Flag } from "@/components/flag";
 import { resolveEffectiveCampaign, resolvePartnerContext } from "@/lib/preorder-effective";
 import type { CustomerRow } from "@/lib/preorder-customers";
@@ -266,68 +266,106 @@ export function CustomerModal({
           </div>
         ) : customer && eff ? (
           <>
-            {/* ── left: context ── */}
+            {/* ── left: what this customer gets ── */}
             <aside className="min-h-0 overflow-y-auto border-b md:border-b-0 md:border-r border-border bg-muted/30 p-5 space-y-4">
               {/* status */}
-              <div className="grid grid-cols-2 gap-3">
-                <Panel title="Access" compact>
-                  <div className="flex items-center gap-1.5 text-[12px]">
-                    {customer.access ? <span className="inline-flex items-center gap-1 text-lime-700 dark:text-lime-400 font-medium"><Check className="w-3.5 h-3.5" /> Unlocked</span> : <span className="text-muted-foreground">Not unlocked</span>}
+              <Panel title="Status">
+                <div className="divide-y divide-border/60 text-[12px]">
+                  <div className="flex items-center gap-2 py-1.5">
+                    <span className="text-muted-foreground w-24 shrink-0">Access</span>
+                    {customer.access ? (
+                      <span className="inline-flex items-center gap-1 text-lime-700 dark:text-lime-400 font-medium"><Check className="w-3.5 h-3.5" /> Unlocked</span>
+                    ) : (
+                      <span className="text-foreground">Not unlocked</span>
+                    )}
+                    {!customer.access && inviteUrl && (
+                      <button type="button" onClick={() => navigator.clipboard?.writeText(inviteUrl)} className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
+                        <Link2 className="w-3 h-3" /> Copy invite
+                      </button>
+                    )}
                   </div>
-                  {!customer.access && inviteUrl && (
-                    <button type="button" onClick={() => navigator.clipboard?.writeText(inviteUrl)} className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
-                      <Link2 className="w-3 h-3" /> Copy invite link
-                    </button>
-                  )}
-                </Panel>
-                <Panel title="Preorder" compact>
-                  <div className="flex items-center gap-1.5 text-[12px]">
-                    {customer.stage ? <SubmissionStageBadge stage={customer.stage} /> : <span className="text-muted-foreground">None</span>}
+                  <div className="flex items-center gap-2 py-1.5">
+                    <span className="text-muted-foreground w-24 shrink-0">Preorder</span>
+                    {customer.stage ? <SubmissionStageBadge stage={customer.stage} /> : <span className="text-foreground">None yet</span>}
                     {customer.submissionId && (
-                      <Link href={`/preorder/${campaignId}/submissions/${customer.submissionId}`} className="text-muted-foreground hover:text-foreground" aria-label="Open preorder">
-                        <ExternalLink className="w-3.5 h-3.5" />
+                      <Link href={`/preorder/${campaignId}/submissions/${customer.submissionId}`} className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
+                        Open <ExternalLink className="w-3 h-3" />
                       </Link>
                     )}
                   </div>
-                </Panel>
-              </div>
-
-              {/* inheritance ladder */}
-              <Panel title="Inheritance">
-                <ol className="space-y-1.5 text-[12px]">
-                  <li className="flex items-center gap-2">
-                    <span className={cn("size-1.5 rounded-full", hasRule ? "bg-lime-500" : "bg-muted-foreground/30")} />
-                    <span className={cn("truncate", hasRule ? "font-medium text-foreground" : "text-muted-foreground")}>{customer.name}</span>
-                    {hasRule && <SourceBadge source="customer" />}
-                  </li>
-                  <li className="flex items-center gap-2 pl-3">
-                    <span className="size-1.5 rounded-full bg-muted-foreground/30" />
-                    <span className="text-foreground inline-flex items-center gap-1.5">{eff.countryIso ? <><Flag iso={eff.countryIso} /> {countryNames[eff.countryIso] ?? eff.countryIso}</> : "Country unknown"}</span>
-                    {eff.countrySource === "manual" && <span className="text-[10px] text-muted-foreground">manual</span>}
-                    {eff.countrySource === "home-fallback" && <span className="text-[10px] text-muted-foreground">home country</span>}
-                  </li>
-                  <li className="flex items-center gap-2 pl-6">
-                    <span className={cn("size-1.5 rounded-full", eff.market ? "bg-sky-500" : "bg-muted-foreground/30")} />
-                    {eff.market ? <MarketChip name={eff.market.name} color={eff.market.color} /> : <span className="text-muted-foreground">No market</span>}
-                    {eff.marketSource === "manual" && <span className="text-[10px] text-muted-foreground">assigned manually</span>}
-                  </li>
-                  <li className="flex items-center gap-2 pl-9">
-                    <span className="size-1.5 rounded-full bg-muted-foreground/30" />
-                    <span className="text-muted-foreground">Campaign default</span>
-                  </li>
-                </ol>
+                </div>
               </Panel>
 
-              {/* effective summary */}
-              <Panel title="Effective configuration">
-                <div className="space-y-1.5 text-[12px]">
-                  <Row label="Price list" value={inherited.partnerPricelist ?? "sheet prices"} source={detail?.effective.sources.pricelist ?? eff.sources.pricelist} />
-                  <Row label="Currency" value={inherited.currency} source={detail?.effective.sources.currency ?? eff.sources.currency} />
-                  <Row label="Products" value={`${detail?.effectiveTabs.reduce((n, t) => n + t.rows, 0) ?? 0} visible`} source={detail?.effective.assortment.hidden || detail?.effective.assortment.exposed ? (detail.effective.hasCustomerRule && (draft.config.hiddenIds || draft.config.exposedIds) ? "customer" : "market") : "campaign"} />
-                  <Row label="Discounts" value={Object.values(detail?.effective.sources.tiers ?? {}).includes("customer") ? "customer tiers" : Object.values(detail?.effective.sources.tiers ?? {}).includes("market") ? `${eff.market?.name ?? "market"} tiers` : "campaign tiers"} source={Object.values(detail?.effective.sources.tiers ?? {}).includes("customer") ? "customer" : Object.values(detail?.effective.sources.tiers ?? {}).includes("market") ? "market" : "campaign"} />
+              {/* effective summary — plain answers, full text, source as a footnote */}
+              <Panel title="What this customer gets">
+                <div className="divide-y divide-border/60">
+                  <Item
+                    label="Country"
+                    value={eff.countryIso ? <span className="inline-flex items-center gap-1.5"><Flag iso={eff.countryIso} /> {countryNames[eff.countryIso] ?? eff.countryIso}</span> : "Unknown"}
+                    note={
+                      draft.countryIso
+                        ? "set for this campaign"
+                        : eff.countrySource === "manual"
+                          ? "set manually in the directory"
+                          : eff.countrySource === "home-fallback"
+                            ? "home country (no address country in Metakocka)"
+                            : eff.countryIso
+                              ? "from Metakocka"
+                              : "pick one under Placement"
+                    }
+                  />
+                  <Item
+                    label="Market"
+                    value={eff.market ? <MarketChip name={eff.market.name} color={eff.market.color} /> : "None"}
+                    note={
+                      eff.market
+                        ? eff.marketSource === "manual"
+                          ? "assigned under Placement"
+                          : `because ${eff.countryIso ? (countryNames[eff.countryIso] ?? eff.countryIso) : "the country"} belongs to it`
+                        : eff.countryIso
+                          ? `no market covers ${countryNames[eff.countryIso] ?? eff.countryIso} — campaign defaults apply`
+                          : "no country, so no market"
+                    }
+                  />
+                  <Item
+                    label="Price list"
+                    value={inherited.partnerPricelist ?? "Sheet prices"}
+                    note={sourceNote(detail?.effective.sources.pricelist ?? eff.sources.pricelist, eff.market?.name)}
+                  />
+                  <Item label="Currency" value={inherited.currency} note={sourceNote(detail?.effective.sources.currency ?? eff.sources.currency, eff.market?.name)} />
+                  <Item
+                    label="Products"
+                    value={`${detail?.effectiveTabs.reduce((n, t) => n + t.rows, 0) ?? 0} visible`}
+                    note={sourceNote(
+                      detail?.effective.assortment.hidden || detail?.effective.assortment.exposed
+                        ? detail.effective.hasCustomerRule && (draft.config.hiddenIds || draft.config.exposedIds)
+                          ? "customer"
+                          : "market"
+                        : "campaign",
+                      eff.market?.name,
+                    )}
+                  />
+                  <Item
+                    label="Volume discounts"
+                    value={
+                      Object.values(detail?.effective.sources.tiers ?? {}).includes("customer")
+                        ? "Customer ladder"
+                        : Object.values(detail?.effective.sources.tiers ?? {}).includes("market")
+                          ? `${eff.market?.name ?? "Market"} ladder`
+                          : "Campaign ladder"
+                    }
+                    note={sourceNote(
+                      Object.values(detail?.effective.sources.tiers ?? {}).includes("customer")
+                        ? "customer"
+                        : Object.values(detail?.effective.sources.tiers ?? {}).includes("market")
+                          ? "market"
+                          : "campaign",
+                      eff.market?.name,
+                    )}
+                  />
                 </div>
                 {(detail?.effective.warnings.length ?? 0) > 0 && (
-                  <div className="mt-2 text-[11px] text-amber-700 dark:text-amber-300 flex items-start gap-1.5">
+                  <div className="mt-3 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/50 px-2.5 py-2 text-[11px] text-amber-800 dark:text-amber-200 flex items-start gap-1.5">
                     <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                     <span>{detail!.effective.warnings.join(" · ")}</span>
                   </div>
@@ -549,12 +587,20 @@ function CopyFact({
   );
 }
 
-function Row({ label, value, source }: { label: string; value: string; source: "campaign" | "market" | "customer" }) {
+// One line of the "what this customer gets" list: label, the full answer, and a
+// footnote saying where it comes from.
+function Item({ label, value, note }: { label: string; value: React.ReactNode; note?: string }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-muted-foreground w-20 shrink-0">{label}</span>
-      <span className="text-foreground truncate">{value}</span>
-      <SourceBadge source={source} className="ml-auto" />
+    <div className="py-2 first:pt-0 last:pb-0">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-0.5 text-[12px] font-medium text-foreground break-words">{value}</div>
+      {note && <div className="mt-0.5 text-[11px] text-muted-foreground">{note}</div>}
     </div>
   );
+}
+
+function sourceNote(source: "campaign" | "market" | "customer", marketName?: string): string {
+  if (source === "customer") return "customer override";
+  if (source === "market") return marketName ? `from market ${marketName}` : "from the market";
+  return "campaign default";
 }
