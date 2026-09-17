@@ -311,41 +311,44 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
         }
       />
 
-      {/* View strip: the three things this page is about, as real tabs with counts. */}
-      <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6">
-        <div className="flex items-end gap-1 -mb-px overflow-x-auto">
-          {(
-            [
-              ["customers", Users, "Customers", geo.totalCustomers, "everyone in the directory"],
-              ["markets", Layers, "Markets", markets.length, "groups that share prices and terms"],
-              ["countries", Globe2, "Countries", countriesWithCustomers.length, "assign each country to a market"],
-            ] as const
-          ).map(([v, Icon, label, count, hint]) => {
-            const active = view === v;
-            return (
-              <button
-                key={v}
-                type="button"
-                onClick={() => switchView(v)}
-                title={hint}
-                className={cn(
-                  "inline-flex items-center gap-2 border-b-2 px-3 h-12 text-[13px] whitespace-nowrap transition-colors",
-                  active ? "border-lime-500 text-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <Icon className="w-4 h-4" />
-                {label}
-                <span className={cn("rounded-full px-1.5 text-[11px] tabular-nums", active ? "bg-lime-500/15 text-lime-700 dark:text-lime-400" : "bg-muted text-muted-foreground")}>
-                  {num.format(count)}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
       <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4">
         {flash && <div className="rounded-lg border border-lime-300/60 bg-lime-50 dark:bg-lime-950/30 px-3 py-2 text-[12px] text-lime-800 dark:text-lime-200">{flash}</div>}
+
+        {/* Which of the page's three lists is showing — a segmented control, so it
+            does not read as a second row of navigation under the campaign tabs. */}
+        <div className="flex items-center gap-3">
+          <div className="inline-flex rounded-xl border border-border bg-muted/40 p-1">
+            {(
+              [
+                ["customers", Users, "Customers", geo.totalCustomers],
+                ["markets", Layers, "Markets", markets.length],
+                ["countries", Globe2, "Countries", countriesWithCustomers.length],
+              ] as const
+            ).map(([v, Icon, label, count]) => {
+              const active = view === v;
+              return (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => switchView(v)}
+                  className={cn(
+                    "inline-flex items-center gap-2 h-9 rounded-lg px-3.5 text-[13px] transition-colors",
+                    active ? "bg-background text-foreground font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon className="w-4 h-4" />
+                  {label}
+                  <span className={cn("rounded-full px-1.5 text-[11px] tabular-nums", active ? "bg-lime-500/15 text-lime-700 dark:text-lime-400" : "bg-muted text-muted-foreground")}>
+                    {num.format(count)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <span className="text-[12px] text-muted-foreground hidden md:inline">
+            {view === "customers" ? "Everyone in the directory, with the market each one lands in." : view === "markets" ? "Groups that share prices and terms — drag to set priority." : "Assign each country to a market; expand one to see its customers."}
+          </span>
+        </div>
 
         {/* summary strip */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
