@@ -118,7 +118,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   const [dirty, setDirty] = useState(false);
   // The product picker either adds a NEW group to a tab, or appends a product's
   // variants to an EXISTING group ("Add from catalogue" in the group footer).
-  const [picker, setPicker] = useState<{ tabId: string; groupId?: string; groupName?: string } | null>(null);
+  const [picker, setPicker] = useState<{ tabId: string; groupId?: string } | null>(null);
   const [csvTab, setCsvTab] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [pricelists, setPricelists] = useState<MkPricelist[]>([]);
@@ -381,6 +381,11 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
     () => campaign?.tabs.find((t) => t.id === activeTabId) ?? null,
     [campaign, activeTabId],
   );
+  // The group the variant picker is open for (live, so "In group" ticks update as rows land).
+  const pickerGroup = useMemo(
+    () => (picker?.groupId ? campaign?.tabs.find((t) => t.id === picker.tabId)?.groups.find((g) => g.id === picker.groupId) ?? null : null),
+    [campaign, picker],
+  );
 
   if (loading) return <BuilderSkeleton campaignId={campaignId} />;
   if (error && !campaign) {
@@ -618,7 +623,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                         onRenameGroup={(name) => mutateGroup(activeTab.id, g.id, (gr) => ({ ...gr, name }))}
                         onDeleteGroup={() => deleteGroup(activeTab.id, g.id)}
                         onAddRow={() => addManualRow(activeTab.id, g.id)}
-                        onAddFromCatalogue={() => setPicker({ tabId: activeTab.id, groupId: g.id, groupName: g.name })}
+                        onAddFromCatalogue={() => setPicker({ tabId: activeTab.id, groupId: g.id })}
                         onUpdateRow={(rowId, patch) => updateRow(activeTab.id, g.id, rowId, patch)}
                         onDeleteRow={(rowId) => deleteRow(activeTab.id, g.id, rowId)}
                         onReorderRows={(a, o) => reorderRows(activeTab.id, g.id, a, o)}
@@ -643,13 +648,21 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
         <div className="fixed bottom-4 right-4 z-30 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive shadow">{error}</div>
       )}
 
-      {picker && (
+      {picker && !picker.groupId && (
         <ProductPickerDialog
           rrpPricelist={campaign.rrpPricelist ?? null}
           partnerPricelist={campaign.partnerPricelist ?? null}
-          targetGroupName={picker.groupName}
           onClose={() => setPicker(null)}
-          onAddGroup={(g) => (picker.groupId ? appendRows(picker.tabId, picker.groupId, g.rows) : addGroups(picker.tabId, [g]))}
+          onAddGroup={(g) => addGroups(picker.tabId, [g])}
+        />
+      )}
+      {picker?.groupId && pickerGroup && (
+        <VariantPickerDialog
+          group={pickerGroup}
+          rrpPricelist={campaign.rrpPricelist ?? null}
+          partnerPricelist={campaign.partnerPricelist ?? null}
+          onClose={() => setPicker(null)}
+          onAddRows={(rows) => appendRows(picker.tabId, picker.groupId!, rows)}
         />
       )}
       {csvTab && (
@@ -1301,13 +1314,196 @@ function PricelistSelect({
 // ── Product picker: search catalogue, add the parent + all its variants as a group ──
 type Hit = { code: string; name: string; image?: string | null };
 
+// ── Variant picker for ONE group: lists the variants of the group's own product
+// (missing ones get an "Add", present ones a check) and lets you browse any
+// other catalogue product down to its single variants. ──
+function VariantPickerDialog({
+  group, rrpPricelist, partnerPricelist, onClose, onAddRows,
+}: {
+  group: PreorderGroup;
+  rrpPricelist: string | null;
+  partnerPricelist: string | null;
+  onClose: () => void;
+  onAddRows: (rows: RowDraft[]) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<Hit[]>([]);
+  const [searching, setSearching] = useState(false);
+  // The product whose variants are listed — the group's own parent by default.
+  const [source, setSource] = useState<{ code: string; name: string } | null>(
+    group.parentCode ? { code: group.parentCode, name: group.name } : null,
+  );
+  const [variants, setVariants] = useState<RowDraft[] | null>(null);
+  const [loadingVariants, setLoadingVariants] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inGroup = useMemo(() => new Set(group.rows.map((r) => r.code).filter(Boolean)), [group.rows]);
+
+  useEffect(() => {
+    if (!source) {
+      setVariants(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingVariants(true);
+    setError(null);
+    fetch(`/api/admin/preorder/products/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: source.code, rrpPricelist, partnerPricelist }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data.group) setVariants((data.group as GroupDraft).rows);
+        else setError(data.error ?? "Product not found in the catalogue.");
+      })
+      .catch(() => !cancelled && setError("Couldn't load the product."))
+      .finally(() => !cancelled && setLoadingVariants(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [source, rrpPricelist, partnerPricelist]);
+
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 2) {
+      setResults([]);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const t = setTimeout(() => {
+      fetch(`/api/admin/preorder/products/search?q=${encodeURIComponent(query)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (cancelled) return;
+          setResults((data.candidates ?? []).map((c: { code: string; name: string; image?: string | null }) => ({ code: c.code, name: c.name, image: c.image })));
+        })
+        .catch(() => !cancelled && setResults([]))
+        .finally(() => !cancelled && setSearching(false));
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [q]);
+
+  const missing = (variants ?? []).filter((v) => !inGroup.has(v.code));
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-lime-600" /> Add variants to <span className="truncate">{group.name || "this group"}</span>
+          </DialogTitle>
+        </DialogHeader>
+
+        {/* search: any product, then browse into its variants */}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <Input
+            autoFocus={!source}
+            placeholder={source ? "Or find another product…" : "Search by name, SKU or EAN…"}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            className="pl-8 h-9"
+          />
+        </div>
+        {q.trim().length >= 2 && (
+          <div className="max-h-48 overflow-y-auto -mx-1 rounded-lg border border-border/60 bg-muted/10">
+            {searching && <ProductRowsSkeleton />}
+            {!searching && results.length === 0 && <div className="text-[12px] text-muted-foreground px-3 py-3">No matches.</div>}
+            {results.map((c) => (
+              <button
+                key={c.code}
+                type="button"
+                onClick={() => {
+                  setSource({ code: c.code, name: c.name });
+                  setQ("");
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted/40"
+              >
+                {c.image ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={c.image} alt="" className="w-8 h-8 rounded object-cover ring-1 ring-border shrink-0" />
+                ) : (
+                  <span className="w-8 h-8 rounded bg-muted flex items-center justify-center shrink-0"><Package className="w-3.5 h-3.5 text-muted-foreground" /></span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-medium text-foreground truncate">{c.name}</div>
+                  <div className="text-[10px] text-muted-foreground font-mono truncate">{c.code}</div>
+                </div>
+                <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1">Browse variants <ChevronRight className="w-3 h-3" /></span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* the variants of the chosen product */}
+        {source ? (
+          <div className="rounded-lg border border-border overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 bg-muted/30 border-b border-border">
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px] font-semibold text-foreground truncate">{source.name}</div>
+                <div className="text-[10px] text-muted-foreground font-mono">{source.code}</div>
+              </div>
+              {variants && missing.length > 0 && (
+                <Button size="xs" onClick={() => onAddRows(missing)}>
+                  <Plus className="w-3 h-3" /> Add all missing ({missing.length})
+                </Button>
+              )}
+            </div>
+            <div className="max-h-72 overflow-y-auto">
+              {loadingVariants && <ProductRowsSkeleton />}
+              {error && <div className="text-[12px] text-destructive px-3 py-3">{error}</div>}
+              {variants && variants.length === 0 && <div className="text-[12px] text-muted-foreground px-3 py-3">This product has no variants.</div>}
+              {variants?.map((v) => {
+                const present = inGroup.has(v.code);
+                return (
+                  <div key={v.code} className={cn("flex items-center gap-2 px-3 py-1.5 border-b border-border/40 last:border-b-0", present && "opacity-60")}>
+                    {v.image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={v.image} alt="" className="w-8 h-8 rounded object-cover ring-1 ring-border shrink-0" />
+                    ) : (
+                      <span className="w-8 h-8 rounded bg-muted flex items-center justify-center shrink-0"><Package className="w-3.5 h-3.5 text-muted-foreground" /></span>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12px] font-medium text-foreground truncate">{v.variantLabel || v.name}</div>
+                      <div className="text-[10px] text-muted-foreground font-mono truncate">{v.code}</div>
+                    </div>
+                    {v.partnerPrice != null && <span className="text-[11px] tabular-nums text-muted-foreground shrink-0">{v.partnerPrice.toFixed(2)}</span>}
+                    {present ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground shrink-0 w-[68px] justify-end"><Check className="w-3 h-3" /> In group</span>
+                    ) : (
+                      <Button size="xs" variant="outline" onClick={() => onAddRows([v])} className="w-[68px]">
+                        <Plus className="w-3 h-3" /> Add
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+              {variants && variants.length > 0 && missing.length === 0 && (
+                <div className="text-[11px] text-muted-foreground px-3 py-2 bg-muted/20">Every variant of this product is already in the group.</div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="text-[11px] text-muted-foreground">
+            This group is not linked to a catalogue product — search above and browse a product&rsquo;s variants to add them here.
+          </p>
+        )}
+        <div className="flex justify-end pt-1"><Button size="sm" variant="outline" onClick={onClose}>Done</Button></div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ProductPickerDialog({
-  rrpPricelist, partnerPricelist, targetGroupName, onClose, onAddGroup,
+  rrpPricelist, partnerPricelist, onClose, onAddGroup,
 }: {
   rrpPricelist: string | null;
   partnerPricelist: string | null;
-  /** Set when the picked product's variants go INTO this group instead of forming a new one. */
-  targetGroupName?: string;
   onClose: () => void;
   onAddGroup: (g: GroupDraft) => void;
 }) {
@@ -1357,17 +1553,13 @@ function ProductPickerDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Search className="w-4 h-4 text-lime-600" /> {targetGroupName !== undefined ? <>Add variants to <span className="truncate">{targetGroupName || "this group"}</span></> : "Add product"}
-          </DialogTitle>
+          <DialogTitle className="flex items-center gap-2"><Search className="w-4 h-4 text-lime-600" /> Add product</DialogTitle>
         </DialogHeader>
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input autoFocus placeholder="Search by name, SKU or EAN…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-8 h-9" />
         </div>
-        <p className="text-[11px] text-muted-foreground">
-          {targetGroupName !== undefined ? "Adds the product's variants to this group — SKUs already in it are skipped." : "Adds the product as a group with all its variants."}
-        </p>
+        <p className="text-[11px] text-muted-foreground">Adds the product as a group with all its variants.</p>
         <div className="max-h-80 overflow-y-auto -mx-1 mt-1">
           {loading && <ProductRowsSkeleton />}
           {!loading && q.trim().length >= 2 && results.length === 0 && <div className="text-[12px] text-muted-foreground px-2 py-3">No matches.</div>}
