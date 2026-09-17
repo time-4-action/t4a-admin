@@ -82,7 +82,7 @@ type LoadData = {
   partner?: { name: string };
 };
 
-export default function FillClient({ campaignId, customerStrip }: { campaignId: string; customerStrip?: React.ReactNode }) {
+export default function FillClient({ campaignId }: { campaignId: string }) {
   const [campaign, setCampaign] = useState<PortalCampaign | null>(null);
   const [frozen, setFrozen] = useState<PreorderCampaign | null>(null);
   const [allocation, setAllocation] = useState<AllocationResult | null>(null);
@@ -447,16 +447,19 @@ export default function FillClient({ campaignId, customerStrip }: { campaignId: 
             </div>
           </div>
           <div className="flex-1" />
+        </div>
+        <div className="px-4 md:px-6 flex items-stretch gap-3">
+          {tabsForBar.length > 0 && <TabBar tabs={tabsForBar} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />}
+          <div className="flex-1" />
           {!locked && (
-            // How to browse the sheet — sits with the tabs, where the customer is looking.
-            // Two real choices with a one-line explanation each, not a tiny icon toggle.
-            <div className="flex items-stretch gap-0.5 rounded-xl bg-muted p-1 shrink-0" role="group" aria-label="How to fill the order">
+            // How to browse the sheet — the same underline tabs as the sections, right end.
+            <nav className="flex items-stretch gap-0.5 -mb-px h-9" aria-label="View">
               {(
                 [
-                  ["guided", LayoutGrid, "Catalogue", "browse with pictures"],
-                  ["grid", Table2, "Order sheet", "every variant in a table"],
-                ] as [Mode, React.ElementType, string, string][]
-              ).map(([m, Icon, label, hint]) => {
+                  ["guided", LayoutGrid, "Catalogue"],
+                  ["grid", Table2, "Order sheet"],
+                ] as [Mode, React.ElementType, string][]
+              ).map(([m, Icon, label]) => {
                 const on = mode === m;
                 return (
                   <button
@@ -465,34 +468,25 @@ export default function FillClient({ campaignId, customerStrip }: { campaignId: 
                     onClick={() => setMode(m)}
                     aria-pressed={on}
                     className={cn(
-                      "flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-left transition-colors",
-                      on ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                      "group relative isolate inline-flex items-center gap-1.5 whitespace-nowrap px-2.5 text-[12.5px] font-medium transition-colors border-b-2",
+                      on ? "border-lime-600 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
                     )}
                   >
-                    <Icon className={cn("w-4 h-4 shrink-0", on ? "text-lime-600" : "text-muted-foreground/70")} />
-                    <span className="flex flex-col leading-tight">
-                      <span className="text-[12px] font-semibold">{label}</span>
-                      <span className="text-[10px] text-muted-foreground">{hint}</span>
-                    </span>
+                    <Icon className={cn("w-3.5 h-3.5 shrink-0", on ? "text-lime-600" : "text-muted-foreground/70 group-hover:text-foreground/70")} />
+                    {label}
+                    <span className="pointer-events-none absolute inset-x-0.5 top-1 bottom-1.5 rounded-md transition-colors group-hover:bg-muted/60 -z-10" aria-hidden />
                   </button>
                 );
               })}
-            </div>
+            </nav>
           )}
         </div>
-        {tabsForBar.length > 0 && (
-          <div className="px-4 md:px-6 flex items-stretch gap-3">
-            <TabBar tabs={tabsForBar} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
-          </div>
-        )}
       </header>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
           {/* Sheet */}
           <div className="min-w-0">
-            {/* Who is ordering — the same strip the document lists open with. */}
-            {customerStrip && <div className="mb-4">{customerStrip}</div>}
 
             {published && allocation && (
               <YourOrderCard allocation={allocation} currency={currency} orderMkId={orderMkId} pricing={sheet?.pricing} />
