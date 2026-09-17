@@ -63,6 +63,7 @@ export function CustomerModal({
   const [hasRule, setHasRule] = useState(false);
   const [saving, setSaving] = useState<null | "rule" | "remove" | "refresh" | "country">(null);
   const [tab, setTab] = useState<Tab>("overview");
+  const [dirPick, setDirPick] = useState(false); // directory-country picker revealed
 
   const load = useCallback(async () => {
     if (!partnerMkId) return;
@@ -87,6 +88,7 @@ export function CustomerModal({
     setDetail(null);
     setError(null);
     setTab("overview");
+    setDirPick(false);
     if (open && partnerMkId) void load();
   }, [open, partnerMkId, load]);
 
@@ -457,51 +459,69 @@ export function CustomerModal({
                   {(() => {
                     const manual = customer.countrySource === "manual";
                     const unresolved = !customer.countryIso;
-                    return (
-                      <div
-                        className={cn(
-                          "rounded-xl border p-4",
-                          unresolved
-                            ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200/60 dark:border-amber-800/50"
-                            : "bg-surface border-border",
-                        )}
-                      >
-                        <div className="flex flex-wrap items-start gap-3">
-                          <div className="min-w-0 flex-1">
-                            <div className="text-[13px] font-semibold text-foreground">Country in the directory</div>
-                            <div className="text-[11px] text-muted-foreground">Shared by every campaign.</div>
-                            <div className={cn("mt-2 text-[13px]", unresolved ? "text-amber-800 dark:text-amber-200" : "text-foreground")}>
-                              {customer.countryIso ? (
-                                <span className="inline-flex items-center gap-2">
-                                  <Flag iso={customer.countryIso} className="text-[16px]" /> {customer.countryName}
-                                  <span className="text-[11px] text-muted-foreground">
-                                    {manual ? "· set manually" : customer.countrySource === "home-fallback" ? "· home country" : "· from Metakocka"}
-                                  </span>
-                                </span>
-                              ) : customer.countryRaw ? (
-                                <>Metakocka says <span className="font-semibold">&ldquo;{customer.countryRaw}&rdquo;</span> — not a country we recognise. Pick the right one:</>
-                              ) : (
-                                <>Metakocka has no country on this partner&rsquo;s address. Pick one:</>
-                              )}
-                              {manual && customer.countryRaw && <div className="text-[11px] text-muted-foreground mt-0.5">Metakocka: &ldquo;{customer.countryRaw}&rdquo;</div>}
-                            </div>
+                    const picker = (
+                      <CountrySelect
+                        value={null}
+                        onChange={(iso) => {
+                          if (iso) {
+                            setDirPick(false);
+                            void saveDirectoryCountry(iso);
+                          }
+                        }}
+                        countryNames={countryNames}
+                        placeholder={saving === "country" ? "Saving…" : unresolved ? "Pick the right country…" : "Pick another country…"}
+                        disabled={saving === "country"}
+                        className="h-9 text-[13px] bg-background"
+                      />
+                    );
+                    if (unresolved) {
+                      return (
+                        <div className="rounded-xl border bg-amber-50 dark:bg-amber-950/30 border-amber-200/60 dark:border-amber-800/50 p-4">
+                          <div className="text-[13px] font-semibold text-foreground">Country in the directory</div>
+                          <div className="mt-1 text-[12px] text-amber-800 dark:text-amber-200">
+                            {customer.countryRaw ? (
+                              <>Metakocka says <span className="font-semibold">&ldquo;{customer.countryRaw}&rdquo;</span> — not a country we recognise. Pick the right one; it applies to every campaign.</>
+                            ) : (
+                              <>Metakocka has no country on this partner&rsquo;s address. Pick one; it applies to every campaign.</>
+                            )}
                           </div>
-                          {manual && (
-                            <Button type="button" size="sm" variant="outline" className="h-8 text-[12px]" onClick={() => void saveDirectoryCountry(null)} disabled={saving !== null}>
-                              <RefreshCw className={cn("w-3.5 h-3.5", saving === "country" && "animate-spin")} /> Use Metakocka&rsquo;s value
-                            </Button>
-                          )}
+                          <div className="mt-3">{picker}</div>
                         </div>
-                        <CountrySelect
-                          value={null}
-                          onChange={(iso) => {
-                            if (iso) void saveDirectoryCountry(iso);
-                          }}
-                          countryNames={countryNames}
-                          placeholder={saving === "country" ? "Saving…" : unresolved ? "Pick the right country…" : manual ? "Change the manual country…" : "Override with another country…"}
-                          disabled={saving === "country"}
-                          className="mt-3 h-10 text-[13px] bg-background"
-                        />
+                      );
+                    }
+                    // Resolved: one quiet line. The picker only appears on demand.
+                    return (
+                      <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-[12px]">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                          <span className="text-muted-foreground">Directory country</span>
+                          <span className="inline-flex items-center gap-1.5 text-foreground font-medium">
+                            <Flag iso={customer.countryIso} /> {customer.countryName}
+                          </span>
+                          <span className="text-[11px] text-muted-foreground">
+                            {manual ? "set manually" : customer.countrySource === "home-fallback" ? "home country" : "from Metakocka"}
+                            {manual && customer.countryRaw ? ` · Metakocka says “${customer.countryRaw}”` : ""}
+                            {" · shared by every campaign"}
+                          </span>
+                          <div className="flex-1" />
+                          {manual && (
+                            <button
+                              type="button"
+                              onClick={() => void saveDirectoryCountry(null)}
+                              disabled={saving !== null}
+                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+                            >
+                              <RefreshCw className={cn("w-3 h-3", saving === "country" && "animate-spin")} /> Use Metakocka&rsquo;s value
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setDirPick((v) => !v)}
+                            className="inline-flex items-center gap-1 text-[11px] font-medium text-lime-700 dark:text-lime-400 hover:underline"
+                          >
+                            {dirPick ? "Cancel" : "Change"}
+                          </button>
+                        </div>
+                        {dirPick && <div className="mt-2">{picker}</div>}
                       </div>
                     );
                   })()}
