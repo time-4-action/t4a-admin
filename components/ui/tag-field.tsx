@@ -41,11 +41,21 @@ export function TagField({
   const ref = inputRef ?? localRef;
   // Where the caret sits among the chips: 0 = before the first, chips.length = after the last.
   const [caret, setCaret] = React.useState(chips.length);
+  // Chips arriving (initial load, a pick) put the caret at the end; chips
+  // leaving only clamp it. The caret moves elsewhere only by key or click.
+  const prevLen = React.useRef(chips.length);
   React.useEffect(() => {
-    setCaret((c) => Math.min(c, chips.length));
+    if (chips.length > prevLen.current) setCaret(chips.length);
+    else setCaret((c) => Math.min(c, chips.length));
+    prevLen.current = chips.length;
   }, [chips.length]);
 
   const focus = () => ref.current?.focus();
+  // Clicking the empty part of the field = "type at the end".
+  const focusAtEnd = () => {
+    setCaret(chips.length);
+    focus();
+  };
   const before = chips.slice(0, caret);
   const after = chips.slice(caret);
 
@@ -65,7 +75,7 @@ export function TagField({
 
   return (
     <div
-      onClick={focus}
+      onClick={focusAtEnd}
       className={cn(
         "flex flex-wrap items-center gap-1.5 min-h-[40px] rounded-lg border border-input bg-background px-2 py-1.5 cursor-text",
         "focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
