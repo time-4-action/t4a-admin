@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Loader2, Check, RefreshCw, Trash2, ExternalLink, Link2, Eye, AlertTriangle, Mail, Phone, MapPin, Hash, Building2, User, Compass, Copy, LayoutList, Wallet, Percent, Boxes, ChevronRight } from "lucide-react";
+import { Loader2, Check, RefreshCw, Trash2, ExternalLink, Link2, Eye, AlertTriangle, Mail, Phone, MapPin, Hash, Building2, User, Compass, Copy, LayoutList, Wallet, Percent, Boxes, ChevronRight, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -64,6 +64,7 @@ export function CustomerModal({
   const [saving, setSaving] = useState<null | "rule" | "remove" | "refresh" | "country">(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [dirPick, setDirPick] = useState(false); // directory-country picker revealed
+  const [advanced, setAdvanced] = useState(false); // placement "Advanced" opened
 
   const load = useCallback(async () => {
     if (!partnerMkId) return;
@@ -89,6 +90,7 @@ export function CustomerModal({
     setError(null);
     setTab("overview");
     setDirPick(false);
+    setAdvanced(false);
     if (open && partnerMkId) void load();
   }, [open, partnerMkId, load]);
 
@@ -316,7 +318,7 @@ export function CustomerModal({
               <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-[12px] text-destructive">{error}</div>
             </div>
           ) : customer && eff ? (
-            <div className="p-6 max-w-[960px]">
+            <div className="p-6">
               {tab === "overview" && (
                 <div className="space-y-5">
                   {/* status */}
@@ -432,7 +434,7 @@ export function CustomerModal({
 
               {tab === "placement" && (
                 <div className="space-y-5">
-                  <TabIntro title="Placement" hint="Which market and country this customer counts as in this campaign. Leave both automatic unless Metakocka is wrong or the customer is a special case." />
+                  <TabIntro title="Placement" hint="Which market this customer belongs to in this campaign. Automatic follows their country." />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     <Field label="Market" hint="Automatic = the market that contains the customer's country.">
                       <Select value={draft.marketId ?? "__auto__"} onValueChange={(v) => setDraft({ ...draft, marketId: v === "__auto__" ? null : v })}>
@@ -445,14 +447,8 @@ export function CustomerModal({
                         </SelectContent>
                       </Select>
                     </Field>
-                    <Field label="Country in this campaign" hint="Only for this campaign. The directory value below is what every campaign uses.">
-                      <CountrySelect
-                        value={draft.countryIso}
-                        onChange={(iso) => setDraft({ ...draft, countryIso: iso })}
-                        countryNames={countryNames}
-                        noneLabel={`Directory value (${customer.countryIso ? (countryNames[customer.countryIso] ?? customer.countryIso) : "unknown"})`}
-                        className="h-10 text-[13px]"
-                      />
+                    <Field label="Internal note" hint="Only your team sees this.">
+                      <Input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder="Why this customer is special…" className="h-10 text-[13px]" />
                     </Field>
                   </div>
 
@@ -526,9 +522,33 @@ export function CustomerModal({
                     );
                   })()}
 
-                  <Field label="Internal note" hint="Only your team sees this.">
-                    <Input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder="Why this customer is special…" className="h-10 text-[13px]" />
-                  </Field>
+                  {/* Rarely needed: a per-campaign country that differs from the directory. */}
+                  <div className="rounded-xl border border-dashed border-border">
+                    <button
+                      type="button"
+                      onClick={() => setAdvanced((v) => !v)}
+                      className="flex w-full items-center gap-2 px-4 py-3 text-left text-[12px] font-medium text-muted-foreground hover:text-foreground"
+                    >
+                      {advanced || draft.countryIso ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                      Advanced
+                      {draft.countryIso && (
+                        <span className="ml-1 rounded-full bg-lime-500/15 text-lime-700 dark:text-lime-400 px-1.5 text-[10px] font-semibold">country overridden</span>
+                      )}
+                    </button>
+                    {(advanced || draft.countryIso) && (
+                      <div className="px-4 pb-4">
+                        <Field label="Country in this campaign only" hint="Treat the customer as another country here without touching the directory. Almost never needed — fix the directory country instead.">
+                          <CountrySelect
+                            value={draft.countryIso}
+                            onChange={(iso) => setDraft({ ...draft, countryIso: iso })}
+                            countryNames={countryNames}
+                            noneLabel={`Same as directory (${customer.countryIso ? (countryNames[customer.countryIso] ?? customer.countryIso) : "unknown"})`}
+                            className="h-10 text-[13px] md:max-w-[420px]"
+                          />
+                        </Field>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
