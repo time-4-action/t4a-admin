@@ -1,21 +1,20 @@
 "use client";
 
-// One customer, opened big: a two-column editor modal. The left column is the
-// read-only context — who they are (company / individual, VAT id, contact,
-// address), campaign access + preorder state, the inheritance ladder
-// (Customer → Country → Market → Campaign) and the effective summary with
-// provenance. The right column is the editor: placement (manual market /
-// country) and the commercial overrides. Also the directory-owned bits: country
-// fix and refresh from Metakocka.
+// One customer, opened big: a tabbed editor modal. Header + copyable contact
+// strip, then tabs — Overview (status + "what this customer gets", each card
+// jumps to the tab that changes it), Placement (market / country / directory
+// country / note), Pricing & terms, Volume discounts, Assortment (the last three
+// are slices of CommercialConfigForm). One draft, one Save.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Loader2, Check, RefreshCw, Trash2, ExternalLink, Link2, Eye, AlertTriangle, Mail, Phone, MapPin, Hash, Building2, User, SlidersHorizontal, Compass, Copy } from "lucide-react";
+import { Loader2, Check, RefreshCw, Trash2, ExternalLink, Link2, Eye, AlertTriangle, Mail, Phone, MapPin, Hash, Building2, User, Compass, Copy, LayoutList, Wallet, Percent, Boxes, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EditorModal, EditorModalBody, EditorModalFooter, EditorModalHeader } from "@/components/ui/editor-modal";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
+import { fmtMoney } from "@/app/preorder/preorder-shared";
 import { cn } from "@/lib/utils";
 import { MarketChip, SubmissionStageBadge } from "@/app/preorder/preorder-badges";
 import { Flag } from "@/components/flag";
@@ -23,7 +22,7 @@ import { resolveEffectiveCampaign, resolvePartnerContext } from "@/lib/preorder-
 import type { CustomerRow } from "@/lib/preorder-customers";
 import type { MkPricelist } from "@/types/documents";
 import { type CommercialConfig, type CustomerRule, type EffectiveMeta, type PreorderCampaignAdmin } from "@/types/preorder";
-import { CommercialConfigForm } from "./commercial-config-form";
+import { CommercialConfigForm, configSectionCounts } from "./commercial-config-form";
 import { CountrySelect } from "./country-picker";
 import { CustomerKindBadge } from "./tables";
 
@@ -63,6 +62,7 @@ export function CustomerModal({
   const [draft, setDraft] = useState<RuleDraft>({ marketId: null, countryIso: null, note: "", config: {} });
   const [hasRule, setHasRule] = useState(false);
   const [saving, setSaving] = useState<null | "rule" | "remove" | "refresh" | "country">(null);
+  const [tab, setTab] = useState<Tab>("overview");
 
   const load = useCallback(async () => {
     if (!partnerMkId) return;
@@ -86,6 +86,7 @@ export function CustomerModal({
     // A different customer must not flash the previous one's data in the header.
     setDetail(null);
     setError(null);
+    setTab("overview");
     if (open && partnerMkId) void load();
   }, [open, partnerMkId, load]);
 
@@ -173,6 +174,37 @@ export function CustomerModal({
 
   const KindIcon = customer?.kind === "business" ? Building2 : User;
 
+  // Per-tab override counts for the tab badges + the summary.
+  const counts = configSectionCounts(draft.config);
+  const placementCount = (draft.marketId ? 1 : 0) + (draft.countryIso ? 1 : 0);
+  const dirty = useMemo(() => {
+    const base = detail?.rule;
+    const same =
+      (base?.marketId ?? null) === draft.marketId &&
+      (base?.countryIso ?? null) === draft.countryIso &&
+      (base?.note ?? "") === draft.note &&
+      JSON.stringify(base?.config ?? {}) === JSON.stringify(draft.config);
+    return !same;
+  }, [detail?.rule, draft]);
+
+  const tabs: { id: Tab; label: string; icon: React.ElementType; count?: number }[] = [
+    { id: "overview", label: "Overview", icon: LayoutList },
+    { id: "placement", label: "Placement", icon: Compass, count: placementCount },
+    { id: "commercial", label: "Pricing & terms", icon: Wallet, count: counts.commercial },
+    { id: "tiers", label: "Volume discounts", icon: Percent, count: counts.tiers },
+    { id: "assortment", label: "Assortment", icon: Boxes, count: counts.assortment },
+  ];
+
+  const productsVisible = detail?.effectiveTabs.reduce((n, t) => n + t.rows, 0) ?? 0;
+  const tierSources = Object.values(detail?.effective.sources.tiers ?? {});
+  const tiersSource: "campaign" | "market" | "customer" = tierSources.includes("customer") ? "customer" : tierSources.includes("market") ? "market" : "campaign";
+  const assortmentSource: "campaign" | "market" | "customer" =
+    detail?.effective.assortment.hidden || detail?.effective.assortment.exposed
+      ? detail.effective.hasCustomerRule && (draft.config.hiddenIds || draft.config.exposedIds)
+        ? "customer"
+        : "market"
+      : "campaign";
+
   return (
     <EditorModal open={open} onOpenChange={onOpenChange}>
       <EditorModalHeader
@@ -186,9 +218,9 @@ export function CustomerModal({
           customer ? (
             <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
               <CustomerKindBadge kind={customer.kind} compact />
-              <span>
+              <span className="inline-flex items-center gap-1.5">
                 {customer.city ? `${customer.city}, ` : ""}
-                {customer.countryIso ? <span className="inline-flex items-center gap-1.5"><Flag iso={customer.countryIso} /> {customer.countryName}</span> : <span className="text-amber-600 dark:text-amber-400">country unknown</span>}
+                {customer.countryIso ? <><Flag iso={customer.countryIso} /> {customer.countryName}</> : <span className="text-amber-600 dark:text-amber-400">country unknown</span>}
               </span>
               {customer.countCode && <span className="font-mono text-[10px]">· {customer.countCode}</span>}
               {customer.stale && <span className="text-[10px] text-amber-600 dark:text-amber-400">· not in the last Metakocka sync</span>}
@@ -219,7 +251,7 @@ export function CustomerModal({
       />
 
       <EditorModalBody className="flex flex-col overflow-hidden">
-        {/* ── customer info strip: contact + address, full width, each copyable ── */}
+        {/* ── contact strip ── */}
         {customer && (
           <div className="shrink-0 border-b border-border bg-muted/20 px-6 py-3.5">
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-6 gap-y-3">
@@ -239,218 +271,225 @@ export function CustomerModal({
           </div>
         )}
 
-        <div className="min-h-0 flex-1 grid grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] overflow-hidden">
-        {loading && !detail ? (
-          <>
-            <aside className="hidden md:block border-r border-border bg-muted/30 p-5 space-y-4">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="rounded-xl border border-border bg-surface p-4 space-y-2">
-                  <SkeletonLine lh="h-[14px]" w="w-24" delay={stagger(i)} />
-                  <Skeleton className="h-8 w-full rounded-md" delay={stagger(i, 80, 30)} />
-                  <Skeleton className="h-8 w-2/3 rounded-md" delay={stagger(i, 80, 60)} />
-                </div>
-              ))}
-            </aside>
-            <div className="p-6 space-y-4">
-              {[0, 1, 2, 3].map((i) => (
+        {/* ── tabs ── */}
+        <div className="shrink-0 border-b border-border px-6">
+          <div className="flex items-end gap-1 -mb-px overflow-x-auto">
+            {tabs.map((t) => {
+              const active = tab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTab(t.id)}
+                  className={cn(
+                    "inline-flex items-center gap-2 border-b-2 px-3 h-11 text-[13px] whitespace-nowrap transition-colors",
+                    active ? "border-lime-500 text-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <t.icon className="w-4 h-4" />
+                  {t.label}
+                  {!!t.count && (
+                    <span className="rounded-full bg-lime-500/15 text-lime-700 dark:text-lime-400 px-1.5 text-[10px] font-semibold tabular-nums">{t.count}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── tab body ── */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {loading && !detail ? (
+            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {[0, 1, 2, 3, 4, 5].map((i) => (
                 <div key={i} className="rounded-xl border border-border p-4 space-y-2">
-                  <SkeletonLine lh="h-[18px]" w="w-40" delay={stagger(i)} />
-                  <Skeleton className="h-9 w-full rounded-md" delay={stagger(i, 80, 30)} />
+                  <SkeletonLine lh="h-[14px]" w="w-24" delay={stagger(i)} />
+                  <Skeleton className="h-6 w-2/3 rounded-md" delay={stagger(i, 80, 30)} />
+                  <Skeleton className="h-3 w-1/2 rounded-md" delay={stagger(i, 80, 60)} />
                 </div>
               ))}
             </div>
-          </>
-        ) : error && !detail ? (
-          <div className="md:col-span-2 p-6">
-            <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-[12px] text-destructive">{error}</div>
-          </div>
-        ) : customer && eff ? (
-          <>
-            {/* ── left: what this customer gets ── */}
-            <aside className="min-h-0 overflow-y-auto border-b md:border-b-0 md:border-r border-border bg-muted/30 p-5 space-y-4">
-              {/* status */}
-              <Panel title="Status">
-                <div className="divide-y divide-border/60 text-[12px]">
-                  <div className="flex items-center gap-2 py-1.5">
-                    <span className="text-muted-foreground w-24 shrink-0">Access</span>
-                    {customer.access ? (
-                      <span className="inline-flex items-center gap-1 text-lime-700 dark:text-lime-400 font-medium"><Check className="w-3.5 h-3.5" /> Unlocked</span>
-                    ) : (
-                      <span className="text-foreground">Not unlocked</span>
-                    )}
-                    {!customer.access && inviteUrl && (
-                      <button type="button" onClick={() => navigator.clipboard?.writeText(inviteUrl)} className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
-                        <Link2 className="w-3 h-3" /> Copy invite
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 py-1.5">
-                    <span className="text-muted-foreground w-24 shrink-0">Preorder</span>
-                    {customer.stage ? <SubmissionStageBadge stage={customer.stage} /> : <span className="text-foreground">None yet</span>}
-                    {customer.submissionId && (
-                      <Link href={`/preorder/${campaignId}/submissions/${customer.submissionId}`} className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
-                        Open <ExternalLink className="w-3 h-3" />
-                      </Link>
-                    )}
-                  </div>
-                </div>
-              </Panel>
-
-              {/* effective summary — plain answers, full text, source as a footnote */}
-              <Panel title="What this customer gets">
-                <div className="divide-y divide-border/60">
-                  <Item
-                    label="Country"
-                    value={eff.countryIso ? <span className="inline-flex items-center gap-1.5"><Flag iso={eff.countryIso} /> {countryNames[eff.countryIso] ?? eff.countryIso}</span> : "Unknown"}
-                    note={
-                      draft.countryIso
-                        ? "set for this campaign"
-                        : eff.countrySource === "manual"
-                          ? "set manually in the directory"
-                          : eff.countrySource === "home-fallback"
-                            ? "home country (no address country in Metakocka)"
-                            : eff.countryIso
-                              ? "from Metakocka"
-                              : "pick one under Placement"
-                    }
-                  />
-                  <Item
-                    label="Market"
-                    value={eff.market ? <MarketChip name={eff.market.name} color={eff.market.color} /> : "None"}
-                    note={
-                      eff.market
-                        ? eff.marketSource === "manual"
-                          ? "assigned under Placement"
-                          : `because ${eff.countryIso ? (countryNames[eff.countryIso] ?? eff.countryIso) : "the country"} belongs to it`
-                        : eff.countryIso
-                          ? `no market covers ${countryNames[eff.countryIso] ?? eff.countryIso} — campaign defaults apply`
-                          : "no country, so no market"
-                    }
-                  />
-                  <Item
-                    label="Price list"
-                    value={inherited.partnerPricelist ?? "Sheet prices"}
-                    note={sourceNote(detail?.effective.sources.pricelist ?? eff.sources.pricelist, eff.market?.name)}
-                  />
-                  <Item label="Currency" value={inherited.currency} note={sourceNote(detail?.effective.sources.currency ?? eff.sources.currency, eff.market?.name)} />
-                  <Item
-                    label="Products"
-                    value={`${detail?.effectiveTabs.reduce((n, t) => n + t.rows, 0) ?? 0} visible`}
-                    note={sourceNote(
-                      detail?.effective.assortment.hidden || detail?.effective.assortment.exposed
-                        ? detail.effective.hasCustomerRule && (draft.config.hiddenIds || draft.config.exposedIds)
-                          ? "customer"
-                          : "market"
-                        : "campaign",
-                      eff.market?.name,
-                    )}
-                  />
-                  <Item
-                    label="Volume discounts"
-                    value={
-                      Object.values(detail?.effective.sources.tiers ?? {}).includes("customer")
-                        ? "Customer ladder"
-                        : Object.values(detail?.effective.sources.tiers ?? {}).includes("market")
-                          ? `${eff.market?.name ?? "Market"} ladder`
-                          : "Campaign ladder"
-                    }
-                    note={sourceNote(
-                      Object.values(detail?.effective.sources.tiers ?? {}).includes("customer")
-                        ? "customer"
-                        : Object.values(detail?.effective.sources.tiers ?? {}).includes("market")
-                          ? "market"
-                          : "campaign",
-                      eff.market?.name,
-                    )}
-                  />
-                </div>
-                {(detail?.effective.warnings.length ?? 0) > 0 && (
-                  <div className="mt-3 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/50 px-2.5 py-2 text-[11px] text-amber-800 dark:text-amber-200 flex items-start gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                    <span>{detail!.effective.warnings.join(" · ")}</span>
-                  </div>
-                )}
-              </Panel>
-            </aside>
-
-            {/* ── right: editor ── */}
-            <div className="min-h-0 overflow-y-auto p-6 space-y-6">
-              {/* placement */}
-              <section className="space-y-3">
-                <SectionHeading icon={Compass} title="Placement" hint="Where this customer sits in the campaign — overrides the country lookup." />
-                <div className="rounded-xl border border-border bg-surface p-4 space-y-4">
+          ) : error && !detail ? (
+            <div className="p-6">
+              <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-[12px] text-destructive">{error}</div>
+            </div>
+          ) : customer && eff ? (
+            <div className="p-6 max-w-[960px]">
+              {tab === "overview" && (
+                <div className="space-y-5">
+                  {/* status */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-[11px] font-medium text-muted-foreground">Market</label>
+                    <StatusCard label="Campaign access">
+                      {customer.access ? (
+                        <span className="inline-flex items-center gap-1.5 text-[14px] font-medium text-lime-700 dark:text-lime-400"><Check className="w-4 h-4" /> Unlocked</span>
+                      ) : (
+                        <span className="text-[14px] font-medium text-foreground">Not unlocked</span>
+                      )}
+                      {!customer.access && inviteUrl && (
+                        <Button type="button" size="sm" variant="outline" className="h-8 text-[12px]" onClick={() => navigator.clipboard?.writeText(inviteUrl)}>
+                          <Link2 className="w-3.5 h-3.5" /> Copy invite link
+                        </Button>
+                      )}
+                    </StatusCard>
+                    <StatusCard label="Preorder">
+                      {customer.stage ? <SubmissionStageBadge stage={customer.stage} /> : <span className="text-[14px] font-medium text-foreground">None yet</span>}
+                      {customer.submissionId && (
+                        <Link href={`/preorder/${campaignId}/submissions/${customer.submissionId}`}>
+                          <Button type="button" size="sm" variant="outline" className="h-8 text-[12px]">
+                            Open preorder <ExternalLink className="w-3.5 h-3.5" />
+                          </Button>
+                        </Link>
+                      )}
+                    </StatusCard>
+                  </div>
+
+                  {/* what applies */}
+                  <div>
+                    <div className="flex items-baseline justify-between gap-3 mb-3">
+                      <h3 className="text-[13px] font-semibold text-foreground">What this customer gets</h3>
+                      <span className="text-[11px] text-muted-foreground">Click a card to change it</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <SummaryCard
+                        label="Country"
+                        value={eff.countryIso ? <span className="inline-flex items-center gap-2"><Flag iso={eff.countryIso} className="text-[16px]" /> {countryNames[eff.countryIso] ?? eff.countryIso}</span> : "Unknown"}
+                        note={
+                          draft.countryIso
+                            ? "set for this campaign"
+                            : eff.countrySource === "manual"
+                              ? "set manually in the directory"
+                              : eff.countrySource === "home-fallback"
+                                ? "home country — no address country in Metakocka"
+                                : eff.countryIso
+                                  ? "from Metakocka"
+                                  : "not recognised — pick one under Placement"
+                        }
+                        tone={eff.countryIso ? undefined : "warn"}
+                        onClick={() => setTab("placement")}
+                      />
+                      <SummaryCard
+                        label="Market"
+                        value={eff.market ? <MarketChip name={eff.market.name} color={eff.market.color} /> : "None"}
+                        note={
+                          eff.market
+                            ? eff.marketSource === "manual"
+                              ? "assigned manually"
+                              : `${eff.countryIso ? (countryNames[eff.countryIso] ?? eff.countryIso) : "the country"} belongs to it`
+                            : eff.countryIso
+                              ? `no market covers ${countryNames[eff.countryIso] ?? eff.countryIso}`
+                              : "no country, so no market"
+                        }
+                        onClick={() => setTab("placement")}
+                      />
+                      <SummaryCard
+                        label="Price list"
+                        value={inherited.partnerPricelist ?? "Sheet prices"}
+                        note={sourceNote(detail?.effective.sources.pricelist ?? eff.sources.pricelist, eff.market?.name)}
+                        onClick={() => setTab("commercial")}
+                      />
+                      <SummaryCard
+                        label="Currency"
+                        value={inherited.currency}
+                        note={sourceNote(detail?.effective.sources.currency ?? eff.sources.currency, eff.market?.name)}
+                        onClick={() => setTab("commercial")}
+                      />
+                      <SummaryCard
+                        label="Deadline"
+                        value={inherited.deadline ? fmtDateTime(inherited.deadline) : "None"}
+                        note={sourceNote(eff.sources.deadline, eff.market?.name)}
+                        onClick={() => setTab("commercial")}
+                      />
+                      <SummaryCard
+                        label="Minimum order"
+                        value={inherited.effective.minOrderAmount ? fmtMoney(inherited.effective.minOrderAmount, inherited.currency) : "None"}
+                        note={sourceNote(eff.sources.minOrderAmount, eff.market?.name)}
+                        onClick={() => setTab("commercial")}
+                      />
+                      <SummaryCard
+                        label="Products"
+                        value={`${productsVisible} visible`}
+                        note={sourceNote(assortmentSource, eff.market?.name)}
+                        onClick={() => setTab("assortment")}
+                      />
+                      <SummaryCard
+                        label="Volume discounts"
+                        value={tiersSource === "customer" ? "Customer ladder" : tiersSource === "market" ? `${eff.market?.name ?? "Market"} ladder` : "Campaign ladder"}
+                        note={sourceNote(tiersSource, eff.market?.name)}
+                        onClick={() => setTab("tiers")}
+                      />
+                    </div>
+                    {(detail?.effective.warnings.length ?? 0) > 0 && (
+                      <div className="mt-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/50 px-4 py-3 text-[12px] text-amber-800 dark:text-amber-200 flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                        <span>{detail!.effective.warnings.join(" · ")}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {tab === "placement" && (
+                <div className="space-y-5">
+                  <TabIntro title="Placement" hint="Which market and country this customer counts as in this campaign. Leave both automatic unless Metakocka is wrong or the customer is a special case." />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <Field label="Market" hint="Automatic = the market that contains the customer's country.">
                       <Select value={draft.marketId ?? "__auto__"} onValueChange={(v) => setDraft({ ...draft, marketId: v === "__auto__" ? null : v })}>
-                        <SelectTrigger size="sm" className="mt-1 h-9 text-[12px] w-full"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="h-10 text-[13px] w-full"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__auto__" className="text-[12px]">By country (automatic)</SelectItem>
+                          <SelectItem value="__auto__" className="text-[13px]">By country (automatic)</SelectItem>
                           {marketOptions.map((m) => (
-                            <SelectItem key={m.id} value={m.id} className="text-[12px]">{m.name}</SelectItem>
+                            <SelectItem key={m.id} value={m.id} className="text-[13px]">{m.name}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-medium text-muted-foreground">Country (this campaign)</label>
+                    </Field>
+                    <Field label="Country in this campaign" hint="Only for this campaign. The directory value below is what every campaign uses.">
                       <CountrySelect
                         value={draft.countryIso}
                         onChange={(iso) => setDraft({ ...draft, countryIso: iso })}
                         countryNames={countryNames}
-                        noneLabel={`From Metakocka (${customer.countryIso ?? "unknown"})`}
-                        className="mt-1 h-9"
+                        noneLabel={`Directory value (${customer.countryIso ? (countryNames[customer.countryIso] ?? customer.countryIso) : "unknown"})`}
+                        className="h-10 text-[13px]"
                       />
-                    </div>
+                    </Field>
                   </div>
-                  {/* Directory country — shared by every campaign. Unresolved ⇒ amber
-                      prompt; manual ⇒ shows the override with a way back to Metakocka. */}
+
                   {(() => {
                     const manual = customer.countrySource === "manual";
                     const unresolved = !customer.countryIso;
                     return (
                       <div
                         className={cn(
-                          "rounded-lg border px-3 py-2.5 text-[11px]",
+                          "rounded-xl border p-4",
                           unresolved
-                            ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200/60 dark:border-amber-800/50 text-amber-800 dark:text-amber-200"
-                            : "bg-muted/30 border-border text-muted-foreground",
+                            ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200/60 dark:border-amber-800/50"
+                            : "bg-surface border-border",
                         )}
                       >
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <span className="font-medium text-foreground">Country in the directory</span>
-                          <span className="text-[10px] text-muted-foreground">applies to every campaign</span>
-                          <div className="flex-1" />
-                          {manual && (
-                            <button
-                              type="button"
-                              onClick={() => void saveDirectoryCountry(null)}
-                              disabled={saving !== null}
-                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
-                            >
-                              <RefreshCw className={cn("w-3 h-3", saving === "country" && "animate-spin")} /> Use Metakocka&rsquo;s value
-                            </button>
-                          )}
-                        </div>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                          <span className="inline-flex items-center gap-1.5 text-[12px] text-foreground">
-                            {customer.countryIso ? (
-                              <>
-                                <Flag iso={customer.countryIso} /> {customer.countryName}
-                                <span className="text-[10px] text-muted-foreground">
-                                  {manual ? "· set manually" : customer.countrySource === "home-fallback" ? "· home country" : "· from Metakocka"}
+                        <div className="flex flex-wrap items-start gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[13px] font-semibold text-foreground">Country in the directory</div>
+                            <div className="text-[11px] text-muted-foreground">Shared by every campaign.</div>
+                            <div className={cn("mt-2 text-[13px]", unresolved ? "text-amber-800 dark:text-amber-200" : "text-foreground")}>
+                              {customer.countryIso ? (
+                                <span className="inline-flex items-center gap-2">
+                                  <Flag iso={customer.countryIso} className="text-[16px]" /> {customer.countryName}
+                                  <span className="text-[11px] text-muted-foreground">
+                                    {manual ? "· set manually" : customer.countrySource === "home-fallback" ? "· home country" : "· from Metakocka"}
+                                  </span>
                                 </span>
-                              </>
-                            ) : customer.countryRaw ? (
-                              <>
-                                Metakocka says <span className="font-semibold">&ldquo;{customer.countryRaw}&rdquo;</span> — not a country we recognise.
-                              </>
-                            ) : (
-                              <>Metakocka has no country on this partner&rsquo;s address.</>
-                            )}
-                          </span>
-                          {manual && customer.countryRaw && (
-                            <span className="text-[10px] text-muted-foreground">Metakocka: &ldquo;{customer.countryRaw}&rdquo;</span>
+                              ) : customer.countryRaw ? (
+                                <>Metakocka says <span className="font-semibold">&ldquo;{customer.countryRaw}&rdquo;</span> — not a country we recognise. Pick the right one:</>
+                              ) : (
+                                <>Metakocka has no country on this partner&rsquo;s address. Pick one:</>
+                              )}
+                              {manual && customer.countryRaw && <div className="text-[11px] text-muted-foreground mt-0.5">Metakocka: &ldquo;{customer.countryRaw}&rdquo;</div>}
+                            </div>
+                          </div>
+                          {manual && (
+                            <Button type="button" size="sm" variant="outline" className="h-8 text-[12px]" onClick={() => void saveDirectoryCountry(null)} disabled={saving !== null}>
+                              <RefreshCw className={cn("w-3.5 h-3.5", saving === "country" && "animate-spin")} /> Use Metakocka&rsquo;s value
+                            </Button>
                           )}
                         </div>
                         <CountrySelect
@@ -461,26 +500,40 @@ export function CustomerModal({
                           countryNames={countryNames}
                           placeholder={saving === "country" ? "Saving…" : unresolved ? "Pick the right country…" : manual ? "Change the manual country…" : "Override with another country…"}
                           disabled={saving === "country"}
-                          className="mt-2 h-8 bg-background"
+                          className="mt-3 h-10 text-[13px] bg-background"
                         />
                       </div>
                     );
                   })()}
-                  <div>
-                    <label className="text-[11px] font-medium text-muted-foreground">Internal note</label>
-                    <Input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder="Why this customer is special…" className="mt-1 h-9 text-[12px]" />
-                  </div>
-                </div>
-              </section>
 
-              {/* overrides */}
-              <section className="space-y-3">
-                <SectionHeading icon={SlidersHorizontal} title="Commercial overrides" hint="Anything left inherited follows the market, then the campaign." />
-                <CommercialConfigForm value={draft.config} onChange={(config) => setDraft({ ...draft, config })} inherited={inherited} campaign={campaign} pricelists={pricelists} layer="customer" />
-              </section>
+                  <Field label="Internal note" hint="Only your team sees this.">
+                    <Input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder="Why this customer is special…" className="h-10 text-[13px]" />
+                  </Field>
+                </div>
+              )}
+
+              {tab === "commercial" && (
+                <div className="space-y-5">
+                  <TabIntro title="Pricing & terms" hint="Each field shows what the customer inherits. Override only what should differ for them." />
+                  <CommercialConfigForm section="commercial" value={draft.config} onChange={(config) => setDraft({ ...draft, config })} inherited={inherited} campaign={campaign} pricelists={pricelists} layer="customer" />
+                </div>
+              )}
+
+              {tab === "tiers" && (
+                <div className="space-y-5">
+                  <TabIntro title="Volume discounts" hint="Per sheet tab: the discount ladder the customer gets. Override a tab to give them their own ladder." />
+                  <CommercialConfigForm section="tiers" value={draft.config} onChange={(config) => setDraft({ ...draft, config })} inherited={inherited} campaign={campaign} pricelists={pricelists} layer="customer" />
+                </div>
+              )}
+
+              {tab === "assortment" && (
+                <div className="space-y-5">
+                  <TabIntro title="Assortment" hint="Which products this customer can order. Hide or show tabs, groups or single products for them." />
+                  <CommercialConfigForm section="assortment" value={draft.config} onChange={(config) => setDraft({ ...draft, config })} inherited={inherited} campaign={campaign} pricelists={pricelists} layer="customer" />
+                </div>
+              )}
             </div>
-          </>
-        ) : null}
+          ) : null}
         </div>
       </EditorModalBody>
 
@@ -488,14 +541,15 @@ export function CustomerModal({
         <div className="flex items-center gap-2">
           {hasRule && (
             <Button size="sm" variant="ghost" className="text-destructive" onClick={removeRule} disabled={saving !== null}>
-              {saving === "remove" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} Remove overrides
+              {saving === "remove" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} Remove all overrides
             </Button>
           )}
           {error && detail && <p className="text-[12px] text-destructive">{error}</p>}
           <div className="flex-1" />
+          {dirty && customer && <span className="text-[11px] text-muted-foreground">Unsaved changes</span>}
           <Button size="sm" variant="outline" onClick={() => onOpenChange(false)} disabled={saving !== null}>Close</Button>
-          <Button size="sm" onClick={saveRule} disabled={saving !== null || !customer}>
-            {saving === "rule" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} {hasRule ? "Save overrides" : "Save as override"}
+          <Button size="sm" onClick={saveRule} disabled={saving !== null || !customer || !dirty}>
+            {saving === "rule" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} {hasRule ? "Save changes" : "Save overrides"}
           </Button>
         </div>
       </EditorModalFooter>
@@ -503,25 +557,79 @@ export function CustomerModal({
   );
 }
 
-function Panel({ title, compact, children }: { title: string; compact?: boolean; children: React.ReactNode }) {
+type Tab = "overview" | "placement" | "commercial" | "tiers" | "assortment";
+
+function fmtDateTime(v: string): string {
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? v : new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(d);
+}
+
+function StatusCard({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className={cn("rounded-xl border border-border bg-surface", compact ? "px-3 py-2.5" : "px-4 py-3")}>
-      <div className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground mb-2">{title}</div>
-      {children}
+    <div className="rounded-xl border border-border bg-surface px-4 py-3 flex items-center gap-3">
+      <div className="min-w-0 flex-1">
+        <div className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">{label}</div>
+        <div className="mt-1 flex flex-wrap items-center gap-3">{children}</div>
+      </div>
     </div>
   );
 }
 
-function SectionHeading({ icon: Icon, title, hint }: { icon: React.ElementType; title: string; hint?: string }) {
+// One answer on the overview: label, the value in full, where it comes from, and
+// a click that opens the tab where it can be changed.
+function SummaryCard({
+  label,
+  value,
+  note,
+  tone,
+  onClick,
+}: {
+  label: string;
+  value: React.ReactNode;
+  note: string;
+  tone?: "warn";
+  onClick: () => void;
+}) {
   return (
-    <div className="flex items-start gap-2.5">
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-        <Icon className="size-3.5" />
-      </span>
-      <div className="min-w-0">
-        <h3 className="text-[13px] font-semibold text-foreground leading-7">{title}</h3>
-        {hint && <p className="-mt-1 text-[11px] text-muted-foreground">{hint}</p>}
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "group text-left rounded-xl border px-4 py-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        tone === "warn"
+          ? "border-amber-200/70 dark:border-amber-800/50 bg-amber-50/60 dark:bg-amber-950/20 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+          : "border-border bg-surface hover:border-lime-400/60 hover:bg-lime-50/30 dark:hover:bg-lime-950/10",
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">{label}</div>
+          <div className="mt-1 text-[14px] font-medium text-foreground break-words">{value}</div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">{note}</div>
+        </div>
+        <span className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+          Change <ChevronRight className="w-3.5 h-3.5" />
+        </span>
       </div>
+    </button>
+  );
+}
+
+function TabIntro({ title, hint }: { title: string; hint: string }) {
+  return (
+    <div>
+      <h3 className="text-[15px] font-semibold text-foreground">{title}</h3>
+      <p className="mt-0.5 text-[12px] text-muted-foreground">{hint}</p>
+    </div>
+  );
+}
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="text-[12px] font-medium text-foreground">{label}</label>
+      <div className="mt-1.5">{children}</div>
+      {hint && <p className="mt-1 text-[11px] text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -583,18 +691,6 @@ function CopyFact({
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-// One line of the "what this customer gets" list: label, the full answer, and a
-// footnote saying where it comes from.
-function Item({ label, value, note }: { label: string; value: React.ReactNode; note?: string }) {
-  return (
-    <div className="py-2 first:pt-0 last:pb-0">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-0.5 text-[12px] font-medium text-foreground break-words">{value}</div>
-      {note && <div className="mt-0.5 text-[11px] text-muted-foreground">{note}</div>}
     </div>
   );
 }

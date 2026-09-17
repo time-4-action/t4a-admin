@@ -9,7 +9,7 @@
 // so it maps 1:1 onto CommercialConfig on the wire.
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Plus, RotateCcw, Trash2, Eye, EyeOff, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, RotateCcw, Trash2, Eye, EyeOff, Search, PenLine } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -32,7 +32,20 @@ export type ConfigFormProps = {
   /** The label of this layer, e.g. "Market override" / "Customer override". */
   layer: Extract<ConfigSource, "market" | "customer">;
   compact?: boolean;
+  /** Render only one part of the form (no section headings). Default: everything. */
+  section?: ConfigSection;
 };
+
+export type ConfigSection = "commercial" | "tiers" | "assortment";
+
+// How many of a layer's overrides fall into each section — for tab badges.
+export function configSectionCounts(value: CommercialConfig): Record<ConfigSection, number> {
+  return {
+    commercial: (["partnerPricelist", "currency", "deadline", "minOrderAmount", "note"] as const).filter((k) => value[k] !== undefined).length,
+    tiers: value.tiersByTab?.length ?? 0,
+    assortment: (value.hiddenIds?.length ?? 0) + (value.exposedIds?.length ?? 0),
+  };
+}
 
 const CURRENCIES = ["EUR", "CHF", "GBP", "USD", "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "RON", "BGN", "TRY"];
 
@@ -46,7 +59,7 @@ function fmtDate(v?: string | null): string {
   return Number.isNaN(d.getTime()) ? "" : new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(d);
 }
 
-export function CommercialConfigForm({ value, onChange, inherited, campaign, pricelists, layer }: ConfigFormProps) {
+export function CommercialConfigForm({ value, onChange, inherited, campaign, pricelists, layer, section }: ConfigFormProps) {
   const set = <K extends keyof CommercialConfig>(key: K, v: CommercialConfig[K]) => onChange({ ...value, [key]: v });
   const reset = (key: keyof CommercialConfig) => {
     const next = { ...value };
@@ -55,11 +68,13 @@ export function CommercialConfigForm({ value, onChange, inherited, campaign, pri
   };
   const has = (key: keyof CommercialConfig) => value[key] !== undefined;
   const src = inherited.effective.sources;
+  const only = (s: ConfigSection) => !section || section === s;
 
   return (
     <div className="space-y-5">
       {/* ── Pricing ── */}
-      <Section title="Pricing">
+      {only("commercial") && (
+      <Section title="Pricing" bare={!!section}>
         <FieldRow
           label="Partner price list"
           overridden={has("partnerPricelist")}
@@ -101,9 +116,11 @@ export function CommercialConfigForm({ value, onChange, inherited, campaign, pri
           </Select>
         </FieldRow>
       </Section>
+      )}
 
       {/* ── Commercial ── */}
-      <Section title="Commercial settings">
+      {only("commercial") && (
+      <Section title="Terms" bare={false}>
         <FieldRow
           label="Deadline"
           overridden={has("deadline")}
@@ -149,26 +166,45 @@ export function CommercialConfigForm({ value, onChange, inherited, campaign, pri
           />
         </FieldRow>
       </Section>
+      )}
 
       {/* ── Volume discounts ── */}
-      <Section title="Volume discounts">
+      {only("tiers") && (
+      <Section title="Volume discounts" bare={!!section}>
         <TiersEditor value={value} onChange={onChange} inherited={inherited} campaign={campaign} layer={layer} />
       </Section>
+      )}
 
       {/* ── Assortment ── */}
-      <Section title="Assortment">
+      {only("assortment") && (
+      <Section title="Assortment" bare={!!section}>
         <AssortmentEditor value={value} onChange={onChange} inherited={inherited} campaign={campaign} />
       </Section>
+      )}
     </div>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, bare, children }: { title: string; bare?: boolean; children: React.ReactNode }) {
   return (
     <section className="space-y-3">
-      <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">{title}</h3>
+      {!bare && <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">{title}</h3>}
       {children}
     </section>
+  );
+}
+
+// The Override / Reset pair every inheritable field carries. Real buttons — the
+// whole point of an override editor is finding these.
+function OverrideToggle({ overridden, onOverride, onReset }: { overridden: boolean; onOverride: () => void; onReset: () => void }) {
+  return overridden ? (
+    <Button type="button" size="sm" variant="ghost" onClick={onReset} className="h-8 text-[12px] text-muted-foreground">
+      <RotateCcw className="w-3.5 h-3.5" /> Reset to inherited
+    </Button>
+  ) : (
+    <Button type="button" size="sm" variant="outline" onClick={onOverride} className="h-8 text-[12px] border-lime-500/50 text-lime-700 dark:text-lime-400 hover:bg-lime-50 dark:hover:bg-lime-950/30">
+      <PenLine className="w-3.5 h-3.5" /> Override
+    </Button>
   );
 }
 
@@ -190,33 +226,24 @@ function FieldRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className={cn("rounded-lg border px-3 py-2.5", overridden ? "border-lime-300/70 bg-lime-50/40 dark:border-lime-800/50 dark:bg-lime-950/20" : "border-border bg-surface")}>
-      <div className="flex items-center gap-2">
-        <div className="text-[12px] font-medium text-foreground">{label}</div>
-        <div className="flex-1" />
-        {overridden ? (
-          <button type="button" onClick={onReset} className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
-            <RotateCcw className="w-3 h-3" /> Reset to inherited
-          </button>
-        ) : (
-          <button type="button" onClick={onOverride} className="inline-flex items-center gap-1 text-[11px] font-medium text-lime-700 dark:text-lime-400 hover:underline">
-            Override
-          </button>
-        )}
+    <div className={cn("rounded-xl border p-4", overridden ? "border-lime-300/70 bg-lime-50/40 dark:border-lime-800/50 dark:bg-lime-950/20" : "border-border bg-surface")}>
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-semibold text-foreground">{label}</div>
+          {overridden ? (
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
+              Inherited: {inheritedValue} <SourceBadge source={inheritedSource} className="ml-1" />
+            </div>
+          ) : (
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-[13px]">
+              <span className="text-foreground break-words">{inheritedValue}</span>
+              <SourceBadge source={inheritedSource} />
+            </div>
+          )}
+        </div>
+        <OverrideToggle overridden={overridden} onOverride={onOverride} onReset={onReset} />
       </div>
-      {overridden ? (
-        <div className="mt-2">{children}</div>
-      ) : (
-        <div className="mt-1 flex items-center gap-2 text-[12px]">
-          <span className="text-foreground truncate">{inheritedValue}</span>
-          <SourceBadge source={inheritedSource} />
-        </div>
-      )}
-      {overridden && (
-        <div className="mt-1.5 text-[10px] text-muted-foreground">
-          Inherited: {inheritedValue} <SourceBadge source={inheritedSource} className="ml-1" />
-        </div>
-      )}
+      {overridden && <div className="mt-3">{children}</div>}
     </div>
   );
 }
@@ -248,22 +275,14 @@ function TiersEditor({
         const inhTiers = activeTiers(inhTab?.tiers ?? tab.tiers);
         const source = inherited.effective.sources.tiers[tab.id] ?? "campaign";
         return (
-          <div key={tab.id} className={cn("rounded-lg border px-3 py-2.5", overridden ? "border-lime-300/70 bg-lime-50/40 dark:border-lime-800/50 dark:bg-lime-950/20" : "border-border bg-surface")}>
-            <div className="flex items-center gap-2">
-              <div className="text-[12px] font-medium text-foreground">{tab.name}</div>
+          <div key={tab.id} className={cn("rounded-xl border p-4", overridden ? "border-lime-300/70 bg-lime-50/40 dark:border-lime-800/50 dark:bg-lime-950/20" : "border-border bg-surface")}>
+            <div className="flex items-center gap-3">
+              <div className="text-[13px] font-semibold text-foreground">{tab.name}</div>
               <div className="flex-1" />
-              {overridden ? (
-                <button type="button" onClick={() => setTab(tab.id, undefined)} className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
-                  <RotateCcw className="w-3 h-3" /> Reset to inherited
-                </button>
-              ) : (
-                <button type="button" onClick={() => setTab(tab.id, inhTiers.map((t) => ({ ...t, id: uid() })))} className="text-[11px] font-medium text-lime-700 dark:text-lime-400 hover:underline">
-                  Override
-                </button>
-              )}
+              <OverrideToggle overridden={overridden} onOverride={() => setTab(tab.id, inhTiers.map((t) => ({ ...t, id: uid() })))} onReset={() => setTab(tab.id, undefined)} />
             </div>
             {!overridden ? (
-              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px]">
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px]">
                 {inhTiers.length ? (
                   inhTiers.map((t) => (
                     <span key={t.id} className="rounded-full bg-muted px-2 py-0.5 text-[11px]">
@@ -374,9 +393,9 @@ function AssortmentEditor({ value, onChange, inherited, campaign }: Pick<ConfigF
         {overrides > 0 && <span className="rounded-full bg-lime-100 text-lime-700 dark:bg-lime-900/50 dark:text-lime-300 px-2 py-0.5 font-medium">{overrides} override{overrides === 1 ? "" : "s"}</span>}
         <div className="flex-1" />
         {overrides > 0 && (
-          <button type="button" onClick={() => { const n = { ...value }; delete n.hiddenIds; delete n.exposedIds; onChange(n); }} className="inline-flex items-center gap-1 hover:text-foreground">
-            <RotateCcw className="w-3 h-3" /> Reset all
-          </button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => { const n = { ...value }; delete n.hiddenIds; delete n.exposedIds; onChange(n); }} className="h-7 text-[12px] text-muted-foreground">
+            <RotateCcw className="w-3.5 h-3.5" /> Reset all
+          </Button>
         )}
       </div>
       <div className="relative">
