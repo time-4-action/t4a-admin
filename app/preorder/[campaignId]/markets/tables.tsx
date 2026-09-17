@@ -63,12 +63,15 @@ export function CustomerKindBadge({ kind, taxId, compact }: { kind: CustomerKind
 export function MarketsPanel({
   markets,
   stats,
+  pinned,
   onEdit,
   onCreate,
   onShowCustomers,
 }: {
   markets: PreorderMarket[];
   stats: Record<string, CountryGeo>;
+  /** Customers pinned to a market by hand (customer rules with marketId), per market id. */
+  pinned?: Record<string, number>;
   onEdit: (id: string) => void;
   onCreate: () => void;
   onShowCustomers: (id: string) => void;
@@ -99,7 +102,7 @@ export function MarketsPanel({
                   <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ml-auto shrink-0" />
                 </div>
                 <div className="mt-1 text-[11px] text-muted-foreground tabular-nums">
-                  {m.countries.length} countr{m.countries.length === 1 ? "y" : "ies"} · {num.format(customers)} customer{customers === 1 ? "" : "s"}{unlocked ? ` · ${unlocked} unlocked` : ""}
+                  {m.countries.length} countr{m.countries.length === 1 ? "y" : "ies"} · {num.format(customers)} customer{customers === 1 ? "" : "s"}{pinned?.[m.id] ? ` + ${pinned[m.id]} hand-picked` : ""}{unlocked ? ` · ${unlocked} unlocked` : ""}
                 </div>
                 <div className="mt-1.5 flex flex-wrap gap-1">
                   {m.countries.slice(0, 10).map((iso) => (

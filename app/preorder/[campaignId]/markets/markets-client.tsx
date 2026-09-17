@@ -154,6 +154,39 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
       const conflicts = (j?.conflicts as { iso: string; markets: string[] }[] | undefined)?.map((c) => `${c.iso} (${c.markets.join(", ")})`).join(", ");
       return conflicts ? `${j.error} ${conflicts}` : j?.error ?? "Save failed";
     }
+    // Hand-picked customers live on customer rules (marketId). Reconcile the
+    // draft's list against the rules: pin the added ones, unpin the removed.
+    const marketId: string | null = draft.id ?? (j?.market?.id as string | undefined) ?? null;
+    if (marketId && campaign) {
+      const rules = campaign.customerRules;
+      const before = new Set(rules.filter((r) => r.marketId === marketId).map((r) => r.partnerMkId));
+      const after = new Map(draft.customers.map((c) => [c.partnerMkId, c.partnerName]));
+      const writes: Promise<unknown>[] = [];
+      const put = (pid: string, body: Record<string, unknown>) =>
+        fetch(`/api/admin/preorder/campaigns/${campaignId}/customers/${encodeURIComponent(pid)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      for (const [pid, name] of after) {
+        if (before.has(pid)) continue;
+        const existing = rules.find((r) => r.partnerMkId === pid);
+        writes.push(put(pid, { ...(existing ?? { config: {} }), partnerName: existing?.partnerName || name, marketId }));
+      }
+      for (const pid of before) {
+        if (after.has(pid)) continue;
+        const existing = rules.find((r) => r.partnerMkId === pid);
+        if (!existing) continue;
+        const bare = !existing.countryIso && !existing.note && Object.keys(existing.config ?? {}).length === 0;
+        writes.push(
+          bare
+            ? fetch(`/api/admin/preorder/campaigns/${campaignId}/customers/${encodeURIComponent(pid)}`, { method: "DELETE" })
+            : put(pid, { ...existing, marketId: null }),
+        );
+      }
+      const results = await Promise.all(writes);
+      if (results.some((res) => res instanceof Response && !res.ok)) toast("Market saved, but some customer assignments failed");
+    }
     await refreshAll();
     toast(draft.id ? "Market saved" : "Market created");
     return null;
@@ -315,7 +348,17 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
 
         {view === "markets" && (
           <div className="grid grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)] gap-4 items-start">
-            <MarketsPanel markets={markets} stats={stats} onEdit={(id) => openMarket(id)} onCreate={() => openMarket(null)} onShowCustomers={(id) => showCustomers({ market: id })} />
+            <MarketsPanel
+              markets={markets}
+              stats={stats}
+              pinned={(campaign?.customerRules ?? []).reduce<Record<string, number>>((acc, r) => {
+                if (r.marketId) acc[r.marketId] = (acc[r.marketId] ?? 0) + 1;
+                return acc;
+              }, {})}
+              onEdit={(id) => openMarket(id)}
+              onCreate={() => openMarket(null)}
+              onShowCustomers={(id) => showCustomers({ market: id })}
+            />
             <CountriesTable stats={stats} markets={markets} countryNames={countryNames} onAssign={assignCountries} onOpenCountry={openCountry} />
           </div>
         )}

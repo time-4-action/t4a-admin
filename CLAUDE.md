@@ -647,7 +647,10 @@ in `lib/preorder.ts` (portal GET, submit, admin preview, customer tables).
   default these to `undefined` on purpose; read layers through `marketView` /
   `customerRuleView`, never `"key" in subdoc` (sub-documents report every path).
 - **Market** = the rule's manual `marketId`, else the market whose `countries`
-  contain the partner's ISO code. A country belongs to at most one market
+  contain the partner's ISO code. The market modal's **Customers** picker edits
+  exactly those manual pins: saving a market reconciles `customerRules` —
+  added customers get `marketId` (an existing rule keeps its other fields),
+  removed ones lose it (a rule left empty is deleted). A country belongs to at most one market
   (validated in `lib/preorder-markets.ts`). Deleted market on a rule ⇒ warning +
   country fallback. Unknown country ⇒ campaign defaults.
 - **Country** comes from MK's localized country *name* (get_partner has no ISO

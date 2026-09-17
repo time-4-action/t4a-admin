@@ -5,8 +5,10 @@
 // Assortment — the last three are slices of CommercialConfigForm, inheriting
 // from the campaign defaults. One draft, one Save.
 
-import { useEffect, useMemo, useState } from "react";
-import { Loader2, Trash2, Check, Globe2, Wallet, Percent, Boxes } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, Trash2, Check, Globe2, Wallet, Percent, Boxes, Search, X, Building2, User } from "lucide-react";
+import { Flag } from "@/components/flag";
+import type { MkCustomerView } from "@/lib/mk-customers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EditorModal, EditorModalBody, EditorModalFooter, EditorModalHeader } from "@/components/ui/editor-modal";
@@ -19,7 +21,18 @@ import type { MkPricelist } from "@/types/documents";
 import { CommercialConfigForm, configSectionCounts } from "./commercial-config-form";
 import { CountryPicker } from "./country-picker";
 
-export type MarketDraft = { id: string | null; name: string; color: MarketColor; countries: string[]; config: CommercialConfig };
+// A customer pinned to the market by hand (a customer rule with marketId) — on
+// top of everyone the market's countries bring in automatically.
+export type MarketCustomer = { partnerMkId: string; partnerName: string };
+
+export type MarketDraft = {
+  id: string | null;
+  name: string;
+  color: MarketColor;
+  countries: string[];
+  customers: MarketCustomer[];
+  config: CommercialConfig;
+};
 
 export function MarketModal({
   open,
@@ -181,6 +194,25 @@ export function MarketModal({
                   />
                 </div>
               </div>
+
+              <div>
+                <div className="flex items-center gap-2">
+                  <label className="text-[12px] font-medium text-foreground">Customers</label>
+                  <span className="text-[12px] text-muted-foreground tabular-nums">{draft.customers.length}</span>
+                  <div className="flex-1" />
+                  <span className="text-[11px] text-muted-foreground">Everyone in the countries above is in already — add customers from elsewhere here.</span>
+                </div>
+                <div className="mt-2">
+                  <CustomerPicker
+                    value={draft.customers}
+                    onChange={(customers) => setDraft({ ...draft, customers })}
+                    campaign={campaign}
+                    currentMarketId={market?.id ?? null}
+                    countryNames={countryNames}
+                    marketCountries={draft.countries}
+                  />
+                </div>
+              </div>
             </div>
           )}
 
@@ -245,8 +277,166 @@ function TabIntro({ title, hint }: { title: string; hint: string }) {
 }
 
 function toDraft(market: PreorderMarket | null, seed: string[], campaign: PreorderCampaignAdmin): MarketDraft {
-  if (market) return { id: market.id, name: market.name, color: market.color, countries: [...market.countries], config: { ...market.config } };
+  if (market) {
+    const customers = campaign.customerRules
+      .filter((r) => r.marketId === market.id)
+      .map((r) => ({ partnerMkId: r.partnerMkId, partnerName: r.partnerName }));
+    return { id: market.id, name: market.name, color: market.color, countries: [...market.countries], customers, config: { ...market.config } };
+  }
   const used = new Set(campaign.markets.map((m) => m.color));
   const color = MARKET_COLOR_KEYS.find((c) => !used.has(c)) ?? MARKET_COLOR_KEYS[campaign.markets.length % MARKET_COLOR_KEYS.length];
-  return { id: null, name: "", color, countries: [...seed], config: {} };
+  return { id: null, name: "", color, countries: [...seed], customers: [], config: {} };
+}
+
+// Searchable directory picker for the market's hand-picked customers. Mirrors
+// CountryPicker: chips of what is picked, a search box, a short result list.
+function CustomerPicker({
+  value,
+  onChange,
+  campaign,
+  currentMarketId,
+  countryNames,
+  marketCountries,
+}: {
+  value: MarketCustomer[];
+  onChange: (v: MarketCustomer[]) => void;
+  campaign: PreorderCampaignAdmin;
+  currentMarketId: string | null;
+  countryNames: Record<string, string>;
+  marketCountries: string[];
+}) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<MkCustomerView[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Where a customer sits today, by hand: partnerMkId → market name.
+  const pinnedTo = useMemo(() => {
+    const byId = new Map(campaign.markets.map((m) => [m.id, m.name]));
+    const out = new Map<string, string>();
+    for (const r of campaign.customerRules) if (r.marketId && r.marketId !== currentMarketId) out.set(r.partnerMkId, byId.get(r.marketId) ?? "another market");
+    return out;
+  }, [campaign, currentMarketId]);
+  const countryOf = useMemo(() => new Map(campaign.markets.flatMap((m) => m.countries.map((iso) => [iso, m.name] as const))), [campaign]);
+  const inCountries = new Set(marketCountries);
+
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 2) {
+      setResults([]);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    const t = setTimeout(() => {
+      fetch(`/api/admin/preorder/customers?q=${encodeURIComponent(query)}&pageSize=8`, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((j) => !cancelled && setResults((j.items ?? []) as MkCustomerView[]))
+        .catch(() => !cancelled && setResults([]))
+        .finally(() => !cancelled && setLoading(false));
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [q]);
+  useEffect(() => setActive(0), [results]);
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  const picked = new Set(value.map((c) => c.partnerMkId));
+  const options = results.filter((c) => !picked.has(c.partnerMkId));
+  const add = (c: MkCustomerView) => {
+    onChange([...value, { partnerMkId: c.partnerMkId, partnerName: c.name }]);
+    setQ("");
+    setOpen(false);
+  };
+  const remove = (id: string) => onChange(value.filter((c) => c.partnerMkId !== id));
+
+  return (
+    <div ref={rootRef} className="space-y-2">
+      <div className="flex flex-wrap gap-1.5 min-h-[34px] rounded-lg border border-border bg-surface p-2">
+        {value.length === 0 && <span className="text-[12px] text-muted-foreground px-1 py-0.5">No hand-picked customers — search below to add one.</span>}
+        {value.map((c) => (
+          <span key={c.partnerMkId} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-foreground">
+            {c.partnerName || c.partnerMkId}
+            <button type="button" onClick={() => remove(c.partnerMkId)} className="opacity-60 hover:opacity-100" aria-label={`Remove ${c.partnerName}`}>
+              <X className="w-3 h-3" />
+            </button>
+          </span>
+        ))}
+      </div>
+      <div className="relative">
+        <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+        <input
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setActive((a) => Math.min(options.length - 1, a + 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setActive((a) => Math.max(0, a - 1));
+            } else if (e.key === "Enter" && q.trim() && options[active]) {
+              e.preventDefault();
+              add(options[active]);
+            } else if (e.key === "Escape") setOpen(false);
+          }}
+          placeholder="Add a customer — type a name, email or VAT id…"
+          className="h-9 w-full rounded-md border border-input bg-background pl-8 pr-2 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        />
+        {open && q.trim().length >= 2 && (
+          <div className="absolute left-0 right-0 top-full mt-1 z-20 rounded-lg border border-border bg-background shadow-lg overflow-hidden">
+            {loading && <div className="px-3 py-2 text-[12px] text-muted-foreground">Searching…</div>}
+            {!loading && options.length === 0 && <div className="px-3 py-2 text-[12px] text-muted-foreground">No customers match.</div>}
+            {options.map((c, i) => {
+              const pinned = pinnedTo.get(c.partnerMkId);
+              const viaCountry = c.countryIso ? (inCountries.has(c.countryIso) ? "already in — by country" : countryOf.get(c.countryIso)) : null;
+              return (
+                <button
+                  key={c.partnerMkId}
+                  type="button"
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => add(c)}
+                  className={cn("w-full flex items-center gap-2.5 px-3 py-2 text-left", i === active ? "bg-muted" : "hover:bg-muted/60")}
+                >
+                  <span className={cn("size-6 rounded-md flex items-center justify-center shrink-0", c.taxId ? "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300" : "bg-muted text-muted-foreground")}>
+                    {c.taxId ? <Building2 className="w-3 h-3" /> : <User className="w-3 h-3" />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[12.5px] font-medium text-foreground truncate">{c.name}</span>
+                    <span className="block text-[11px] text-muted-foreground truncate">
+                      {[c.city, c.email].filter(Boolean).join(" · ")}
+                    </span>
+                  </span>
+                  {c.countryIso && (
+                    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
+                      <Flag iso={c.countryIso} /> {countryNames[c.countryIso] ?? c.countryIso}
+                    </span>
+                  )}
+                  {pinned ? (
+                    <span className="text-[10px] text-amber-700 dark:text-amber-300 shrink-0">pinned to {pinned} — moves here</span>
+                  ) : viaCountry ? (
+                    <span className="text-[10px] text-muted-foreground shrink-0">{viaCountry === "already in — by country" ? viaCountry : `in ${viaCountry} by country`}</span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
