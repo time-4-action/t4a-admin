@@ -151,7 +151,7 @@ export function MarketModal({
             <div className="space-y-6 max-w-[760px]">
               <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-5 items-start">
                 <div>
-                  <label className="text-[12px] font-medium text-foreground">Name</label>
+                  <div className="text-[12px] font-medium text-foreground">Name</div>
                   <Input
                     value={draft.name}
                     onChange={(e) => setDraft({ ...draft, name: e.target.value })}
@@ -161,7 +161,7 @@ export function MarketModal({
                   />
                 </div>
                 <div>
-                  <label className="text-[12px] font-medium text-foreground">Colour</label>
+                  <div className="text-[12px] font-medium text-foreground">Colour</div>
                   <div className="mt-1.5 flex items-center gap-1.5 h-10">
                     {MARKET_COLOR_KEYS.map((c) => (
                       <button
@@ -179,7 +179,7 @@ export function MarketModal({
               </div>
 
               <div>
-                <label className="text-[12px] font-medium text-foreground">Who is in this market</label>
+                <div className="text-[12px] font-medium text-foreground">Who is in this market</div>
                 <div className="mt-1.5 inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
                   {(
                     [
@@ -204,7 +204,7 @@ export function MarketModal({
                     );
                   })}
                 </div>
-                <p className="mt-1 text-[11px] text-muted-foreground">A company is a partner with a tax id in Metakocka; everyone else counts as an individual.</p>
+                <p className="mt-1.5 text-[11px] text-muted-foreground">Company = has a tax id in Metakocka. Everyone else is an individual.</p>
               </div>
 
               <div>
