@@ -1418,9 +1418,16 @@ export function DocumentListSkeleton({ kind, rows = 8 }: { kind: DocKind; rows?:
   const isBill = isBillKind(kind);
   return (
     <div className="space-y-4">
-      {isBill && (
+      {/* Summary strip — bills (Invoiced / Paid / Outstanding, refund wording on
+          credit notes) and orders (Orders / Items / Ordered value); offers have none. */}
+      {(isBill || kind === "order") && (
         <div className="grid grid-cols-3 rounded-2xl border border-border bg-surface overflow-hidden divide-x divide-border/60">
-          {["Invoiced", "Paid", "Outstanding"].map((label, i) => (
+          {(kind === "credit-note"
+            ? ["Credited", "Refunded", "Open"]
+            : kind === "order"
+              ? ["Orders", "Items", "Ordered value"]
+              : ["Invoiced", "Paid", "Outstanding"]
+          ).map((label, i) => (
             <div key={label} className="px-4 py-3">
               <p className="text-[11px] text-muted-foreground">{label}</p>
               {/* text-[15px] → 22.5px; text-[10px] → 15px */}
@@ -1488,11 +1495,14 @@ export function DocumentDetailSkeleton({
   const KindIcon = KIND_ICON[kind];
   const kindLabel = DOC_KIND_LABELS[kind].singular;
   return (
-    <div className={cn("px-4 md:px-8 py-6 md:py-8 space-y-4 overflow-y-auto h-full", wide ? "" : "max-w-5xl mx-auto")}>
+    <div className={cn("px-4 md:px-8 py-6 md:py-8 space-y-3 overflow-y-auto h-full", wide ? "" : "max-w-5xl mx-auto")}>
       <span className="inline-block text-[12px] text-muted-foreground">← Back</span>
 
+      {/* One framed document, rows divided — twin of DocumentDetail. */}
+      <div className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
+
       {/* Hero */}
-      <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+      <div className="overflow-hidden">
         <div className="px-5 py-4 flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1518,7 +1528,7 @@ export function DocumentDetailSkeleton({
       </div>
 
       {showPartner && (
-        <div className="rounded-2xl border border-border bg-surface px-4 py-3 flex items-center gap-3">
+        <div className="px-4 py-3 flex items-center gap-3">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted shrink-0">
             <Building2 className="h-4 w-4 text-muted-foreground" />
           </span>
@@ -1532,9 +1542,9 @@ export function DocumentDetailSkeleton({
 
       {/* Addresses (bills and orders) */}
       {(isBill || isOrder) && (
-        <div className="rounded-2xl border border-border bg-surface overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center gap-2">
-            <MapPin className="h-3.5 w-3.5 text-teal-500" />
+        <div className="overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-border/60 bg-muted/20 flex items-center gap-2">
+            <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-[12px] font-semibold text-foreground">Addresses</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-border/60">
@@ -1552,7 +1562,7 @@ export function DocumentDetailSkeleton({
       )}
 
       {/* Line items */}
-      <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+      <div className="overflow-hidden">
         <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
           <span className="text-[12px] font-semibold text-foreground">Products</span>
           <Skeleton className="h-[20.5px] w-7 rounded-full" delay={200} />
@@ -1587,7 +1597,7 @@ export function DocumentDetailSkeleton({
       </div>
 
       {/* Totals */}
-      <div className="rounded-2xl border border-border bg-surface px-4 py-3">
+      <div className="px-4 py-3">
         {["Subtotal", "Tax"].map((label, i) => (
           <div key={label} className="flex items-baseline justify-between gap-4 py-1">
             <span className="text-[12px] text-muted-foreground">{label}</span>
@@ -1606,11 +1616,11 @@ export function DocumentDetailSkeleton({
       {isBill && (
         <div>
           <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
-            <span className="text-[12px] font-semibold text-foreground">Payment</span>
+            <span className="text-[12px] font-semibold text-foreground">{kind === "credit-note" ? "Refund" : "Payment"}</span>
             <Skeleton className="h-[20.5px] w-16 rounded-full" delay={540} />
           </div>
           <div className="grid grid-cols-3 divide-x divide-border/50">
-            {["Paid", "Remaining", "Due date"].map((label, i) => (
+            {[kind === "credit-note" ? "Refunded" : "Paid", "Remaining", "Due date"].map((label, i) => (
               <div key={label} className="px-4 py-3">
                 <p className="text-[11px] text-muted-foreground">{label}</p>
                 <SkeletonLine lh="h-[22.5px]" h="h-4" w="w-20" className="mt-0.5" delay={stagger(i, 60, 560)} />
@@ -1619,6 +1629,24 @@ export function DocumentDetailSkeleton({
           </div>
         </div>
       )}
+
+      {/* Related documents — bills and orders usually carry one */}
+      {kind !== "offer" && (
+        <div>
+          <div className="px-4 py-2.5 flex items-center gap-2 bg-muted/20 border-b border-border/60">
+            <span className="text-[12px] font-semibold text-foreground">Related documents</span>
+            <Skeleton className="h-3 w-3 rounded" delay={700} />
+          </div>
+          <div className="flex items-center gap-3 px-4 py-2.5">
+            <Skeleton className="h-9 w-9 rounded-lg shrink-0" delay={720} />
+            <div className="min-w-0 flex-1">
+              <SkeletonLine lh="h-[14px]" h="h-2.5" w="w-16" delay={740} />
+              <SkeletonLine lh="h-[16px]" h="h-3.5" w="w-20" delay={760} />
+            </div>
+          </div>
+        </div>
+      )}
+      </div>
     </div>
   );
 }

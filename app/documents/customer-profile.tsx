@@ -1,25 +1,13 @@
-import { Building2, Mail, Phone, MapPin, User } from "lucide-react";
-import type { MkAddress, MkContact, MkPartner } from "@/types/documents";
+import { Building2, Mail, Phone, User } from "lucide-react";
+import type { MkContact, MkPartner } from "@/types/documents";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
+import { AddressList, ContactList } from "./profile-lists";
 
 // Full customer profile — a shared, presentational card view used by both the
 // admin Documents "Customer" page and the customer's own portal "Account" page.
 // No client hooks, so it renders in either a server or client component. Built to
 // stay balanced for customers with many contacts/addresses (dense rows, count
 // badges, scroll-capped lists, masonry columns).
-
-function addrLine(a: MkAddress): string {
-  return [a.street, [a.postNumber, a.city].filter(Boolean).join(" "), a.country].filter(Boolean).join(", ");
-}
-
-// MK address types come as Slovene register labels; show them as what they are.
-function addressKind(t?: string | null): string {
-  const k = (t ?? "").trim().toLowerCase();
-  if (!k) return "Address";
-  if (k.startsWith("rač") || k.startsWith("rac") || k.includes("bill") || k.includes("invoice")) return "Billing";
-  if (k.startsWith("dob") || k.includes("deliv") || k.includes("ship")) return "Delivery";
-  return t!;
-}
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -104,51 +92,11 @@ export default function CustomerProfile({ customer }: { customer: MkPartner }) {
         </section>
 
         <section className="p-5">
-          <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-3">Addresses</h3>
-          {addresses.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">No address on file.</p>
-          ) : (
-            <ul className="space-y-3">
-              {addresses.map((a, i) => (
-                <li key={i} className="flex items-start gap-2.5">
-                  <MapPin className="h-3.5 w-3.5 mt-[3px] text-muted-foreground shrink-0" />
-                  <div className="min-w-0">
-                    <div className="text-[11px] text-muted-foreground">{addressKind(a.type)}</div>
-                    <div className="text-[13px] text-foreground leading-snug">
-                      {a.street && <div>{a.street}</div>}
-                      <div>{[a.postNumber, a.city].filter(Boolean).join(" ")}</div>
-                      {a.country && <div>{a.country}</div>}
-                      {!addrLine(a) && <div>—</div>}
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+          <AddressList addresses={addresses} />
         </section>
 
         <section className="p-5">
-          <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-3">Contacts</h3>
-          {contacts.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">No contact on file.</p>
-          ) : (
-            <ul className="space-y-2.5 max-h-[320px] overflow-y-auto">
-              {contacts.map((ct, i) => (
-                <li key={i} className="min-w-0">
-                  {ct.email && (
-                    <a href={`mailto:${ct.email}`} className="block text-[13px] text-foreground truncate hover:text-teal-600 dark:hover:text-teal-400 transition-colors">
-                      {ct.email}
-                    </a>
-                  )}
-                  {ct.phone && (
-                    <a href={`tel:${ct.phone.replace(/\s/g, "")}`} className="block text-[12px] text-muted-foreground hover:text-foreground transition-colors">
-                      {ct.phone}
-                    </a>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
+          <ContactList contacts={contacts} />
         </section>
       </div>
 
@@ -175,19 +123,50 @@ export function CustomerProfileSkeleton() {
         </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border/60 border-t border-border/60">
-        {["Account", "Addresses", "Contacts"].map((title, col) => (
-          <section key={title} className="p-5">
-            <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-3">{title}</h3>
-            <div className="space-y-2.5">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i}>
-                  <SkeletonLine lh="h-[16px]" h="h-2.5" w="w-20" delay={stagger(col * 3 + i, 50)} />
-                  <SkeletonLine lh="h-[20px]" w={["w-40", "w-52", "w-32"][i]} delay={stagger(col * 3 + i, 50, 20)} />
+        {/* Account: label / value pairs */}
+        <section className="p-5">
+          <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-3">Account</h3>
+          <div className="space-y-2.5">
+            {["w-36", "w-28", "w-16", "w-12"].map((w, i) => (
+              <div key={i}>
+                <SkeletonLine lh="h-[16px]" h="h-2.5" w="w-20" delay={stagger(i, 50)} />
+                <SkeletonLine lh="h-[19.5px]" h="h-3.5" w={w} delay={stagger(i, 50, 20)} />
+              </div>
+            ))}
+          </div>
+        </section>
+        {/* Addresses: pin + kind + three lines */}
+        <section className="p-5">
+          <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-3">Addresses</h3>
+          <div className="space-y-3">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="flex items-start gap-2.5">
+                <Skeleton className="h-3.5 w-3.5 mt-[3px] rounded-full shrink-0" delay={stagger(i, 60, 200)} />
+                <div className="min-w-0 flex-1">
+                  <SkeletonLine lh="h-[16px]" h="h-2.5" w="w-12" delay={stagger(i, 60, 200)} />
+                  <SkeletonLine lh="h-[18px]" h="h-3.5" w="w-44" delay={stagger(i, 60, 220)} />
+                  <SkeletonLine lh="h-[18px]" h="h-3.5" w="w-28" delay={stagger(i, 60, 240)} />
+                  <SkeletonLine lh="h-[18px]" h="h-3.5" w="w-20" delay={stagger(i, 60, 260)} />
                 </div>
-              ))}
-            </div>
-          </section>
-        ))}
+              </div>
+            ))}
+          </div>
+        </section>
+        {/* Contacts: email + phone */}
+        <section className="p-5">
+          <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-3">Contacts</h3>
+          <div className="space-y-2.5">
+            {["w-48", "w-40", "w-52"].map((w, i) => (
+              <div key={i}>
+                <SkeletonLine lh="h-[19.5px]" h="h-3.5" w={w} delay={stagger(i, 60, 400)} />
+                <SkeletonLine lh="h-[18px]" h="h-3" w="w-28" delay={stagger(i, 60, 420)} />
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+      <div className="px-5 py-2.5 border-t border-border/60 bg-muted/20">
+        <SkeletonLine lh="h-[16.5px]" h="h-2.5" w="w-96 max-w-full" delay={600} />
       </div>
     </div>
   );
