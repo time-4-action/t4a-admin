@@ -17,7 +17,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { cn } from "@/lib/utils";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
 import { SourceBadge } from "@/app/preorder/preorder-badges";
-import { activeTiers, flattenRows, type CommercialConfig, type ConfigSource, type EffectiveCampaign, type PreorderCampaign, type PreorderTier } from "@/types/preorder";
+import { activeTiers, flattenRows, rowUnitPrice, type CommercialConfig, type ConfigSource, type EffectiveCampaign, type PreorderCampaign, type PreorderGroup, type PreorderRow, type PreorderTab, type PreorderTier } from "@/types/preorder";
 import type { MkPricelist } from "@/types/documents";
 
 // What the layer inherits if it sets nothing: the effective campaign WITHOUT this layer.
@@ -345,186 +345,304 @@ function TierLadder({ tiers, currency, onChange }: { tiers: PreorderTier[]; curr
 }
 
 // ── assortment ─────────────────────────────────────────────────────────────────
+//
+// A product-first editor: every row shows what the customer will see (a Visible /
+// Hidden switch reflecting the EFFECTIVE state) and flipping it writes the
+// smallest override that gets there. Bulk actions on a tab or group write
+// row-level ids too, so single rows stay independently flippable — a tab-level
+// `exposedIds` entry would otherwise out-rank any row-level hide (exposed beats
+// hidden within a layer). Legacy tab/group-level ids are still honoured and are
+// dissolved into row-level ones the first time a row beneath them is touched.
 
-type Tri = "inherit" | "hidden" | "exposed";
+type Flat = { tab: PreorderTab; group: PreorderGroup; row: PreorderRow };
+type AssortmentFilter = "all" | "visible" | "hidden" | "changed";
 
 function AssortmentEditor({ value, onChange, inherited, campaign }: Pick<ConfigFormProps, "value" | "onChange" | "inherited" | "campaign">) {
   const [q, setQ] = useState("");
-  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<AssortmentFilter>("all");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const hidden = useMemo(() => new Set(value.hiddenIds ?? []), [value.hiddenIds]);
   const exposed = useMemo(() => new Set(value.exposedIds ?? []), [value.exposedIds]);
   const inheritedVisible = useMemo(() => new Set(flattenRows(inherited).map((r) => r.row.id)), [inherited]);
+  const all = useMemo(() => flattenRows(campaign) as Flat[], [campaign]);
+  const currency = value.currency ?? inherited.currency;
 
-  const stateOf = (id: string): Tri => (hidden.has(id) ? "hidden" : exposed.has(id) ? "exposed" : "inherit");
-  const setState = (id: string, s: Tri) => {
-    const h = new Set(hidden);
-    const e = new Set(exposed);
-    h.delete(id);
-    e.delete(id);
-    if (s === "hidden") h.add(id);
-    if (s === "exposed") e.add(id);
+  const idsOf = (r: Flat) => [r.tab.id, r.group.id, r.row.id];
+  const inh = (r: Flat) => inheritedVisible.has(r.row.id);
+  // Effective visibility for this layer, mirroring lib/preorder-effective.
+  const eff = (r: Flat) => (idsOf(r).some((id) => exposed.has(id)) ? true : idsOf(r).some((id) => hidden.has(id)) ? false : inh(r));
+  const changed = (r: Flat) => idsOf(r).some((id) => hidden.has(id) || exposed.has(id));
+
+  const commit = (h: Set<string>, e: Set<string>) => {
     const next = { ...value };
-    if (h.size || value.hiddenIds !== undefined) next.hiddenIds = Array.from(h);
-    if (e.size || value.exposedIds !== undefined) next.exposedIds = Array.from(e);
-    if (!h.size && !e.size) {
-      delete next.hiddenIds;
-      delete next.exposedIds;
-    }
+    if (h.size) next.hiddenIds = Array.from(h);
+    else delete next.hiddenIds;
+    if (e.size) next.exposedIds = Array.from(e);
+    else delete next.exposedIds;
     onChange(next);
   };
+
+  // Set the target visibility on a set of rows. Ancestor (tab/group) overrides
+  // touching any of them are first dissolved into row-level ones so the result
+  // is exactly what was asked for.
+  const setRowsVisible = (rows: Flat[], visible: boolean) => {
+    const h = new Set(hidden);
+    const e = new Set(exposed);
+    const ancestors = new Set<string>();
+    for (const r of rows) for (const id of [r.tab.id, r.group.id]) if (hidden.has(id) || exposed.has(id)) ancestors.add(id);
+    if (ancestors.size) {
+      const affected = all.filter((r) => ancestors.has(r.tab.id) || ancestors.has(r.group.id));
+      for (const r of affected) {
+        const cur = eff(r); // with the ancestor override still in force
+        h.delete(r.row.id);
+        e.delete(r.row.id);
+        if (cur !== inh(r)) (cur ? e : h).add(r.row.id);
+      }
+      for (const id of ancestors) {
+        h.delete(id);
+        e.delete(id);
+      }
+    }
+    for (const r of rows) {
+      h.delete(r.row.id);
+      e.delete(r.row.id);
+      if (visible !== inh(r)) (visible ? e : h).add(r.row.id);
+    }
+    commit(h, e);
+  };
+  const resetRows = (rows: Flat[], ancestorIds: string[] = []) => {
+    const h = new Set(hidden);
+    const e = new Set(exposed);
+    for (const id of ancestorIds) {
+      h.delete(id);
+      e.delete(id);
+    }
+    for (const r of rows) {
+      h.delete(r.row.id);
+      e.delete(r.row.id);
+    }
+    commit(h, e);
+  };
+
+  const needle = q.trim().toLowerCase();
+  const match = (r: Flat) =>
+    !needle || [r.row.name, r.row.code, r.row.variantLabel, r.group.name, r.tab.name].some((s) => (s ?? "").toLowerCase().includes(needle));
+  const passes = (r: Flat) => {
+    if (!match(r)) return false;
+    if (filter === "visible") return eff(r);
+    if (filter === "hidden") return !eff(r);
+    if (filter === "changed") return changed(r);
+    return true;
+  };
+
+  const total = all.length;
+  const visibleCount = all.filter(eff).length;
+  const changedCount = all.filter(changed).length;
   const toggle = (id: string) =>
-    setOpen((prev) => {
+    setCollapsed((prev) => {
       const n = new Set(prev);
       if (n.has(id)) n.delete(id);
       else n.add(id);
       return n;
     });
 
-  const needle = q.trim().toLowerCase();
-  const match = (s: string | null | undefined) => !needle || (s ?? "").toLowerCase().includes(needle);
-  const total = flattenRows(campaign).length;
-  const overrides = hidden.size + exposed.size;
-  const visibleNow = inheritedVisible.size;
-
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-        <span>{visibleNow} of {total} rows visible when inheriting</span>
-        {overrides > 0 && <span className="rounded-full bg-lime-100 text-lime-700 dark:bg-lime-900/50 dark:text-lime-300 px-2 py-0.5 font-medium">{overrides} override{overrides === 1 ? "" : "s"}</span>}
-        <div className="flex-1" />
-        {overrides > 0 && (
-          <Button type="button" size="sm" variant="ghost" onClick={() => { const n = { ...value }; delete n.hiddenIds; delete n.exposedIds; onChange(n); }} className="h-7 text-[12px] text-muted-foreground">
-            <RotateCcw className="w-3.5 h-3.5" /> Reset all
-          </Button>
-        )}
+    <div className="space-y-4">
+      {/* summary + tools */}
+      <div className="rounded-xl border border-border bg-surface p-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div>
+            <div className="text-[18px] font-semibold text-foreground tabular-nums leading-none">
+              {visibleCount} <span className="text-[13px] font-normal text-muted-foreground">of {total} products orderable</span>
+            </div>
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {changedCount === 0 ? "Everything follows the inherited assortment." : `${changedCount} product${changedCount === 1 ? "" : "s"} changed for this layer.`}
+            </div>
+          </div>
+          <div className="flex-1" />
+          {changedCount > 0 && (
+            <Button type="button" size="sm" variant="ghost" onClick={() => commit(new Set(), new Set())} className="h-8 text-[12px] text-muted-foreground">
+              <RotateCcw className="w-3.5 h-3.5" /> Reset everything
+            </Button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a product, SKU, group or tab…" className="h-9 pl-8 text-[13px]" />
+          </div>
+          <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
+            {(
+              [
+                ["all", "All", total],
+                ["visible", "Visible", visibleCount],
+                ["hidden", "Hidden", total - visibleCount],
+                ["changed", "Changed", changedCount],
+              ] as [AssortmentFilter, string, number][]
+            ).map(([id, label, n]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setFilter(id)}
+                className={cn(
+                  "h-8 rounded-md px-2.5 text-[12px] font-medium tabular-nums transition-colors",
+                  filter === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label} <span className="opacity-60">{n}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
-      <div className="relative">
-        <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find product / SKU…" className="h-8 pl-8 text-[12px]" />
-      </div>
-      <div className="rounded-lg border border-border divide-y divide-border/60 overflow-hidden">
-        {campaign.tabs.map((tab) => {
-          const rows = tab.groups.flatMap((g) => g.rows);
-          const tabMatches = match(tab.name) || rows.some((r) => match(r.name) || match(r.code) || match(r.variantLabel));
-          if (!tabMatches) return null;
-          const isOpen = open.has(tab.id) || !!needle;
-          const vis = rows.filter((r) => inheritedVisible.has(r.id)).length;
-          return (
-            <div key={tab.id}>
-              <NodeRow
-                depth={0}
-                label={tab.name}
-                meta={`${vis}/${rows.length} visible`}
-                state={stateOf(tab.id)}
-                onState={(s) => setState(tab.id, s)}
-                expandable
-                open={isOpen}
-                onToggle={() => toggle(tab.id)}
+
+      {/* tabs → groups → rows */}
+      {campaign.tabs.map((tab) => {
+        const tabRows = all.filter((r) => r.tab.id === tab.id);
+        const shownRows = tabRows.filter(passes);
+        if (shownRows.length === 0 && (needle || filter !== "all")) return null;
+        const tabVisible = tabRows.filter(eff).length;
+        const tabChanged = tabRows.filter(changed).length;
+        const open = !collapsed.has(tab.id);
+        return (
+          <div key={tab.id} className="rounded-xl border border-border bg-surface overflow-hidden">
+            <div className="flex flex-wrap items-center gap-3 px-4 py-3 bg-muted/30 border-b border-border">
+              <button type="button" onClick={() => toggle(tab.id)} className="inline-flex items-center gap-2 text-left min-w-0" aria-label={open ? "Collapse" : "Expand"}>
+                {open ? <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />}
+                <span className="text-[14px] font-semibold text-foreground truncate">{tab.name}</span>
+              </button>
+              <span className="text-[12px] text-muted-foreground tabular-nums">
+                {tabVisible} of {tabRows.length} orderable{tabChanged > 0 ? ` · ${tabChanged} changed` : ""}
+              </span>
+              <div className="flex-1" />
+              <BulkButtons
+                onShow={() => setRowsVisible(tabRows, true)}
+                onHide={() => setRowsVisible(tabRows, false)}
+                onReset={tabChanged > 0 ? () => resetRows(tabRows, [tab.id, ...tab.groups.map((g) => g.id)]) : undefined}
               />
-              {isOpen &&
-                tab.groups.map((g) => {
-                  const gm = match(g.name) || g.rows.some((r) => match(r.name) || match(r.code) || match(r.variantLabel));
-                  if (!gm) return null;
-                  const gOpen = open.has(g.id) || !!needle;
-                  const gvis = g.rows.filter((r) => inheritedVisible.has(r.id)).length;
+            </div>
+            {open && (
+              <div className="divide-y divide-border/60">
+                {tab.groups.map((group) => {
+                  const groupRows = tabRows.filter((r) => r.group.id === group.id);
+                  const rows = groupRows.filter(passes);
+                  if (rows.length === 0) return null;
+                  const gVisible = groupRows.filter(eff).length;
+                  const gChanged = groupRows.filter(changed).length;
                   return (
-                    <div key={g.id}>
-                      <NodeRow
-                        depth={1}
-                        label={g.name}
-                        meta={`${gvis}/${g.rows.length}`}
-                        state={stateOf(g.id)}
-                        onState={(s) => setState(g.id, s)}
-                        expandable
-                        open={gOpen}
-                        onToggle={() => toggle(g.id)}
-                      />
-                      {gOpen &&
-                        g.rows
-                          .filter((r) => !needle || match(r.name) || match(r.code) || match(r.variantLabel))
-                          .map((r) => (
-                            <NodeRow
-                              key={r.id}
-                              depth={2}
-                              label={[r.name, r.variantLabel].filter(Boolean).join(" · ")}
-                              meta={r.code}
-                              restricted={!!r.restricted}
-                              inheritedVisible={inheritedVisible.has(r.id)}
-                              state={stateOf(r.id)}
-                              onState={(s) => setState(r.id, s)}
-                            />
-                          ))}
+                    <div key={group.id}>
+                      <div className="flex flex-wrap items-center gap-3 px-4 py-2 bg-muted/10">
+                        <span className="text-[12px] font-semibold text-foreground">{group.name}</span>
+                        <span className="text-[11px] text-muted-foreground tabular-nums">{gVisible}/{groupRows.length}</span>
+                        <div className="flex-1" />
+                        <BulkButtons
+                          small
+                          onShow={() => setRowsVisible(groupRows, true)}
+                          onHide={() => setRowsVisible(groupRows, false)}
+                          onReset={gChanged > 0 ? () => resetRows(groupRows, [group.id]) : undefined}
+                        />
+                      </div>
+                      <div className="divide-y divide-border/40">
+                        {rows.map((r) => {
+                          const on = eff(r);
+                          const isChanged = changed(r);
+                          const price = rowUnitPrice(r.row);
+                          return (
+                            <div key={r.row.id} className={cn("flex items-center gap-3 px-4 py-2", isChanged && "bg-lime-50/50 dark:bg-lime-950/15", !on && "opacity-80")}>
+                              {r.row.image ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={r.row.image} alt="" className={cn("w-9 h-9 rounded-md object-cover ring-1 ring-border shrink-0", !on && "grayscale")} />
+                              ) : (
+                                <span className="w-9 h-9 rounded-md bg-muted shrink-0" />
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <div className={cn("text-[13px] truncate", on ? "text-foreground" : "text-muted-foreground line-through decoration-border")}>
+                                  {r.row.name}
+                                  {r.row.variantLabel && <span className="text-muted-foreground"> · {r.row.variantLabel}</span>}
+                                </div>
+                                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                                  <span className="font-mono">{r.row.code}</span>
+                                  {r.row.restricted && (
+                                    <span className="rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300 px-1.5 py-px text-[10px] font-medium">restricted</span>
+                                  )}
+                                  {isChanged && <span className="text-lime-700 dark:text-lime-400">{on ? "shown for this layer" : "hidden for this layer"}</span>}
+                                  {!isChanged && !inh(r) && <span>hidden by inheritance</span>}
+                                </div>
+                              </div>
+                              {price > 0 && <span className="hidden sm:block text-[12px] tabular-nums text-muted-foreground shrink-0">{fmtMoney(price, currency)}</span>}
+                              {isChanged && (
+                                <button
+                                  type="button"
+                                  onClick={() => resetRows([r])}
+                                  title="Back to inherited"
+                                  aria-label="Back to inherited"
+                                  className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted shrink-0"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              <VisibilitySwitch on={on} onChange={(v) => setRowsVisible([r], v)} />
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   );
                 })}
-            </div>
-          );
-        })}
-        {campaign.tabs.length === 0 && <div className="px-3 py-4 text-[12px] text-muted-foreground">The sheet has no products yet.</div>}
-      </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {campaign.tabs.length === 0 && (
+        <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-[12px] text-muted-foreground">The sheet has no products yet.</div>
+      )}
+      {campaign.tabs.length > 0 && all.filter(passes).length === 0 && (
+        <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-[12px] text-muted-foreground">Nothing matches.</div>
+      )}
     </div>
   );
 }
 
-function NodeRow({
-  depth,
-  label,
-  meta,
-  state,
-  onState,
-  expandable,
-  open,
-  onToggle,
-  restricted,
-  inheritedVisible,
-}: {
-  depth: number;
-  label: string;
-  meta?: string;
-  state: Tri;
-  onState: (s: Tri) => void;
-  expandable?: boolean;
-  open?: boolean;
-  onToggle?: () => void;
-  restricted?: boolean;
-  inheritedVisible?: boolean;
-}) {
+function BulkButtons({ onShow, onHide, onReset, small }: { onShow: () => void; onHide: () => void; onReset?: () => void; small?: boolean }) {
+  const h = small ? "h-7" : "h-8";
   return (
-    <div className={cn("flex items-center gap-2 px-2 py-1.5 text-[12px]", depth === 0 ? "bg-muted/30" : "", state !== "inherit" && "bg-lime-50/60 dark:bg-lime-950/20")} style={{ paddingLeft: 8 + depth * 16 }}>
-      {expandable ? (
-        <button type="button" onClick={onToggle} className="p-0.5 text-muted-foreground hover:text-foreground" aria-label={open ? "Collapse" : "Expand"}>
-          {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-        </button>
-      ) : (
-        <span className={cn("w-4 flex justify-center", inheritedVisible === false ? "text-muted-foreground/50" : "text-lime-600")} title={inheritedVisible === false ? "Hidden when inheriting" : "Visible when inheriting"}>
-          {inheritedVisible === false ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-        </span>
+    <div className="flex items-center gap-1.5">
+      <Button type="button" size="sm" variant="outline" onClick={onShow} className={cn(h, "text-[12px]")}>
+        <Eye className="w-3.5 h-3.5" /> Show all
+      </Button>
+      <Button type="button" size="sm" variant="outline" onClick={onHide} className={cn(h, "text-[12px]")}>
+        <EyeOff className="w-3.5 h-3.5" /> Hide all
+      </Button>
+      {onReset && (
+        <Button type="button" size="sm" variant="ghost" onClick={onReset} className={cn(h, "text-[12px] text-muted-foreground")}>
+          <RotateCcw className="w-3.5 h-3.5" /> Reset
+        </Button>
       )}
-      <span className={cn("truncate", depth === 0 ? "font-medium text-foreground" : depth === 1 ? "text-foreground" : "text-foreground/90", inheritedVisible === false && state === "inherit" && "text-muted-foreground")}>{label}</span>
-      {restricted && <span className="rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300 px-1.5 py-px text-[10px] font-medium shrink-0">restricted</span>}
-      {meta && <span className="text-[10px] text-muted-foreground font-mono shrink-0">{meta}</span>}
-      <div className="flex-1" />
-      <div className="inline-flex rounded-md border border-border overflow-hidden shrink-0">
-        {(["inherit", "hidden", "exposed"] as Tri[]).map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => onState(s)}
-            className={cn(
-              "px-1.5 h-5 text-[10px] font-medium transition-colors",
-              state === s
-                ? s === "hidden"
-                  ? "bg-rose-500 text-white"
-                  : s === "exposed"
-                    ? "bg-lime-600 text-white"
-                    : "bg-muted text-foreground"
-                : "text-muted-foreground hover:bg-muted",
-            )}
-          >
-            {s === "inherit" ? "Inherit" : s === "hidden" ? "Hide" : "Show"}
-          </button>
-        ))}
-      </div>
     </div>
+  );
+}
+
+// The per-row control: a labelled switch that always reads as the customer sees
+// it — green "Visible" or grey "Hidden".
+function VisibilitySwitch({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={() => onChange(!on)}
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full border pl-1 pr-2.5 h-7 text-[11px] font-semibold transition-colors shrink-0",
+        on
+          ? "border-lime-500/40 bg-lime-500/12 text-lime-700 dark:text-lime-400"
+          : "border-border bg-muted text-muted-foreground",
+      )}
+    >
+      <span className={cn("relative h-5 w-9 rounded-full transition-colors", on ? "bg-lime-500" : "bg-muted-foreground/30")}>
+        <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all", on ? "left-[18px]" : "left-0.5")} />
+      </span>
+      <span className="w-11 text-left">{on ? "Visible" : "Hidden"}</span>
+    </button>
   );
 }
