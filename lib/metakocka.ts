@@ -396,15 +396,32 @@ function mapLines(raw: unknown): DocLine[] {
   });
 }
 
-function mapLinks(raw: unknown): DocLink[] {
+function mapLinks(raw: unknown, docType?: string): DocLink[] {
   if (!Array.isArray(raw)) return [];
   return (raw as Record<string, unknown>[])
     .filter((d) => d && d.mk_id)
     .map((d) => ({
       mkId: String(d.mk_id),
       countCode: str(d.count_code) ?? "",
-      docType: str(d.doc_type) ?? "",
+      docType: str(d.doc_type) ?? docType ?? "",
     }));
+}
+
+// A bill's links, MK-style. Only sales orders carry a `doc_link_list`; bills
+// keep their relations in typed fields instead (verified on this account):
+// an invoice names the orders it was issued for in `sales_order_list`, a credit
+// note names the invoice it corrects in `bill_for_credit_note`. Neither carries
+// a doc_type, so the family is assigned here (an invoice is reported as
+// domestic — the kind resolution tries both bill types anyway). The reverse
+// invoice → credit notes direction has no field at all and is looked up in
+// `getDocument`.
+function mapBillLinks(raw: Record<string, unknown>): DocLink[] {
+  const links = mapLinks(raw.sales_order_list, "sales_order");
+  const bill = raw.bill_for_credit_note;
+  if (bill && typeof bill === "object" && (bill as Record<string, unknown>).mk_id) {
+    links.push(...mapLinks([bill], "sales_bill_domestic"));
+  }
+  return links;
 }
 
 function mapSummary(raw: Record<string, unknown>): DocSummary {
@@ -459,7 +476,7 @@ function mapDetail(raw: Record<string, unknown>): DocDetail {
     lastPaidDate: mkDate(raw.last_paid_date),
     validTo: mkDate(raw.valid_to),
     lines: mapLines(raw.product_list),
-    links: mapLinks(raw.doc_link_list),
+    links: [...mapLinks(raw.doc_link_list), ...mapBillLinks(raw)],
   };
 }
 
@@ -545,10 +562,43 @@ export async function getDocument(
     if (res.ok && res.data.mk_id) {
       const detail = mapDetail(res.data);
       if (kind === "order") detail.lines = await withShippedAmounts(detail);
+      if (kind === "invoice") detail.links.push(...(await creditNotesFor(detail)));
       return detail;
     }
   }
   return null;
+}
+
+// Credit notes issued against an invoice. MK stores the relation on the credit
+// note only (`bill_for_credit_note`), so the invoice side is a reverse lookup:
+// every credit note of the invoice's partner, kept where it points at this
+// invoice. One partner rarely has more than a page of credit notes; a failed
+// lookup yields no links rather than a failed document.
+async function creditNotesFor(detail: DocDetail): Promise<DocLink[]> {
+  const partnerMkId = detail.partner?.mkId;
+  if (!partnerMkId) return [];
+  try {
+    const res = await callMetakocka("search", {
+      doc_type: "sales_bill_credit_note",
+      result_type: "doc",
+      limit: SEARCH_PAGE_SIZE,
+      offset: 0,
+      query_advance: [{ type: "partner_mk_id", value: partnerMkId }],
+    });
+    if (!res.ok || !Array.isArray(res.data.result)) return [];
+    return (res.data.result as Record<string, unknown>[])
+      .filter((cn) => {
+        const bill = cn.bill_for_credit_note as Record<string, unknown> | undefined;
+        return bill && String(bill.mk_id) === detail.mkId;
+      })
+      .map((cn) => ({
+        mkId: String(cn.mk_id),
+        countCode: str(cn.count_code) ?? "",
+        docType: "sales_bill_credit_note",
+      }));
+  } catch {
+    return [];
+  }
 }
 
 // Per-line shipped quantity for a sales order. MK carries no such figure on

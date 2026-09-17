@@ -991,7 +991,11 @@ const CUSTOMER_RELATED: Record<DocKind, DocKind[]> = {
 function RelatedDocuments({ detail, scope, hrefBase }: { detail: DocDetail; scope: "customer" | "all"; hrefBase: string }) {
   const allowed = scope === "customer" ? CUSTOMER_RELATED[detail.kind] : null;
   const groups = new Map<string, { label: string; Icon: React.ElementType; kind: DocKind | null; items: DocLink[] }>();
+  const seen = new Set<string>();
   for (const l of detail.links) {
+    // MK lists a sales order in its own doc_link_list; never a related document.
+    if (l.mkId === detail.mkId || seen.has(l.mkId)) continue;
+    seen.add(l.mkId);
     const kind = linkKind(l.docType);
     if (allowed && (!kind || !allowed.includes(kind))) continue;
     const key = kind ?? l.docType;
@@ -1068,8 +1072,10 @@ function PaymentPanel({ detail }: { detail: DocDetail }) {
   const fully = remaining <= 0.005;
   const overdue = detail.payment === "overdue";
   const c = detail.currency;
+  // Rendered as one row of the framed document (the caller's divide-y draws
+  // the separators), not as a card of its own.
   return (
-    <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+    <div>
       <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
         <span className="text-[12px] font-semibold text-foreground">{credit ? "Refund" : "Payment"}</span>
         <PaymentBadge state={detail.payment} />
@@ -1598,7 +1604,7 @@ export function DocumentDetailSkeleton({
 
       {/* Payment (bills) */}
       {isBill && (
-        <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+        <div>
           <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
             <span className="text-[12px] font-semibold text-foreground">Payment</span>
             <Skeleton className="h-[20.5px] w-16 rounded-full" delay={540} />
