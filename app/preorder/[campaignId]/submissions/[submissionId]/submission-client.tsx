@@ -355,8 +355,12 @@ export default function SubmissionClient({
             </MoreMenu>
           </>
         }
-        navExtra={filledTabs.length > 0 ? <TabBar tabs={filledTabs} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} /> : undefined}
       />
+      {filledTabs.length > 1 && (
+        <div className="shrink-0 border-b border-border bg-background px-4 md:px-6 flex items-stretch">
+          <TabBar tabs={filledTabs} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
+        </div>
+      )}
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
