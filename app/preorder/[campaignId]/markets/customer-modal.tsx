@@ -365,27 +365,69 @@ export function CustomerModal({
                       />
                     </div>
                   </div>
-                  {!customer.countryIso && (
-                    <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/50 px-3 py-2.5 text-[11px] text-amber-800 dark:text-amber-200">
-                      {customer.countryRaw ? (
-                        <>
-                          Metakocka lists this partner&rsquo;s country as <span className="font-semibold">&ldquo;{customer.countryRaw}&rdquo;</span>, which we couldn&rsquo;t match to a country. Pick the right one — it applies to every campaign:
-                        </>
-                      ) : (
-                        <>Metakocka has no country on this partner&rsquo;s address. Pick one — it applies to every campaign:</>
-                      )}
-                      <CountrySelect
-                        value={null}
-                        onChange={(iso) => {
-                          if (iso) void saveDirectoryCountry(iso);
-                        }}
-                        countryNames={countryNames}
-                        placeholder={saving === "country" ? "Saving…" : "Set country in the directory…"}
-                        disabled={saving === "country"}
-                        className="mt-2 h-8 bg-background"
-                      />
-                    </div>
-                  )}
+                  {/* Directory country — shared by every campaign. Unresolved ⇒ amber
+                      prompt; manual ⇒ shows the override with a way back to Metakocka. */}
+                  {(() => {
+                    const manual = customer.countrySource === "manual";
+                    const unresolved = !customer.countryIso;
+                    return (
+                      <div
+                        className={cn(
+                          "rounded-lg border px-3 py-2.5 text-[11px]",
+                          unresolved
+                            ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200/60 dark:border-amber-800/50 text-amber-800 dark:text-amber-200"
+                            : "bg-muted/30 border-border text-muted-foreground",
+                        )}
+                      >
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="font-medium text-foreground">Country in the directory</span>
+                          <span className="text-[10px] text-muted-foreground">applies to every campaign</span>
+                          <div className="flex-1" />
+                          {manual && (
+                            <button
+                              type="button"
+                              onClick={() => void saveDirectoryCountry(null)}
+                              disabled={saving !== null}
+                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+                            >
+                              <RefreshCw className={cn("w-3 h-3", saving === "country" && "animate-spin")} /> Use Metakocka&rsquo;s value
+                            </button>
+                          )}
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                          <span className="inline-flex items-center gap-1.5 text-[12px] text-foreground">
+                            {customer.countryIso ? (
+                              <>
+                                <Flag iso={customer.countryIso} /> {customer.countryName}
+                                <span className="text-[10px] text-muted-foreground">
+                                  {manual ? "· set manually" : customer.countrySource === "home-fallback" ? "· home country" : "· from Metakocka"}
+                                </span>
+                              </>
+                            ) : customer.countryRaw ? (
+                              <>
+                                Metakocka says <span className="font-semibold">&ldquo;{customer.countryRaw}&rdquo;</span> — not a country we recognise.
+                              </>
+                            ) : (
+                              <>Metakocka has no country on this partner&rsquo;s address.</>
+                            )}
+                          </span>
+                          {manual && customer.countryRaw && (
+                            <span className="text-[10px] text-muted-foreground">Metakocka: &ldquo;{customer.countryRaw}&rdquo;</span>
+                          )}
+                        </div>
+                        <CountrySelect
+                          value={null}
+                          onChange={(iso) => {
+                            if (iso) void saveDirectoryCountry(iso);
+                          }}
+                          countryNames={countryNames}
+                          placeholder={saving === "country" ? "Saving…" : unresolved ? "Pick the right country…" : manual ? "Change the manual country…" : "Override with another country…"}
+                          disabled={saving === "country"}
+                          className="mt-2 h-8 bg-background"
+                        />
+                      </div>
+                    );
+                  })()}
                   <div>
                     <label className="text-[11px] font-medium text-muted-foreground">Internal note</label>
                     <Input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder="Why this customer is special…" className="mt-1 h-9 text-[12px]" />

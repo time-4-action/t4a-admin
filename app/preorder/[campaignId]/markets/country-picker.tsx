@@ -178,6 +178,9 @@ export function CountrySelect({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
+  // Enter only picks after the user typed or arrowed — never the first
+  // alphabetical country on an untouched list.
+  const [intent, setIntent] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -197,10 +200,14 @@ export function CountrySelect({
     return [...none, ...countries];
   }, [countryNames, q, noneLabel]);
 
-  useEffect(() => setActive(0), [q]);
+  useEffect(() => {
+    setActive(0);
+    if (q) setIntent(true);
+  }, [q]);
   useEffect(() => {
     if (!open) {
       setQ("");
+      setIntent(false);
       return;
     }
     // Start on the current value so Enter without typing keeps it.
@@ -260,13 +267,15 @@ export function CountrySelect({
               onKeyDown={(e) => {
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
+                  setIntent(true);
                   setActive((a) => Math.min(options.length - 1, a + 1));
                 } else if (e.key === "ArrowUp") {
                   e.preventDefault();
+                  setIntent(true);
                   setActive((a) => Math.max(0, a - 1));
                 } else if (e.key === "Enter") {
                   e.preventDefault();
-                  if (options[active]) pick(options[active]);
+                  if (intent && options[active]) pick(options[active]);
                 } else if (e.key === "Escape") {
                   e.preventDefault();
                   setOpen(false);
