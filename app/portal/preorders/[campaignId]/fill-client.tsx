@@ -28,10 +28,15 @@ import {
   ExternalLink,
   Info,
   ChevronRight,
+  User,
+  Building2,
+  Phone,
+  MapPin,
+  Truck,
 } from "lucide-react";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
 import { computeConfirmedTotals, flattenRows } from "@/types/preorder";
-import { vatIsMissing, vatLabel } from "@/lib/pricing";
+import { vatIsMissing, vatLabel, toCents, fromCents, splitGross, addVat } from "@/lib/pricing";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
@@ -100,6 +105,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
   const [flash, setFlash] = useState<string | null>(null);
   const [status, setStatus] = useState<PortalSubmission["status"]>("draft");
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [showRequest, setShowRequest] = useState(false); // confirmed order: reveal the original request
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestNote, setRequestNote] = useState("");
   const [requestBusy, setRequestBusy] = useState(false);
@@ -176,6 +182,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
   const currency = sheet?.currency ?? campaign?.currency ?? "EUR";
   // No configured VAT rate for this customer's country: nothing can be submitted.
   const vatMissing = vatIsMissing(campaign?.pricing);
+
   // Rows this customer cannot order (no consumer price) that still carry a quantity —
   // e.g. saved before the price was removed. They block submit until removed.
   const unpricedFilled = useMemo(
@@ -379,6 +386,9 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
 
   const submitted = status === "submitted" || status === "confirmed";
   const published = !!submission?.published && !!allocation;
+  // Once we confirmed the order, that is what the customer sees; the original request
+  // is one click away, not a second copy of the sheet.
+  const confirmedShown = !!(published && allocation && allocation.state === "ok");
   const registration = submission?.registration ?? { state: "none" as const, canRetry: false };
 
   const renderStatusCell = (rowId: string) => {
@@ -489,6 +499,23 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
         <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
           {/* Sheet */}
           <div className="min-w-0">
+            {/* Who is ordering — the same strip the document lists open with. */}
+            <div className="mb-4 rounded-2xl border border-border bg-surface px-4 py-3 flex items-start gap-3">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-lime-600/10 shrink-0">
+                {sheet.pricing?.kind === "person" ? <User className="h-4 w-4 text-lime-600" /> : <Building2 className="h-4 w-4 text-lime-600" />}
+              </span>
+              <div className="min-w-0">
+                <p className="text-[14px] font-semibold text-foreground truncate">{partnerName}</p>
+                <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-muted-foreground">
+                  {terms.phone && <span className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 shrink-0" /> {terms.phone}</span>}
+                  {terms.invoiceAddress && <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 shrink-0" /> {terms.invoiceAddress}</span>}
+                  {terms.shippingAddress && terms.shippingAddress !== terms.invoiceAddress && (
+                    <span className="inline-flex items-center gap-1.5"><Truck className="h-3.5 w-3.5 shrink-0" /> ships to {terms.shippingAddress}</span>
+                  )}
+                </div>
+              </div>
+              <span className="ml-auto text-[10px] text-muted-foreground shrink-0 hidden sm:inline">from our records · contact us if wrong</span>
+            </div>
             {locked && submitted && (
               <RegistrationBanner registration={registration} published={published} busy={busy === "retry"} onRetry={retryRegistration} />
             )}
@@ -504,16 +531,26 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
               </div>
             )}
 
-            {locked && submitted && (
+            {locked && submitted && !confirmedShown && (
               <h2 className="text-[13px] font-semibold text-foreground mb-2 flex items-center gap-2">
                 Your preorder request
                 <span className="text-[11px] font-normal text-muted-foreground">what you submitted{submission?.submittedAt ? ` on ${fmtDate(submission.submittedAt)}` : ""}</span>
               </h2>
             )}
+            {confirmedShown && (
+              <button
+                type="button"
+                onClick={() => setShowRequest((v) => !v)}
+                className="mb-3 inline-flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground"
+              >
+                <ChevronRight className={cn("w-3.5 h-3.5 transition-transform", showRequest && "rotate-90")} />
+                {showRequest ? "Hide" : "Show"} what you originally requested{submission?.submittedAt ? ` (${fmtDate(submission.submittedAt)})` : ""}
+              </button>
+            )}
 
             {/* One quiet frame for everything the customer needs to know while filling:
                 how they are priced, and how far they are from the section's discount. */}
-            {(sheet.pricing || orphanLines.length > 0 || unpricedFilled.length > 0 || (activeTab && (activeTab.tiers?.length ?? 0) > 0)) && (
+            {(!confirmedShown || showRequest) && (sheet.pricing || orphanLines.length > 0 || unpricedFilled.length > 0 || (activeTab && (activeTab.tiers?.length ?? 0) > 0)) && (
               <div className="mb-4 rounded-xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
                 <PricingBanner pricing={sheet.pricing} bare />
                 {orphanLines.length > 0 && (
@@ -545,7 +582,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
                 {activeTab && <TabTierBanner tab={activeTab} quantities={quantities} currency={currency} pricing={sheet.pricing} bare />}
               </div>
             )}
-            {!activeTab ? (
+            {confirmedShown && !showRequest ? null : !activeTab ? (
               <div className="text-center text-[13px] text-muted-foreground py-16">
                 {locked ? "No items in this preorder." : "This sheet has no tabs yet."}
               </div>
@@ -577,7 +614,33 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
           {/* Sidebar */}
           <aside className="lg:sticky lg:top-4 space-y-3">
             <div className="rounded-xl border border-border bg-surface overflow-hidden">
-            <OrderSummaryPanel campaign={sheet} quantities={quantities} currency={currency} confirmed={confirmedTotals} bare />
+            {confirmedShown && allocation && allocation.state === "ok" ? (
+              <div className="p-4 space-y-2">
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Your order</div>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[13px] text-muted-foreground">Items confirmed</span>
+                  <span className="text-[15px] font-semibold tabular-nums text-foreground">{allocation.allocation.allocatedQty}</span>
+                </div>
+                {allocation.allocation.allocatedQty !== allocation.allocation.requestedQty && (
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-[12px] text-muted-foreground">You requested</span>
+                    <span className="text-[12px] tabular-nums text-muted-foreground">{allocation.allocation.requestedQty}</span>
+                  </div>
+                )}
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[13px] text-muted-foreground">Order total</span>
+                  <span className="text-[18px] font-bold tabular-nums text-foreground">{fmtMoney(Number(allocation.allocation.sumAll ?? 0) || 0, allocation.allocation.currency ?? currency)}</span>
+                </div>
+                {sheet.pricing && <div className="text-[10px] text-muted-foreground text-right -mt-1">{vatLabel(sheet.pricing)}</div>}
+                {orderMkId && (
+                  <Link href={`/portal/orders/${encodeURIComponent(orderMkId)}`} className="inline-flex items-center gap-1 text-[12px] font-medium text-emerald-700 dark:text-emerald-300 hover:underline pt-1">
+                    View order <ExternalLink className="w-3 h-3" />
+                  </Link>
+                )}
+              </div>
+            ) : (
+              <OrderSummaryPanel campaign={sheet} quantities={quantities} currency={currency} confirmed={confirmedTotals} bare />
+            )}
             {campaign.effective.minOrderAmount && !locked && (
               <p className="text-[11px] text-muted-foreground px-4 -mt-2 pb-2">
                 Minimum order value: <span className="font-medium text-foreground">{fmtMoney(campaign.effective.minOrderAmount, currency)}</span>
@@ -674,23 +737,13 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
               </div>
             )}
 
-            {/* Who is ordering — Metakocka's data, read-only, tucked away. */}
-            <details className="rounded-xl border border-border bg-surface group">
-              <summary className="cursor-pointer list-none px-3 py-2 flex items-center gap-2 text-[12px] text-muted-foreground hover:text-foreground">
-                <ChevronRight className="w-3.5 h-3.5 transition-transform group-open:rotate-90" />
-                <span className="font-medium text-foreground truncate">{partnerName}</span>
-                <span className="ml-auto text-[11px]">your details</span>
-              </summary>
-              <dl className="px-3 pb-3 space-y-1.5 text-[12px]">
-                <ViewRow label="Invoice address" value={terms.invoiceAddress} />
-                <ViewRow label="Shipping address" value={terms.shippingAddress} />
-                <ViewRow label="Country" value={terms.country} />
-                <ViewRow label="Phone" value={terms.phone} />
-                {locked && <ViewRow label="Requested delivery" value={terms.deliveryDate ? fmtDate(terms.deliveryDate) : ""} />}
-                {locked && terms.comment && <ViewRow label="Comment" value={terms.comment} />}
-                <p className="text-[10px] text-muted-foreground pt-1">From our records — contact us if something is wrong.</p>
-              </dl>
-            </details>
+            {locked && (terms.deliveryDate || terms.comment) && (
+              <div className="rounded-xl border border-border bg-surface p-3 space-y-1.5">
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Delivery &amp; note</div>
+                {terms.deliveryDate && <ViewRow label="Requested delivery" value={fmtDate(terms.deliveryDate)} />}
+                {terms.comment && <ViewRow label="Comment" value={terms.comment} />}
+              </div>
+            )}
           </aside>
         </div>
       </div>
@@ -820,6 +873,18 @@ function YourOrderCard({
   if (allocation.state !== "ok") return null;
   const a: AllocationView = allocation.allocation;
   const total = a.sumAll != null ? Number(a.sumAll) : null;
+  const cur = a.currency ?? currency;
+  const rate = pricing?.vat.rate ?? null;
+  const gross = pricing?.basis === "rrp";
+  // Net / VAT of a gross or net figure at the customer's rate (display only; MK owns the sums).
+  const split = (v: number) => {
+    if (rate == null) return null;
+    const c = toCents(v);
+    const parts = gross ? splitGross(c, rate) : addVat(c, rate);
+    return { net: fromCents(parts.net), vat: fromCents(parts.vat), gross: fromCents(parts.gross) };
+  };
+  const totalSplit = total != null ? split(total) : null;
+  const changed = a.lines.filter((l) => l.status !== "full").length;
   return (
     <section className="mb-5 rounded-2xl border border-emerald-300/60 bg-emerald-50/60 dark:border-emerald-800/50 dark:bg-emerald-950/20 overflow-hidden">
       <div className="px-4 py-3 flex items-center gap-3 border-b border-emerald-200/60 dark:border-emerald-800/40">
@@ -827,8 +892,13 @@ function YourOrderCard({
         <div className="min-w-0 flex-1">
           <h2 className="text-[14px] font-semibold text-foreground">Your confirmed order</h2>
           <p className="text-[11px] text-muted-foreground">
-            Order {a.countCode} · Requested <span className="font-medium text-foreground tabular-nums">{a.requestedQty}</span> · Confirmed{" "}
-            <span className="font-medium text-emerald-700 dark:text-emerald-300 tabular-nums">{a.allocatedQty}</span> items
+            Order {a.countCode} · <span className="font-medium text-emerald-700 dark:text-emerald-300 tabular-nums">{a.allocatedQty}</span> of{" "}
+            <span className="font-medium text-foreground tabular-nums">{a.requestedQty}</span> requested items confirmed
+            {changed > 0 && (
+              <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 px-1.5 py-px text-[10px] font-medium">
+                {changed} line{changed === 1 ? "" : "s"} differ{changed === 1 ? "s" : ""} from your request
+              </span>
+            )}
           </p>
         </div>
         {orderMkId && (
@@ -842,37 +912,77 @@ function YourOrderCard({
           <thead>
             <tr className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
               <th className="text-left px-4 py-2">Product</th>
+              <th className="text-right px-2 py-2 w-28 hidden md:table-cell">
+                Unit price
+                {rate != null && <div className="text-[9px] normal-case tracking-normal font-medium text-muted-foreground/70">{gross ? "incl." : "excl."} VAT</div>}
+              </th>
               <th className="text-right px-2 py-2 w-24">Requested</th>
               <th className="text-right px-2 py-2 w-24">Confirmed</th>
-              <th className="text-right px-4 py-2 w-28 hidden sm:table-cell">Total</th>
+              {rate != null && rate > 0 && <th className="text-right px-2 py-2 w-24 hidden md:table-cell">VAT {rate}%</th>}
+              <th className="text-right px-4 py-2 w-28">Total</th>
             </tr>
           </thead>
           <tbody>
             {a.lines.map((l) => {
-              const tone =
-                l.status === "full"
-                  ? "text-emerald-700 dark:text-emerald-300"
-                  : l.status === "removed"
-                    ? "text-rose-600 dark:text-rose-400"
-                    : "text-amber-700 dark:text-amber-300";
+              const diff = l.allocatedQty - l.requestedQty;
+              const same = l.status === "full";
+              const tone = same
+                ? "text-emerald-700 dark:text-emerald-300"
+                : l.status === "removed"
+                  ? "text-rose-600 dark:text-rose-400"
+                  : "text-amber-700 dark:text-amber-300";
+              const note =
+                l.status === "removed"
+                  ? "not available"
+                  : l.status === "partial"
+                    ? `${diff} — partly available`
+                    : l.status === "added"
+                      ? "added by us"
+                      : l.status === "increased"
+                        ? `+${diff} — more than requested`
+                        : null;
+              const lineSplit = l.lineTotal != null ? split(l.lineTotal) : null;
               return (
-                <tr key={l.code} className="border-t border-emerald-200/40 dark:border-emerald-800/30">
+                <tr key={l.code} className={cn("border-t border-emerald-200/40 dark:border-emerald-800/30", !same && "bg-amber-50/50 dark:bg-amber-950/15")}>
                   <td className="px-4 py-2">
                     <div className="font-medium text-foreground truncate max-w-[28rem]">{l.name}</div>
-                    <div className="text-[10px] text-muted-foreground font-mono">{l.code}{l.status === "added" ? " · added" : ""}</div>
+                    <div className="text-[10px] text-muted-foreground font-mono">
+                      {l.code}
+                      {note && <span className={cn("ml-2 font-sans font-medium", tone)}>{note}</span>}
+                    </div>
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{l.requestedQty}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-muted-foreground hidden md:table-cell">{l.unitPriceWithTax != null ? fmtMoney(l.unitPriceWithTax, cur) : "—"}</td>
+                  <td className={cn("px-2 py-2 text-right tabular-nums", same ? "text-muted-foreground" : "text-muted-foreground line-through decoration-amber-500/60")}>{l.requestedQty}</td>
                   <td className={cn("px-2 py-2 text-right tabular-nums font-semibold", tone)}>{l.allocatedQty}</td>
-                  <td className="px-4 py-2 text-right tabular-nums hidden sm:table-cell">{l.lineTotal != null ? fmtMoney(l.lineTotal, a.currency ?? currency) : "—"}</td>
+                  {rate != null && rate > 0 && (
+                    <td className="px-2 py-2 text-right tabular-nums text-muted-foreground hidden md:table-cell">{lineSplit ? fmtMoney(lineSplit.vat, cur) : "—"}</td>
+                  )}
+                  <td className="px-4 py-2 text-right tabular-nums font-medium">{l.lineTotal != null ? fmtMoney(l.lineTotal, cur) : "—"}</td>
                 </tr>
               );
             })}
           </tbody>
           {total != null && (
-            <tfoot>
-              <tr className="border-t border-emerald-200/60 dark:border-emerald-800/40">
-                <td className="px-4 py-2 text-[11px] text-muted-foreground" colSpan={3}>Order total{pricing ? ` (${vatLabel(pricing)})` : ""}</td>
-                <td className="px-4 py-2 text-right tabular-nums font-semibold text-foreground">{fmtMoney(total, a.currency ?? currency)}</td>
+            <tfoot className="border-t border-emerald-200/60 dark:border-emerald-800/40">
+              {totalSplit && rate != null && rate > 0 && (
+                <>
+                  <tr>
+                    <td className="px-4 pt-2 pb-0.5 text-[11px] text-muted-foreground" colSpan={99}>
+                      <div className="flex justify-end gap-6 tabular-nums">
+                        <span>Net {fmtMoney(totalSplit.net, cur)}</span>
+                        <span>VAT {rate}% {fmtMoney(totalSplit.vat, cur)}</span>
+                      </div>
+                    </td>
+                  </tr>
+                </>
+              )}
+              <tr>
+                <td className="px-4 py-2 text-[12px] text-foreground font-medium" colSpan={99}>
+                  <div className="flex items-baseline justify-between">
+                    <span>Order total{pricing ? <span className="ml-1 text-[11px] font-normal text-muted-foreground">({vatLabel(pricing)})</span> : null}</span>
+                    <span className="text-[15px] font-bold tabular-nums">{fmtMoney(total, cur)}</span>
+                  </div>
+                </td>
               </tr>
             </tfoot>
           )}

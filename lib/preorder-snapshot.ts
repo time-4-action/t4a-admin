@@ -156,7 +156,10 @@ export function allocationFromDocument(
   const requested = new Map<string, { qty: number; name: string }>();
   for (const l of snap?.lines ?? []) {
     const prev = requested.get(l.code);
-    requested.set(l.code, { qty: (prev?.qty ?? 0) + l.qty, name: prev?.name ?? [l.name, l.variantLabel].filter(Boolean).join(" · ") });
+    requested.set(l.code, {
+      qty: (prev?.qty ?? 0) + l.qty,
+      name: prev?.name ?? [l.name, l.variantLabel && l.variantLabel !== l.name ? l.variantLabel : null].filter(Boolean).join(" · "),
+    });
   }
   const allocated = new Map<string, { qty: number; name: string; price: number | null; total: number; shipped: number; hasShipped: boolean }>();
   for (const l of order.lines) {

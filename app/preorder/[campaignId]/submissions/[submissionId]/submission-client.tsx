@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, useCallback, useRef, type ReactNode } fro
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { CheckboxRow } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
@@ -637,13 +638,12 @@ export default function SubmissionClient({
                 <p>
                   The Metakocka order <span className="font-mono text-foreground">{submission.mkSalesOrder.countCode}</span> will be <strong className="text-foreground">detached</strong> from this preorder (it stays hidden from the customer). A new order is created when they resubmit.
                 </p>
-                <label className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 cursor-pointer">
-                  <input type="checkbox" className="mt-0.5" checked={deleteInMk} onChange={(e) => setDeleteInMk(e.target.checked)} />
-                  <span>
-                    <span className="font-medium text-foreground">Also delete it in Metakocka</span>
-                    <span className="block text-[11px] text-muted-foreground">Otherwise staff must cancel it there by hand.</span>
-                  </span>
-                </label>
+                <CheckboxRow
+                  checked={deleteInMk}
+                  onCheckedChange={setDeleteInMk}
+                  title="Also delete it in Metakocka"
+                  hint="Otherwise staff must cancel it there by hand."
+                />
               </>
             ) : submission.mkOrder?.state === "pending" ? (
               <p className="text-amber-600 dark:text-amber-400">A registration is in progress — unlocking is refused until it settles.</p>
