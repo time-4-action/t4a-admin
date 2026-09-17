@@ -525,7 +525,6 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
 
         {/* Active tab editor */}
         <main className="flex-1 min-w-0 overflow-y-auto p-4 md:p-6">
-          <div className="max-w-[1360px]">
           {!activeTab ? (
             <div className="text-center text-[13px] text-muted-foreground py-20">
               <Layers className="w-6 h-6 mx-auto mb-2 text-muted-foreground/40" />
@@ -656,7 +655,6 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
               )}
             </div>
           )}
-          </div>
         </main>
       </div>
 
