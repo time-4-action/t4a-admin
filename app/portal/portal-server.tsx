@@ -53,10 +53,11 @@ export async function PortalDetailPage({ kind, mkId }: { kind: DocKind; mkId: st
     ? `/api/portal/documents/pdf?kind=${kind}&mkId=${encodeURIComponent(mkId)}`
     : undefined;
 
-  // Related documents are internal (offers, delivery notes, …) — hidden from customers.
+  // Related documents: only the customer-facing families (invoice ↔ sales order,
+  // invoice ↔ credit note), linked inside the portal.
   return (
     <div className="h-full">
-      <DocumentDetail detail={detail} pdfHref={pdfHref} backHref={`/portal/${slugFor(kind)}`} showLinks={false} wide />
+      <DocumentDetail detail={detail} pdfHref={pdfHref} backHref={`/portal/${slugFor(kind)}`} links="customer" linkHrefBase="/portal" wide />
     </div>
   );
 }

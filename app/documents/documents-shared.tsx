@@ -30,10 +30,12 @@ import {
 } from "lucide-react";
 import {
   DOC_KIND_LABELS,
+  DOC_KIND_SLUGS,
   isBillKind,
   type DocDetail,
   type DocKind,
   type DocLine,
+  type DocLink,
   type DocSummary,
   type MkPartnerRef,
   type PaymentState,
@@ -964,6 +966,75 @@ const DOC_TYPE_META: { test: RegExp; label: string; icon: React.ElementType }[] 
   { test: /order/, label: "Order", icon: ClipboardList },
 ];
 
+// The customer-facing document family of a linked MK document, or null for the
+// internal ones (delivery notes, work orders, …) that customers never see.
+function linkKind(docType: string): DocKind | null {
+  if (docType === "sales_offer") return "offer";
+  if (docType === "sales_order") return "order";
+  if (docType === "sales_bill_credit_note") return "credit-note";
+  if (docType === "sales_bill_domestic" || docType === "sales_bill_foreign") return "invoice";
+  return null;
+}
+
+// What a customer is shown as related: an invoice → its sales orders and credit
+// notes; a sales order → its invoices; a credit note → its invoices. Nothing else.
+const CUSTOMER_RELATED: Record<DocKind, DocKind[]> = {
+  invoice: ["order", "credit-note"],
+  order: ["invoice"],
+  "credit-note": ["invoice"],
+  offer: ["order"],
+};
+
+// Related documents as a row of the document: one line per family, the documents
+// as linked code chips. `scope` "customer" keeps only the families above and links
+// into the portal; "all" (admin) shows every typed link, internal ones unlinked.
+function RelatedDocuments({ detail, scope, hrefBase }: { detail: DocDetail; scope: "customer" | "all"; hrefBase: string }) {
+  const allowed = scope === "customer" ? CUSTOMER_RELATED[detail.kind] : null;
+  const groups = new Map<string, { label: string; Icon: React.ElementType; kind: DocKind | null; items: DocLink[] }>();
+  for (const l of detail.links) {
+    const kind = linkKind(l.docType);
+    if (allowed && (!kind || !allowed.includes(kind))) continue;
+    const key = kind ?? l.docType;
+    const meta = kind ? { label: DOC_KIND_LABELS[kind].plural, Icon: KIND_ICON[kind] } : { label: docTypeMeta(l.docType).label, Icon: docTypeMeta(l.docType).Icon };
+    const g = groups.get(key) ?? { ...meta, kind, items: [] };
+    g.items.push(l);
+    groups.set(key, g);
+  }
+  if (groups.size === 0) return null;
+  return (
+    <div className="px-4 py-3">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">Related documents</p>
+      <div className="space-y-2">
+        {Array.from(groups.values()).map((g) => (
+          <div key={g.label} className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground w-32 shrink-0">
+              <g.Icon className="h-3.5 w-3.5" /> {g.items.length === 1 && g.kind ? DOC_KIND_LABELS[g.kind].singular : g.label}
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {g.items.map((l) =>
+                g.kind ? (
+                  <Link
+                    key={l.mkId}
+                    href={`${hrefBase}/${DOC_KIND_SLUGS[g.kind]}/${encodeURIComponent(l.mkId)}`}
+                    className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 font-mono text-[12px] text-foreground hover:border-foreground/40 hover:bg-muted/40 transition-colors"
+                  >
+                    {l.countCode || l.mkId}
+                    <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                  </Link>
+                ) : (
+                  <span key={l.mkId} className="inline-flex items-center rounded-md border border-border/60 bg-muted/30 px-2 py-1 font-mono text-[12px] text-muted-foreground">
+                    {l.countCode || l.mkId}
+                  </span>
+                ),
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function docTypeMeta(docType: string): { label: string; Icon: React.ElementType } {
   for (const m of DOC_TYPE_META) {
     if (m.test.test(docType)) return { label: m.label, Icon: m.icon };
@@ -1042,16 +1113,19 @@ export function DocumentDetail({
   pdfHref,
   backHref,
   showPartner = false,
-  showLinks = true,
+  links = "all",
+  linkHrefBase = "/documents",
   wide = false,
 }: {
   detail: DocDetail;
   pdfHref?: string;
   backHref?: string;
   showPartner?: boolean;
-  // Related documents (offers, delivery notes, …) are internal — the admin
-  // view shows them, the customer portal passes false.
-  showLinks?: boolean;
+  // Related documents: "all" for the admin (every typed link), "customer" for the
+  // portal (only the families a customer is meant to see, linked into the portal),
+  // "none" to hide the row.
+  links?: "all" | "customer" | "none";
+  linkHrefBase?: string;
   wide?: boolean;
 }) {
   const isBill = isBillKind(detail.kind);
@@ -1242,31 +1316,8 @@ export function DocumentDetail({
         </div>
       )}
 
-      {/* Related documents — typed; team-only */}
-      {showLinks && detail.links.length > 0 && (
-        <div className="px-4 py-3.5">
-          <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">Related documents</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {detail.links.map((l) => {
-              const { label, Icon } = docTypeMeta(l.docType);
-              return (
-                <div
-                  key={l.mkId}
-                  className="flex items-center gap-2.5 rounded-xl border border-border bg-muted/20 px-3 py-2"
-                >
-                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-500/10 shrink-0">
-                    <Icon className="h-4 w-4 text-teal-500" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
-                    <p className="text-[12px] font-medium text-foreground truncate">{l.countCode || l.mkId}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Related documents */}
+      {links !== "none" && detail.links.length > 0 && <RelatedDocuments detail={detail} scope={links} hrefBase={linkHrefBase} />}
       </div>
     </div>
   );
