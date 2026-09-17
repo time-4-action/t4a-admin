@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { CampaignHeader } from "@/app/preorder/[campaignId]/campaign-nav";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +33,7 @@ import {
   Package,
   PencilLine,
   Layers,
+  Info,
   Settings2,
   Rocket,
   Eye,
@@ -1125,7 +1127,6 @@ function TierEditor({
   otherTabCount: number;
 }) {
   const tiers = useMemo(() => tab.tiers ?? [], [tab.tiers]);
-  const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
   // The ladder as every reader (partner sheet, review, sales order) will see it.
@@ -1154,177 +1155,198 @@ function TierEditor({
   const update = (id: string, patch: Partial<PreorderTier>) =>
     onChange(tiers.map((t) => (t.id === id ? { ...t, ...patch } : t)));
 
+  // Which tier row is in edit mode (inline inputs); every other row is read-only.
+  const [editing, setEditing] = useState<string | null>(null);
+
   function addTier() {
     const last = ladder[ladder.length - 1];
+    const id = uid();
     onChange([
       ...tiers,
       {
-        id: uid(),
+        id,
         name: `Tier ${tiers.length + 1}`,
         minAmount: last ? last.minAmount * 2 : 10000,
         discountPct: last ? Math.min(100, last.discountPct + 5) : 5,
       },
     ]);
-    setOpen(true);
+    setEditing(id);
   }
 
+  const best = ladder[ladder.length - 1];
+
   return (
-    <div>
-      {/* The summary line never changes shape — opening only adds the panel below. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-1 min-h-8">
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          className="group inline-flex items-center gap-1.5 text-left"
-        >
-          <Percent className="w-3.5 h-3.5 text-lime-700 dark:text-lime-400" />
-          <span className="text-[13px] font-semibold text-foreground group-hover:underline decoration-border underline-offset-4">Volume discounts</span>
-          <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
-        </button>
-        <span className="text-[12px] text-muted-foreground">
-          {ladder.length === 0
-            ? "none — this tab stays at list price"
-            : `${ladder.length} tier${ladder.length === 1 ? "" : "s"}, up to −${ladder[ladder.length - 1].discountPct}% from ${fmtMoney(ladder[ladder.length - 1].minAmount, currency)}`}
+    <section className="rounded-xl border border-border bg-surface overflow-hidden">
+      {/* header: title · info · summary · add */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 h-11">
+        <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
+          <Percent className="w-3.5 h-3.5 text-lime-700 dark:text-lime-400" /> Volume discounts
         </span>
-        {ladder.length > 0 && (
-          <div className="hidden lg:flex flex-wrap items-center gap-1">
-            {ladder.map((t) => (
-              <span
-                key={t.id}
-                className="inline-flex items-center gap-1 rounded-full bg-lime-100 dark:bg-lime-900/40 px-2 py-0.5 text-[11px] font-medium text-lime-700 dark:text-lime-300"
-                title={`${t.name || "Tier"}: −${t.discountPct}% from ${fmtMoney(t.minAmount, currency)}`}
-              >
-                {t.name || "Tier"} −{t.discountPct}%
-                <span className="text-lime-600/70 dark:text-lime-400/70 tabular-nums">
-                  {fmtMoney(t.minAmount, currency)}+
-                </span>
-              </span>
-            ))}
-          </div>
-        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button type="button" className="text-muted-foreground/60 hover:text-foreground" aria-label="How volume discounts work">
+              <Info className="w-3.5 h-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" align="start">
+            Spend enough inside <span className="font-medium">{tab.name || "this tab"}</span> and every line in it drops by that tier&rsquo;s
+            percentage. Only the highest tier reached applies; each tab counts on its own. Thresholds are the totals the partner sees, incl. VAT.
+          </TooltipContent>
+        </Tooltip>
+        <span className="text-[12px] text-muted-foreground tabular-nums">
+          {ladder.length === 0 ? "None — list price" : `${ladder.length} tier${ladder.length === 1 ? "" : "s"} · up to −${best.discountPct}% from ${fmtMoney(best.minAmount, currency)}`}
+        </span>
         <div className="flex-1" />
-        {warnings.length > 0 && (
-          <span className="inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400" title={warnings.join("\n")}>
-            <AlertTriangle className="w-3.5 h-3.5" /> {warnings.length} note{warnings.length === 1 ? "" : "s"}
-          </span>
+        {otherTabCount > 0 && tiers.length > 0 && (
+          <Button
+            variant="ghost"
+            size="xs"
+            className="h-7 text-muted-foreground"
+            onClick={() => {
+              onApplyToAllTabs();
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            }}
+            title={`Copy this ladder onto the other ${otherTabCount} tab${otherTabCount === 1 ? "" : "s"}, replacing theirs`}
+          >
+            {copied ? <Check className="w-3 h-3 text-lime-600" /> : <Copy className="w-3 h-3" />}
+            {copied ? "Copied" : "Copy to all tabs"}
+          </Button>
         )}
-        <Button variant="ghost" size="sm" className="h-8 text-muted-foreground" onClick={addTier}>
+        <Button size="sm" variant="outline" className="h-8 bg-background" onClick={addTier}>
           <Plus className="w-3.5 h-3.5" /> Add tier
         </Button>
       </div>
 
-      {open && (
-        <div className="mt-2 rounded-xl border border-border bg-surface px-4 py-4 space-y-3 max-w-[760px]">
-          {tiers.length === 0 ? (
-            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-border px-4 py-3">
-              <div className="min-w-0 flex-1">
-                <div className="text-[12.5px] font-medium text-foreground">No tiers yet</div>
-                <div className="text-[11.5px] text-muted-foreground">A first tier usually looks like −5% once the partner spends {fmtMoney(10000, currency)} in this tab.</div>
-              </div>
-              <Button size="sm" variant="outline" className="h-8 bg-background" onClick={addTier}>
-                <Plus className="w-3.5 h-3.5" /> Add tier
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              <div className="hidden sm:grid grid-cols-[minmax(0,320px)_150px_110px_32px] gap-2 text-[11px] font-medium text-muted-foreground px-1">
-                <span>Tier name</span>
-                <span>Spend at least</span>
-                <span>Discount</span>
-                <span />
-              </div>
-              {tiers.map((t, i) => (
-                <div key={t.id} className="grid grid-cols-[minmax(0,320px)_150px_110px_32px] gap-2 items-center">
-                  <Input
+      {/* rows */}
+      <div className="border-t border-border/60 divide-y divide-border/50">
+        {tiers.length === 0 && (
+          <div className="px-4 py-2.5 text-[12px] text-muted-foreground">No tiers — partners pay list price on this tab.</div>
+        )}
+        {[...tiers].sort((a, b) => a.minAmount - b.minAmount).map((t, i) => {
+          const isEditing = editing === t.id;
+          return (
+            <div
+              key={t.id}
+              className={cn(
+                "group/tier grid items-center gap-3 px-4 min-h-10",
+                "grid-cols-[20px_minmax(0,1fr)_150px_96px_64px]",
+                isEditing && "bg-lime-50/40 dark:bg-lime-950/10",
+              )}
+            >
+              <span className="flex size-5 items-center justify-center rounded-full bg-lime-500/12 text-[10px] font-semibold text-lime-700 dark:text-lime-400 tabular-nums">
+                {i + 1}
+              </span>
+              {isEditing ? (
+                <>
+                  <input
+                    autoFocus
                     value={t.name}
                     onChange={(e) => update(t.id, { name: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === "Escape") setEditing(null);
+                    }}
                     placeholder={`Tier ${i + 1}`}
-                    className="h-8 text-[12px] bg-background"
+                    className="h-8 min-w-0 rounded-md border border-border bg-background px-2 text-[12.5px] focus:border-ring focus:outline-none"
                     aria-label="Tier name"
                   />
                   <div className="relative">
-                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground pointer-events-none">
-                      {currency}
-                    </span>
-                    <Input
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground pointer-events-none">from</span>
+                    <input
                       type="number"
                       min={0}
                       step={100}
                       value={t.minAmount || ""}
                       onChange={(e) => update(t.id, { minAmount: Math.max(0, Number(e.target.value) || 0) })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === "Escape") setEditing(null);
+                      }}
                       placeholder="0"
-                      className="h-8 text-[12px] bg-background pl-9 text-right tabular-nums no-spinner"
-                      aria-label="Threshold"
+                      className="h-8 w-full rounded-md border border-border bg-background pl-10 pr-2 text-right text-[12.5px] tabular-nums no-spinner focus:border-ring focus:outline-none"
+                      aria-label="Order threshold"
                     />
                   </div>
                   <div className="relative">
-                    <Input
+                    <input
                       type="number"
                       min={0}
                       max={100}
                       step={0.5}
                       value={t.discountPct || ""}
-                      onChange={(e) =>
-                        update(t.id, { discountPct: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })
-                      }
+                      onChange={(e) => update(t.id, { discountPct: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === "Escape") setEditing(null);
+                      }}
                       placeholder="0"
-                      className="h-8 text-[12px] bg-background pr-6 text-right tabular-nums no-spinner"
+                      className="h-8 w-full rounded-md border border-border bg-background pl-2 pr-6 text-right text-[12.5px] tabular-nums no-spinner focus:border-ring focus:outline-none"
                       aria-label="Discount percent"
                     />
-                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground pointer-events-none">
-                      %
-                    </span>
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground pointer-events-none">%</span>
                   </div>
+                </>
+              ) : (
+                <>
+                  <span className={cn("text-[13px] truncate", t.name.trim() ? "text-foreground font-medium" : "text-muted-foreground italic")}>
+                    {t.name.trim() || "Unnamed tier"}
+                  </span>
+                  <span className="text-[12.5px] text-muted-foreground tabular-nums">
+                    from <span className="text-foreground">{fmtMoney(t.minAmount, currency)}</span>
+                  </span>
+                  <span className="text-[13px] font-semibold text-lime-700 dark:text-lime-400 tabular-nums text-right pr-1">−{t.discountPct}%</span>
+                </>
+              )}
+              <div className="flex items-center justify-end gap-0.5">
+                {isEditing ? (
                   <button
                     type="button"
-                    onClick={() => onChange(tiers.filter((x) => x.id !== t.id))}
-                    className="w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                    aria-label="Remove tier"
+                    onClick={() => setEditing(null)}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-lime-700 dark:text-lime-400 hover:bg-lime-500/12"
+                    aria-label="Done"
+                    title="Done"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Check className="w-3.5 h-3.5" />
                   </button>
-                </div>
-              ))}
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setEditing(t.id)}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-muted opacity-0 group-hover/tier:opacity-100 focus-visible:opacity-100 transition-opacity"
+                    aria-label="Edit tier"
+                    title="Edit"
+                  >
+                    <PencilLine className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange(tiers.filter((x) => x.id !== t.id));
+                    if (editing === t.id) setEditing(null);
+                  }}
+                  className={cn(
+                    "flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-opacity",
+                    !isEditing && "opacity-0 group-hover/tier:opacity-100 focus-visible:opacity-100",
+                  )}
+                  aria-label="Remove tier"
+                  title="Remove"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
-          )}
-
-          {warnings.length > 0 && (
-            <ul className="space-y-0.5">
-              {warnings.map((w) => (
-                <li key={w} className="text-[11px] text-amber-600 dark:text-amber-400">
-                  {w}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <p className="text-[11px] leading-relaxed text-muted-foreground max-w-prose">
-            Spend enough inside <span className="font-medium text-foreground">{tab.name || "this tab"}</span> and every line in it drops by that tier&rsquo;s percentage.
-            Only the highest tier reached applies; each tab counts on its own. Thresholds are the totals the partner sees, incl. VAT.
-          </p>
-
-          {otherTabCount > 0 && tiers.length > 0 && (
-            <div className="flex items-center justify-end pt-1">
-              <Button
-                variant="ghost"
-                size="xs"
-                className="h-7 text-muted-foreground shrink-0"
-                onClick={() => {
-                  onApplyToAllTabs();
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                }}
-                title={`Copy this ladder onto the other ${otherTabCount} tab${otherTabCount === 1 ? "" : "s"}, replacing theirs`}
-              >
-                {copied ? <Check className="w-3 h-3 text-lime-600" /> : <Copy className="w-3 h-3" />}
-                {copied ? "Copied to all tabs" : `Copy to all ${otherTabCount + 1} tabs`}
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+          );
+        })}
+        {warnings.length > 0 && (
+          <ul className="px-4 py-2 space-y-0.5 bg-amber-50/60 dark:bg-amber-950/20">
+            {warnings.map((w) => (
+              <li key={w} className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> {w}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
   );
 }
 
