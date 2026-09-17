@@ -1165,8 +1165,9 @@ function TierEditor({
   }
 
   return (
-    <div className={cn("rounded-xl", open && "border border-border bg-surface")}>
-      <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-1.5 px-1", open && "px-4 py-3")}>
+    <div>
+      {/* The summary line never changes shape — opening only adds the panel below. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-1 min-h-8">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
@@ -1204,13 +1205,13 @@ function TierEditor({
             <AlertTriangle className="w-3.5 h-3.5" /> {warnings.length} note{warnings.length === 1 ? "" : "s"}
           </span>
         )}
-        <Button variant={open ? "outline" : "ghost"} size="sm" className={cn("h-8", open && "bg-background", !open && "text-muted-foreground")} onClick={addTier}>
+        <Button variant="ghost" size="sm" className="h-8 text-muted-foreground" onClick={addTier}>
           <Plus className="w-3.5 h-3.5" /> Add tier
         </Button>
       </div>
 
       {open && (
-        <div className="border-t border-border px-4 py-4 space-y-3">
+        <div className="mt-2 rounded-xl border border-border bg-surface px-4 py-4 space-y-3">
           <p className="rounded-lg bg-muted/40 px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
             Reach a spend inside <span className="font-medium text-foreground">{tab.name || "this tab"}</span> and every
             line in it drops by that tier&rsquo;s percentage. Tiers don&rsquo;t stack — only the highest one reached
