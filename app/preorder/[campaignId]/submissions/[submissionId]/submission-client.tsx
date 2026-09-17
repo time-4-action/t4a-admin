@@ -392,18 +392,17 @@ export default function SubmissionClient({
               </div>
             )}
 
-            {/* 1 · Requested preorder */}
-            <section>
-              <div className="flex flex-wrap items-center gap-2 mb-2">
+            {/* 1 · Requested preorder — one frame: title · provenance · context · lines */}
+            <section className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
+              <div className="px-4 py-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
                 <h2 className="text-[13px] font-semibold text-foreground">Requested preorder</h2>
                 <span className="text-[11px] text-muted-foreground">
                   what the customer submitted{submission.submittedAt ? ` · ${fmtDateTime(submission.submittedAt)}` : ""}
                   {submission.submitSource === "admin" ? ` · filled by ${submission.submittedBy ?? "admin"}` : ""}
                 </span>
-              </div>
               {snap && (
                 <p
-                  className="mb-3 text-[12px] text-muted-foreground flex flex-wrap items-center gap-x-1.5"
+                  className="basis-full text-[12px] text-muted-foreground flex flex-wrap items-center gap-x-1.5"
                   title={`Price list: ${CONFIG_SOURCE_LABELS[snap.sources.pricelist]} · Currency: ${CONFIG_SOURCE_LABELS[snap.sources.currency]}`}
                 >
                   {snap.market ? <MarketChip name={snap.market.name} color="sky" /> : <span>No market</span>}
@@ -427,14 +426,15 @@ export default function SubmissionClient({
                   )}
                 </p>
               )}
+              </div>
               {/* What the customer saw while filling: how they are priced and the discount they reached. */}
               {sheet.pricing && activeTab && (
-                <div className="mb-3 rounded-xl border border-border bg-surface overflow-hidden">
+                <div className="bg-muted/10">
                   <SheetContextBar pricing={sheet.pricing} tab={activeTab} quantities={quantities} currency={currency} />
                 </div>
               )}
               {isLegacy && (
-                <div className="mb-3 rounded-lg border border-border bg-muted/30 px-3 py-2 text-[12px] text-muted-foreground flex items-center gap-2">
+                <div className="bg-muted/30 px-4 py-2 text-[12px] text-muted-foreground flex items-center gap-2">
                   <Info className="w-3.5 h-3.5 shrink-0" /> Legacy submission (before immediate Metakocka registration) — shown with the campaign&rsquo;s current prices.
                 </div>
               )}
@@ -449,9 +449,10 @@ export default function SubmissionClient({
                   extraHeader={legacyConfirmed ? <th className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-2 text-left w-40">Fulfilment</th> : undefined}
                   renderExtraCell={legacyConfirmed ? renderLegacyCell : undefined}
                   pricing={sheet.pricing}
+                  bare
                 />
               ) : (
-                <div className="text-center text-[13px] text-muted-foreground py-12 rounded-xl border border-dashed border-border">No items in this preorder.</div>
+                <div className="text-center text-[13px] text-muted-foreground py-12">No items in this preorder.</div>
               )}
             </section>
 
@@ -467,11 +468,12 @@ export default function SubmissionClient({
             />
           </div>
 
-          <aside className="lg:sticky lg:top-4 space-y-3">
-            <OrderSummaryPanel campaign={sheet} quantities={quantities} currency={currency} confirmed={legacyConfirmed} />
+          <aside className="lg:sticky lg:top-4">
+            <div className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
+            <OrderSummaryPanel campaign={sheet} quantities={quantities} currency={currency} confirmed={legacyConfirmed} bare />
 
             {/* 3 · Customer visibility */}
-            <div className="rounded-xl border border-border bg-surface p-4 space-y-2.5 text-[12px]">
+            <div className="p-4 space-y-2.5 text-[12px]">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Customer visibility</div>
                 <VisibilityBadge published={published} />
@@ -510,7 +512,7 @@ export default function SubmissionClient({
             </div>
 
             {/* Metakocka registration */}
-            <div className="rounded-xl border border-border bg-surface p-4 space-y-2.5 text-[12px]">
+            <div className="p-4 space-y-2.5 text-[12px]">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Metakocka</div>
                 <MkOrderStateBadge state={mkState} />
@@ -569,7 +571,7 @@ export default function SubmissionClient({
             </div>
 
             {/* Partner details */}
-            <div className="rounded-xl border border-border bg-surface p-4 space-y-2 text-[12px]">
+            <div className="p-4 space-y-2 text-[12px]">
               <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Partner details</div>
               {submission.partnerEmail && <Detail icon={Mail} value={submission.partnerEmail} />}
               {t.phone && <Detail icon={Phone} value={t.phone} />}
@@ -581,6 +583,7 @@ export default function SubmissionClient({
               {!submission.partnerEmail && !t.phone && !t.invoiceAddress && !t.shippingAddress && !t.comment && (
                 <p className="text-muted-foreground">No additional details provided.</p>
               )}
+            </div>
             </div>
           </aside>
         </div>
@@ -719,7 +722,7 @@ function MkOrderPanel({
 }) {
   const state = submission.mkOrder?.state ?? (submission.mkSalesOrder ? "legacy" : null);
   const head = (
-    <div className="flex flex-wrap items-center gap-2 mb-2">
+    <div className="flex flex-wrap items-center gap-2 px-4 py-3">
       <h2 className="text-[13px] font-semibold text-foreground">Current Metakocka order</h2>
       <span className="text-[11px] text-muted-foreground">what exists in Metakocka right now</span>
       <div className="flex-1" />
@@ -738,17 +741,17 @@ function MkOrderPanel({
 
   if (submission.status !== "submitted" && submission.status !== "confirmed") {
     return (
-      <section>
+      <section className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
         {head}
-        <div className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-[12px] text-muted-foreground">Not submitted yet — no order exists.</div>
+        <div className="px-4 py-6 text-center text-[12px] text-muted-foreground">Not submitted yet — no order exists.</div>
       </section>
     );
   }
   if (state === "pending") {
     return (
-      <section>
+      <section className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
         {head}
-        <div className="rounded-xl border border-sky-200/70 bg-sky-50 dark:border-sky-800/50 dark:bg-sky-950/30 px-4 py-4 text-[12px] text-sky-800 dark:text-sky-200 flex items-center gap-2">
+        <div className="bg-sky-50/70 dark:bg-sky-950/30 px-4 py-3 text-[12px] text-sky-800 dark:text-sky-200 flex items-center gap-2">
           <Loader2 className="w-4 h-4 animate-spin shrink-0" /> Registering the order in Metakocka…
         </div>
       </section>
@@ -756,9 +759,9 @@ function MkOrderPanel({
   }
   if (state === "failed" || !submission.mkSalesOrder) {
     return (
-      <section>
+      <section className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
         {head}
-        <div className="rounded-xl border border-rose-200/70 bg-rose-50 dark:border-rose-800/50 dark:bg-rose-950/30 px-4 py-4 text-[12px] text-rose-800 dark:text-rose-200 flex items-start gap-3">
+        <div className="bg-rose-50/70 dark:bg-rose-950/30 px-4 py-3 text-[12px] text-rose-800 dark:text-rose-200 flex items-start gap-3">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
           <div className="min-w-0 flex-1">
             <div className="font-medium">No Metakocka order yet{state === "failed" ? " — the registration failed" : ""}.</div>
@@ -773,9 +776,9 @@ function MkOrderPanel({
   }
   if (allocation.state === "missing") {
     return (
-      <section>
+      <section className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
         {head}
-        <div className="rounded-xl border border-rose-200/70 bg-rose-50 dark:border-rose-800/50 dark:bg-rose-950/30 px-4 py-4 text-[12px] text-rose-800 dark:text-rose-200 flex items-start gap-3">
+        <div className="bg-rose-50/70 dark:bg-rose-950/30 px-4 py-3 text-[12px] text-rose-800 dark:text-rose-200 flex items-start gap-3">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
           <div className="min-w-0 flex-1">
             <div className="font-medium">Order {submission.mkSalesOrder.countCode} no longer exists in Metakocka.</div>
@@ -787,9 +790,9 @@ function MkOrderPanel({
   }
   if (allocation.state === "unavailable") {
     return (
-      <section>
+      <section className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
         {head}
-        <div className="rounded-xl border border-amber-300/70 bg-amber-50 dark:border-amber-800/50 dark:bg-amber-950/30 px-4 py-4 text-[12px] text-amber-900 dark:text-amber-200 flex items-center gap-2">
+        <div className="bg-amber-50/80 dark:bg-amber-950/30 px-4 py-3 text-[12px] text-amber-900 dark:text-amber-200 flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0" /> Metakocka is not reachable right now — {allocation.error}
         </div>
       </section>
@@ -799,10 +802,10 @@ function MkOrderPanel({
   const a: AllocationView = allocation.allocation;
   const diff = a.allocatedQty - a.requestedQty;
   return (
-    <section>
+    <section className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
       {head}
-      <div className="rounded-2xl border border-border bg-surface overflow-hidden">
-        <div className="px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border text-[12px]">
+      <div>
+        <div className="px-4 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border/60 bg-muted/10 text-[12px]">
           <span className="inline-flex items-center gap-1.5 font-mono text-foreground">{a.countCode}</span>
           {a.mkStatusDesc && <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{a.mkStatusDesc}</span>}
           <span className="text-muted-foreground">
