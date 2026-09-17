@@ -357,24 +357,33 @@ function HeaderFilter({
   options: { value: string; label: React.ReactNode; count?: number }[];
 }) {
   const active = value !== "all";
+  const picked = options.find((o) => o.value === value);
   return (
     <Select value={value} onValueChange={onChange}>
+      {/* Custom trigger content: the heading alone when unfiltered, heading + the
+          pick when filtered. (SelectValue would echo the "all" item's row.) */}
       <SelectTrigger
         size="sm"
         aria-label={`Filter by ${label.toLowerCase()}`}
         className={cn(
-          "h-6 max-w-full gap-1 rounded-md border-0 bg-transparent px-1.5 -ml-1.5 shadow-none text-[10px] font-semibold uppercase tracking-wider",
-          "hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring dark:bg-transparent dark:hover:bg-muted [&_svg]:size-3",
-          "*:data-[slot=select-value]:normal-case *:data-[slot=select-value]:tracking-normal",
-          active ? "text-lime-700 dark:text-lime-400" : "text-muted-foreground hover:text-foreground",
+          "group/h h-7 max-w-full gap-1 rounded-md border-0 bg-transparent px-1.5 -ml-1.5 shadow-none",
+          "hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring dark:bg-transparent dark:hover:bg-muted",
+          "[&>svg]:size-3 [&>svg]:opacity-0 hover:[&>svg]:opacity-60 data-[state=open]:[&>svg]:opacity-60",
+          active ? "[&>svg]:opacity-60" : "",
         )}
       >
-        <SelectValue placeholder={label} />
+        <span className={cn("text-[10px] font-semibold uppercase tracking-wider", active ? "text-lime-700 dark:text-lime-400" : "text-muted-foreground group-hover/h:text-foreground")}>
+          {label}
+        </span>
+        {active && picked && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-lime-500/12 text-lime-700 dark:text-lime-400 px-1.5 h-5 text-[11px] font-medium normal-case tracking-normal max-w-[10rem] truncate">
+            {picked.label}
+          </span>
+        )}
       </SelectTrigger>
       <SelectContent align="start">
         <SelectItem value="all" className="text-[12px]">
-          <span className="uppercase tracking-wider font-semibold text-[10px]">{label}</span>
-          <span className="ml-1 text-muted-foreground">all</span>
+          <span className="text-muted-foreground">All</span>
         </SelectItem>
         {options.map((o) => (
           <SelectItem key={o.value} value={o.value} className="text-[12px]">
