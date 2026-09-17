@@ -453,102 +453,109 @@ export function CustomerModal({
                   </div>
 
                   {(() => {
-                    const manual = customer.countrySource === "manual";
-                    const unresolved = !customer.countryIso;
-                    const picker = (
-                      <CountrySelect
-                        value={null}
-                        onChange={(iso) => {
-                          if (iso) {
-                            setDirPick(false);
-                            void saveDirectoryCountry(iso);
-                          }
-                        }}
-                        countryNames={countryNames}
-                        placeholder={saving === "country" ? "Saving…" : unresolved ? "Pick the right country…" : "Pick another country…"}
-                        disabled={saving === "country"}
-                        className="h-9 text-[13px] bg-background"
-                      />
-                    );
-                    if (unresolved) {
-                      return (
-                        <div className="rounded-xl border bg-amber-50 dark:bg-amber-950/30 border-amber-200/60 dark:border-amber-800/50 p-4">
-                          <div className="text-[13px] font-semibold text-foreground">Country in the directory</div>
-                          <div className="mt-1 text-[12px] text-amber-800 dark:text-amber-200">
-                            {customer.countryRaw ? (
-                              <>Metakocka says <span className="font-semibold">&ldquo;{customer.countryRaw}&rdquo;</span> — not a country we recognise. Pick the right one; it applies to every campaign.</>
-                            ) : (
-                              <>Metakocka has no country on this partner&rsquo;s address. Pick one; it applies to every campaign.</>
-                            )}
+                    const dirBlock = (() => {
+                        const manual = customer.countrySource === "manual";
+                        const unresolved = !customer.countryIso;
+                        const picker = (
+                          <CountrySelect
+                            value={null}
+                            onChange={(iso) => {
+                              if (iso) {
+                                setDirPick(false);
+                                void saveDirectoryCountry(iso);
+                              }
+                            }}
+                            countryNames={countryNames}
+                            placeholder={saving === "country" ? "Saving…" : unresolved ? "Pick the right country…" : "Pick another country…"}
+                            disabled={saving === "country"}
+                            className="h-9 text-[13px] bg-background"
+                          />
+                        );
+                        if (unresolved) {
+                          return (
+                            <div className="rounded-xl border bg-amber-50 dark:bg-amber-950/30 border-amber-200/60 dark:border-amber-800/50 p-4">
+                              <div className="text-[13px] font-semibold text-foreground">Country in the directory</div>
+                              <div className="mt-1 text-[12px] text-amber-800 dark:text-amber-200">
+                                {customer.countryRaw ? (
+                                  <>Metakocka says <span className="font-semibold">&ldquo;{customer.countryRaw}&rdquo;</span> — not a country we recognise. Pick the right one; it applies to every campaign.</>
+                                ) : (
+                                  <>Metakocka has no country on this partner&rsquo;s address. Pick one; it applies to every campaign.</>
+                                )}
+                              </div>
+                              <div className="mt-3">{picker}</div>
+                            </div>
+                          );
+                        }
+                        // Resolved: one quiet line. The picker only appears on demand.
+                        return (
+                          <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-[12px]">
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                              <span className="text-muted-foreground">Directory country</span>
+                              <span className="inline-flex items-center gap-1.5 text-foreground font-medium">
+                                <Flag iso={customer.countryIso} /> {customer.countryName}
+                              </span>
+                              <span className="text-[11px] text-muted-foreground">
+                                {manual ? "set manually" : customer.countrySource === "home-fallback" ? "home country" : "from Metakocka"}
+                                {manual && customer.countryRaw ? ` · Metakocka says “${customer.countryRaw}”` : ""}
+                                {" · shared by every campaign"}
+                              </span>
+                              <div className="flex-1" />
+                              {manual && (
+                                <button
+                                  type="button"
+                                  onClick={() => void saveDirectoryCountry(null)}
+                                  disabled={saving !== null}
+                                  className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+                                >
+                                  <RefreshCw className={cn("w-3 h-3", saving === "country" && "animate-spin")} /> Use Metakocka&rsquo;s value
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setDirPick((v) => !v)}
+                                className="inline-flex items-center gap-1 text-[11px] font-medium text-lime-700 dark:text-lime-400 hover:underline"
+                              >
+                                {dirPick ? "Cancel" : "Change"}
+                              </button>
+                            </div>
+                            {dirPick && <div className="mt-2">{picker}</div>}
                           </div>
-                          <div className="mt-3">{picker}</div>
-                        </div>
-                      );
-                    }
-                    // Resolved: one quiet line. The picker only appears on demand.
+                        );
+                    })();
+                    const unresolved = !customer.countryIso;
                     return (
-                      <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-[12px]">
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                          <span className="text-muted-foreground">Directory country</span>
-                          <span className="inline-flex items-center gap-1.5 text-foreground font-medium">
-                            <Flag iso={customer.countryIso} /> {customer.countryName}
-                          </span>
-                          <span className="text-[11px] text-muted-foreground">
-                            {manual ? "set manually" : customer.countrySource === "home-fallback" ? "home country" : "from Metakocka"}
-                            {manual && customer.countryRaw ? ` · Metakocka says “${customer.countryRaw}”` : ""}
-                            {" · shared by every campaign"}
-                          </span>
-                          <div className="flex-1" />
-                          {manual && (
-                            <button
-                              type="button"
-                              onClick={() => void saveDirectoryCountry(null)}
-                              disabled={saving !== null}
-                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
-                            >
-                              <RefreshCw className={cn("w-3 h-3", saving === "country" && "animate-spin")} /> Use Metakocka&rsquo;s value
-                            </button>
+                      <>
+                      {/* Rarely needed: the directory country and a per-campaign country. */}
+                      <div className="rounded-xl border border-dashed border-border">
+                        <button
+                          type="button"
+                          onClick={() => setAdvanced((v) => !v)}
+                          className="flex w-full items-center gap-2 px-4 py-3 text-left text-[12px] font-medium text-muted-foreground hover:text-foreground"
+                        >
+                          {advanced || draft.countryIso || unresolved ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                          Advanced
+                          {draft.countryIso && (
+                            <span className="ml-1 rounded-full bg-lime-500/15 text-lime-700 dark:text-lime-400 px-1.5 text-[10px] font-semibold">country overridden</span>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => setDirPick((v) => !v)}
-                            className="inline-flex items-center gap-1 text-[11px] font-medium text-lime-700 dark:text-lime-400 hover:underline"
-                          >
-                            {dirPick ? "Cancel" : "Change"}
-                          </button>
-                        </div>
-                        {dirPick && <div className="mt-2">{picker}</div>}
+                        </button>
+                        {(advanced || draft.countryIso || unresolved) && (
+                          <div className="px-4 pb-4 space-y-4">
+                            {dirBlock}
+                            <Field label="Country in this campaign only" hint="Treat the customer as another country here without touching the directory. Almost never needed — fix the directory country instead.">
+                              <CountrySelect
+                                value={draft.countryIso}
+                                onChange={(iso) => setDraft({ ...draft, countryIso: iso })}
+                                countryNames={countryNames}
+                                noneLabel={`Same as directory (${customer.countryIso ? (countryNames[customer.countryIso] ?? customer.countryIso) : "unknown"})`}
+                                className="h-10 text-[13px] md:max-w-[420px]"
+                              />
+                            </Field>
+                          </div>
+                        )}
                       </div>
+                      </>
                     );
                   })()}
-
-                  {/* Rarely needed: a per-campaign country that differs from the directory. */}
-                  <div className="rounded-xl border border-dashed border-border">
-                    <button
-                      type="button"
-                      onClick={() => setAdvanced((v) => !v)}
-                      className="flex w-full items-center gap-2 px-4 py-3 text-left text-[12px] font-medium text-muted-foreground hover:text-foreground"
-                    >
-                      {advanced || draft.countryIso ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                      Advanced
-                      {draft.countryIso && (
-                        <span className="ml-1 rounded-full bg-lime-500/15 text-lime-700 dark:text-lime-400 px-1.5 text-[10px] font-semibold">country overridden</span>
-                      )}
-                    </button>
-                    {(advanced || draft.countryIso) && (
-                      <div className="px-4 pb-4">
-                        <Field label="Country in this campaign only" hint="Treat the customer as another country here without touching the directory. Almost never needed — fix the directory country instead.">
-                          <CountrySelect
-                            value={draft.countryIso}
-                            onChange={(iso) => setDraft({ ...draft, countryIso: iso })}
-                            countryNames={countryNames}
-                            noneLabel={`Same as directory (${customer.countryIso ? (countryNames[customer.countryIso] ?? customer.countryIso) : "unknown"})`}
-                            className="h-10 text-[13px] md:max-w-[420px]"
-                          />
-                        </Field>
-                      </div>
-                    )}
-                  </div>
                 </div>
               )}
 
