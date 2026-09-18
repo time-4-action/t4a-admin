@@ -150,12 +150,14 @@ async function markFailed(id: Types.ObjectId, error: string, buyerOrder: string)
 }
 
 // Build the put_document payload from the FROZEN snapshot: the order contains exactly
-// what the customer submitted, at the prices they saw, with each tab's earned volume
-// discount baked into the unit price (the document carries no price list and no
-// document-level discount, so the price must already be final). The VAT treatment is
-// the snapshot's too: a company's lines go as NET price + tax_factor (0 when zero-rated,
-// the rate when the layer charges companies), an individual's as the GROSS RRP + the
-// country's tax_factor (MK backs out the VAT).
+// what the customer submitted, at the prices they saw. Each line goes out as the LIST
+// unit price the customer was shown (`unitPrice`, before the tier) plus the earned
+// volume tier as the line's `discount` % — MK then shows price and discount
+// separately, like a hand-entered order, instead of one opaque net figure (the
+// document carries no price list and no document-level discount). The VAT treatment
+// is the snapshot's too: a company's lines go as NET price + tax_factor (0 when
+// zero-rated, the rate when the layer charges companies), an individual's as the
+// GROSS RRP + the country's tax_factor (MK backs out the VAT).
 async function buildOrderInput(
   doc: IPreorderSubmission,
   port: MkOrderPort,
@@ -193,10 +195,13 @@ async function buildOrderInput(
     if (l.unitGross == null || l.unitNet == null) {
       return { ok: false, error: `Line ${l.code} carries no frozen VAT figures — unlock and resubmit.` };
     }
+    // List price = the frozen pre-tier unit in the customer's basis (gross RRP for an
+    // individual, net partner price for a company); the tier rides as `discount`.
+    const discount = l.tierPct && l.tierPct > 0 ? l.tierPct : undefined;
     lines.push(
       pricing.basis === "rrp"
-        ? { code: l.code, amount: l.qty, priceWithTax: l.unitGross, taxFactor: factor, tax }
-        : { code: l.code, amount: l.qty, price: l.unitNet, taxFactor: factor, tax },
+        ? { code: l.code, amount: l.qty, priceWithTax: l.unitPrice, ...(discount ? { discount } : {}), taxFactor: factor, tax }
+        : { code: l.code, amount: l.qty, price: l.unitPrice, ...(discount ? { discount } : {}), taxFactor: factor, tax },
     );
   }
 

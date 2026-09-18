@@ -33,7 +33,7 @@ export class MkFake implements MkOrderPort {
       docDate: "2026-09-14",
       currency: input.currencyCode,
       // MK computes the gross of a net line from its tax factor.
-      sumAll: String(input.lines.reduce((a, l) => a + l.amount * lineGross(l), 0).toFixed(2)),
+      sumAll: String(input.lines.reduce((a, l) => a + l.amount * lineGross(l) * (1 - (l.discount ?? 0) / 100), 0).toFixed(2)),
       statusDesc: "created",
       buyerOrder: input.buyerOrder,
       lines: input.lines.map((l) => ({
@@ -42,6 +42,7 @@ export class MkFake implements MkOrderPort {
         amount: String(l.amount),
         price: l.price != null ? String(l.price) : undefined,
         priceWithTax: String(lineGross(l)),
+        discount: l.discount != null ? String(l.discount) : undefined,
         taxFactor: String(l.taxFactor),
         tax: l.tax ?? undefined,
       })),
@@ -58,7 +59,7 @@ export class MkFake implements MkOrderPort {
     const line = o.lines.find((l) => l.code === code);
     if (line) line.amount = String(amount);
     else o.lines.push({ code, name: code, amount: String(amount), priceWithTax: "1" });
-    o.sumAll = String(o.lines.reduce((a, l) => a + Number(l.amount) * Number(l.priceWithTax ?? 0), 0).toFixed(2));
+    o.sumAll = String(o.lines.reduce((a, l) => a + Number(l.amount) * Number(l.priceWithTax ?? 0) * (1 - Number(l.discount ?? 0) / 100), 0).toFixed(2));
   }
 
   create: MkOrderPort["create"] = async (input) => {

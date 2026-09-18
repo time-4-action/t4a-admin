@@ -928,16 +928,19 @@ export type SalesOrderInput = {
   deliveryDeadline?: string; // yyyy-mm-dd
   // Each line references an existing product by code with an EXPLICIT unit price locked
   // at order time (we don't put a price list on the document) and its VAT factor:
-  //  • consumer lines carry the GROSS price (priceWithTax = RRP, tier discount baked
-  //    in) and the country's factor — MK backs the net/VAT out of the gross;
-  //  • company lines carry the NET price (price = partner price after tier) and a
-  //    factor of 0 (zero-rated).
+  //  • consumer lines carry the GROSS price (priceWithTax = RRP) and the country's
+  //    factor — MK backs the net/VAT out of the gross;
+  //  • company lines carry the NET price (price = partner price) and a factor of 0
+  //    (zero-rated).
+  // The volume tier is NOT baked into the price: it goes out as the line's `discount`
+  // (percent) next to the LIST price, so staff see "price − x %" in MK exactly as the
+  // customer saw it, and can adjust either. Omitted when 0.
   // VAT per line: MK's documented `tax_factor` ("0.22") by default — no account
   // codes needed. A configured tax code for the rate (VAT settings → Metakocka tax
   // codes) is sent as `tax` instead, which is the fallback for lines MK refuses a
   // factor for (a zero-rated line: MK_ZERO_TAX_CODE or the 0 % code).
   // `MK_LINE_TAX_MODE=code` makes codes mandatory.
-  lines: { code: string; amount: number; price?: number; priceWithTax?: number; taxFactor: number; tax: string | null }[];
+  lines: { code: string; amount: number; price?: number; priceWithTax?: number; discount?: number; taxFactor: number; tax: string | null }[];
 };
 
 function mkLineTax(l: SalesOrderInput["lines"][number]): Record<string, string> {
@@ -960,29 +963,34 @@ export async function createSalesOrder(
   if (lines.length === 0) return { ok: false, error: "No lines to order", status: 400 };
 
   const addr = partner.address ?? {};
+  const partnerRef = {
+    business_entity: partner.businessEntity ? "true" : "false",
+    ...(partner.foreignCountry !== undefined ? { foreign_county: partner.foreignCountry ? "true" : "false" } : {}),
+    ...(partner.taxpayer !== undefined ? { taxpayer: partner.taxpayer ? "true" : "false" } : {}),
+    tax_id_number: partner.taxId ?? "",
+    customer: partner.name,
+    street: addr.street ?? "",
+    post_number: addr.postNumber ?? "",
+    place: addr.city ?? partner.city ?? "",
+    country: addr.country ?? "",
+  };
   const body: Record<string, unknown> = {
     doc_type: "sales_order",
     doc_date: mkDocDate(),
     title,
     currency_code: currencyCode,
     status_code: "created",
-    partner: {
-      business_entity: partner.businessEntity ? "true" : "false",
-      ...(partner.foreignCountry !== undefined ? { foreign_county: partner.foreignCountry ? "true" : "false" } : {}),
-      ...(partner.taxpayer !== undefined ? { taxpayer: partner.taxpayer ? "true" : "false" } : {}),
-      tax_id_number: partner.taxId ?? "",
-      customer: partner.name,
-      street: addr.street ?? "",
-      post_number: addr.postNumber ?? "",
-      place: addr.city ?? partner.city ?? "",
-      country: addr.country ?? "",
-    },
-    // Explicit unit price + VAT factor per line (see SalesOrderInput.lines). No price
-    // list on the document.
+    partner: partnerRef,
+    // Recipient (delivery address) = the customer, like a hand-entered order where
+    // staff pick the same partner for both. Without it MK leaves the recipient empty.
+    receiver: { ...partnerRef },
+    // Explicit unit price + discount % + VAT factor per line (see SalesOrderInput.lines).
+    // No price list on the document.
     product_list: lines.map((l) => ({
       code: l.code,
       amount: String(l.amount),
       ...(l.priceWithTax != null ? { price_with_tax: String(l.priceWithTax) } : { price: String(l.price ?? 0) }),
+      ...(l.discount ? { discount: String(round4(l.discount)) } : {}),
       ...mkLineTax(l),
     })),
   };

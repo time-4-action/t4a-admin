@@ -73,11 +73,13 @@ describe("submission → Metakocka order", () => {
       ["SKU-s1", 100],
       ["SKU-m1", 20],
     ]);
-    // 100 × 100 = 10 000 in the Sails tab ⇒ Gold tier 10 % baked into the unit price.
-    // A company: NET partner price, zero-rated.
-    expect(input.lines[0]).toMatchObject({ price: 90, taxFactor: 0, tax: "000" });
+    // 100 × 100 + 20 × 50 = 11 000 on the order ⇒ Sails' Gold tier 10 % — sent as the
+    // LIST price + a discount %, not baked in. A company: NET partner price, zero-rated.
+    expect(input.lines[0]).toMatchObject({ price: 100, discount: 10, taxFactor: 0, tax: "000" });
     expect(input.lines[0].priceWithTax).toBeUndefined();
+    // Masts has no ladder ⇒ no discount on that line.
     expect(input.lines[1]).toMatchObject({ price: 50, taxFactor: 0 });
+    expect(input.lines[1].discount).toBeUndefined();
     expect(input.buyerOrder).toBe(buyerOrderKey(String(r.doc._id), 1));
     expect(input.extraColumns).toBeUndefined(); // MK rejects extra columns on sales orders
     expect(input.changeLogNote).toBe(`T4A preorder ${String(r.doc._id)}`);
@@ -260,8 +262,8 @@ describe("consumer (B2C) submissions — RRP incl. VAT", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const input = mk.creates[0];
-    // 100 × 200 RRP = 20 000 in Sails ⇒ Gold 10 % ⇒ 180 gross; SI 22 % inside it.
-    expect(input.lines[0]).toEqual({ code: "SKU-s1", amount: 100, priceWithTax: 180, taxFactor: 0.22, tax: "EX4" });
+    // 100 × 200 RRP = 20 000 in Sails ⇒ Gold 10 % as the line discount on the 200 gross; SI 22 % inside it.
+    expect(input.lines[0]).toEqual({ code: "SKU-s1", amount: 100, priceWithTax: 200, discount: 10, taxFactor: 0.22, tax: "EX4" });
     expect(input.lines[1]).toEqual({ code: "SKU-m1", amount: 20, priceWithTax: 100, taxFactor: 0.22, tax: "EX4" });
     expect(input.notes).toContain("VAT: Individual, RRP incl. 22% VAT (SI, global rate)");
     const view = toSubmissionView(r.doc);

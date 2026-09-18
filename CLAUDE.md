@@ -777,8 +777,12 @@ vatSource, totals: {net, vat, gross} }`; later VAT/price changes never touch it)
 and opens a registration window (`mkOrder.state = "pending"`,
 `submitRevision++`).
 
-`registerSalesOrder()` then creates the MK order from the **snapshot** (tier
-discount baked into the unit price; the VAT treatment is the snapshot's: a
+`registerSalesOrder()` then creates the MK order from the **snapshot** (each
+line = the frozen LIST unit price `unitPrice` + the earned tier as the line
+`discount` % — never baked into the price, so MK shows price and discount
+separately like a hand-entered order; `allocationFromDocument` applies the
+discount when reading the order back. The `receiver` (delivery recipient) is
+sent as a copy of the `partner`. The VAT treatment is the snapshot's: a
 company's lines go as `price` = net, an individual's as `price_with_tax` = gross
 RRP; each line carries the rate as MK's documented `tax_factor` ("0.22"). When a
 **Metakocka tax code** is configured for the rate (VAT rates page → optional

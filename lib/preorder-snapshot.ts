@@ -165,7 +165,11 @@ export function allocationFromDocument(
   for (const l of order.lines) {
     if (l.isText || !l.code) continue;
     const qty = num(l.amount) ?? 0;
-    const price = num(l.priceWithTax) ?? num(l.price);
+    // MK lines carry the list price + a discount % (the tier we registered, or one
+    // staff typed in); the customer-facing unit is the discounted one.
+    const list = num(l.priceWithTax) ?? num(l.price);
+    const disc = num(l.discount) ?? 0;
+    const price = list != null ? Math.round(list * (1 - disc / 100) * 100) / 100 : null;
     const prev = allocated.get(l.code);
     const shipped = num(l.shipped);
     allocated.set(l.code, {
