@@ -23,6 +23,8 @@ import {
   Building2,
   User,
   AlertTriangle,
+  LayoutGrid,
+  Table2,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -977,6 +979,42 @@ export function TabTierBanner({
 // order's subtotal (every tab), which is what unlocks the tiers — so `tabs` is the
 // full sheet and `tab` only picks the ladder shown. Replaces the stacked pricing
 // sentence + discount banner on the customer's and the admin's order views.
+export type FillMode = "grid" | "guided";
+
+// How the customer browses the sheet — "Catalogue" (guided cards) or "Order sheet"
+// (the grid). Underline tabs, sat at the right end of the section TabBar row. Shared
+// by the portal fill page and the admin preview so both read exactly the same.
+export function FillModeNav({ mode, onChange }: { mode: FillMode; onChange: (m: FillMode) => void }) {
+  return (
+    <nav className="flex items-stretch gap-0.5 -mb-px h-9" aria-label="View">
+      {(
+        [
+          ["guided", LayoutGrid, "Catalogue"],
+          ["grid", Table2, "Order sheet"],
+        ] as [FillMode, React.ElementType, string][]
+      ).map(([m, Icon, label]) => {
+        const on = mode === m;
+        return (
+          <button
+            key={m}
+            type="button"
+            onClick={() => onChange(m)}
+            aria-pressed={on}
+            className={cn(
+              "group relative isolate inline-flex items-center gap-1.5 whitespace-nowrap px-2.5 text-[12.5px] font-medium transition-colors border-b-2",
+              on ? "border-lime-600 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Icon className={cn("w-3.5 h-3.5 shrink-0", on ? "text-lime-600" : "text-muted-foreground/70 group-hover:text-foreground/70")} />
+            {label}
+            <span className="pointer-events-none absolute inset-x-0.5 top-1 bottom-1.5 rounded-md transition-colors group-hover:bg-muted/60 -z-10" aria-hidden />
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
 export function SheetContextBar({
   pricing,
   tab,
@@ -1003,16 +1041,20 @@ export function SheetContextBar({
   const reached = totals?.tier ?? null;
   const next = totals?.nextTier ?? null;
   const amount = totals?.orderAmount ?? 0;
-  // Tiers sit at EQUAL spacing along the track (thresholds can be wildly apart —
-  // €10k then €4bn — so a proportional track would pile every marker at the left).
-  // The current position is interpolated inside the segment it is in.
+  // The track is split into ZONES at equal width — the base zone (no discount) and
+  // one per tier — because thresholds can be wildly apart (€10k then €4bn) and a
+  // proportional track would pile every marker at the left. Each zone owns its
+  // label cell, so labels never collide; the current position is interpolated
+  // inside the zone it is in.
   const n = ladder.length;
-  const tierX = (i: number) => ((i + 1) / n) * 100; // i-th tier (0-based) → % along the track
+  const zones = n + 1;
   const reachedCount = ladder.filter((t) => amount + 1e-9 >= t.minAmount).length;
   const lower = reachedCount === 0 ? 0 : ladder[reachedCount - 1].minAmount;
   const upper = reachedCount < n ? ladder[reachedCount].minAmount : null;
   const frac = upper == null ? 1 : Math.min(1, Math.max(0, (amount - lower) / Math.max(1e-9, upper - lower)));
-  const pos = n === 0 ? 0 : upper == null ? 100 : ((reachedCount + frac) / n) * 100;
+  const zoneFill = (z: number) => (z < reachedCount ? 1 : z === reachedCount ? frac : 0);
+  const pos = n === 0 ? 0 : ((reachedCount + frac) / zones) * 100;
+  const gridCols = { gridTemplateColumns: `repeat(${zones}, minmax(0, 1fr))` };
 
   return (
     <div className={cn("grid grid-cols-1 lg:grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-6 gap-y-3 px-4 py-3", className)}>
@@ -1040,32 +1082,47 @@ export function SheetContextBar({
       {/* ladder */}
       {ladder.length > 0 && totals ? (
         <div className="min-w-0">
-          <div className="relative h-7">
-            {/* track */}
-            <div className="absolute left-0 right-0 top-[9px] h-1.5 rounded-full bg-muted" />
-            <div className="absolute left-0 top-[9px] h-1.5 rounded-full bg-lime-600 transition-[width] duration-300" style={{ width: `${pos}%` }} />
-            {/* tier markers */}
+          {/* segmented track — the gaps ARE the thresholds */}
+          <div className="relative">
+            <div className="grid gap-1" style={gridCols}>
+              {Array.from({ length: zones }, (_, z) => (
+                <div key={z} className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-lime-600 transition-[width] duration-500 ease-out"
+                    style={{ width: `${zoneFill(z) * 100}%` }}
+                  />
+                </div>
+              ))}
+            </div>
+            {/* current position */}
+            <span
+              className="absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground ring-[3px] ring-background shadow-md transition-[left] duration-500 ease-out"
+              style={{ left: `${pos}%` }}
+            />
+          </div>
+
+          {/* one label cell per zone, left-aligned to where the zone starts */}
+          <div className="mt-2 grid gap-1" style={gridCols}>
+            <div className="min-w-0 text-[10px] leading-tight text-muted-foreground/70">
+              <div className="truncate uppercase tracking-wide">No discount</div>
+            </div>
             {ladder.map((t, i) => {
-              const x = tierX(i);
               const hit = amount + 1e-9 >= t.minAmount;
-              const last = i === n - 1;
+              const current = reached?.id === t.id;
               return (
-                <div key={t.id} className={cn("absolute top-0 flex flex-col", last ? "-translate-x-full items-end" : "-translate-x-1/2 items-center")} style={{ left: `${x}%` }}>
-                  <span className={cn("mt-[6px] size-3 rounded-full border-2 bg-background", hit ? "border-lime-600" : "border-border", last && "translate-x-1/2")} />
-                  <span className={cn("mt-1 whitespace-nowrap text-[10px] leading-none", hit ? "text-foreground font-semibold" : "text-muted-foreground")}>
-                    {t.name || "Tier"} −{t.discountPct}% <span className="font-normal text-muted-foreground/80">from {fmtMoney(t.minAmount, currency)}</span>
-                  </span>
+                <div key={t.id} className={cn("min-w-0 text-[10px] leading-tight", hit ? "text-foreground" : "text-muted-foreground")}>
+                  <div className={cn("truncate uppercase tracking-wide", hit && "font-semibold", current && "text-lime-700 dark:text-lime-400")}>
+                    {t.name || "Tier"} −{t.discountPct}%
+                  </div>
+                  <div className="truncate tabular-nums text-muted-foreground/80">from {fmtMoney(t.minAmount, currency)}</div>
                 </div>
               );
             })}
-            {/* current position */}
-            <div className="absolute top-0 -translate-x-1/2 flex flex-col items-center" style={{ left: `${pos}%` }}>
-              <span className="mt-[3px] size-[18px] rounded-full bg-foreground ring-2 ring-background shadow-sm" />
-            </div>
           </div>
+
           <div className="mt-2 flex items-center justify-between gap-3 text-[11px]">
             <span className="text-muted-foreground tabular-nums">
-              {fmtMoney(amount, currency)} on the whole order
+              <span className="font-medium text-foreground">{fmtMoney(amount, currency)}</span> on the whole order
             </span>
             <span className="text-muted-foreground tabular-nums truncate">
               {next

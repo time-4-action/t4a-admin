@@ -37,6 +37,8 @@ import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
   TabBar,
   SheetContextBar,
+  FillModeNav,
+  type FillMode,
   PreorderGridTab,
   PreorderGuidedTab,
   OrderSummaryPanel,
@@ -57,7 +59,7 @@ import {
   type PricingContext,
 } from "@/types/preorder";
 
-type Mode = "grid" | "guided";
+type Mode = FillMode;
 
 const LINE_STATUS_PILL: Record<LineStatus, string> = {
   pending: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
@@ -494,35 +496,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
         <div className="px-4 md:px-6 flex items-stretch gap-3">
           {tabsForBar.length > 0 && <TabBar tabs={tabsForBar} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />}
           <div className="flex-1" />
-          {!locked && (
-            // How to browse the sheet — the same underline tabs as the sections, right end.
-            <nav className="flex items-stretch gap-0.5 -mb-px h-9" aria-label="View">
-              {(
-                [
-                  ["guided", LayoutGrid, "Catalogue"],
-                  ["grid", Table2, "Order sheet"],
-                ] as [Mode, React.ElementType, string][]
-              ).map(([m, Icon, label]) => {
-                const on = mode === m;
-                return (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setMode(m)}
-                    aria-pressed={on}
-                    className={cn(
-                      "group relative isolate inline-flex items-center gap-1.5 whitespace-nowrap px-2.5 text-[12.5px] font-medium transition-colors border-b-2",
-                      on ? "border-lime-600 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <Icon className={cn("w-3.5 h-3.5 shrink-0", on ? "text-lime-600" : "text-muted-foreground/70 group-hover:text-foreground/70")} />
-                    {label}
-                    <span className="pointer-events-none absolute inset-x-0.5 top-1 bottom-1.5 rounded-md transition-colors group-hover:bg-muted/60 -z-10" aria-hidden />
-                  </button>
-                );
-              })}
-            </nav>
-          )}
+          {!locked && <FillModeNav mode={mode} onChange={setMode} />}
         </div>
       </header>
 
