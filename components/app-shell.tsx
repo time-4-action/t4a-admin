@@ -22,7 +22,8 @@ export default function AppShell({
 }: {
   user?: ShellUser;
   roles?: string[];
-  // Set when an admin is viewing the portal as someone else (lib/portal-impersonation.ts).
+  // Set when an admin is viewing the portal as a customer, or the whole app as
+  // another user (lib/portal-impersonation.ts).
   viewingAs?: ViewingAs | null;
   children: React.ReactNode;
 }) {
@@ -35,10 +36,15 @@ export default function AppShell({
     return <main className="flex-1 min-w-0 overflow-y-auto bg-background">{children}</main>;
   }
 
+  // The "viewing as" strip: on every portal page for either kind, and on the
+  // admin pages too while viewing as a user — an admin user is shown the admin
+  // app with THEIR roles, and it must never be mistaken for your own session.
+  const banner = viewingAs && (isPortal || viewingAs.kind === "user");
+
   return (
     <>
-      {isPortal ? <PortalNav user={user} viewingAs={viewingAs} /> : <Nav user={user} roles={roles} />}
-      {isPortal && viewingAs ? (
+      {isPortal ? <PortalNav user={user} viewingAs={viewingAs} /> : <Nav user={user} roles={roles} viewingAs={viewingAs} />}
+      {banner ? (
         <main className="flex-1 min-w-0 overflow-hidden bg-background pt-12 md:pt-0 flex flex-col">
           <ViewingAsBanner viewingAs={viewingAs} />
           <div className="flex-1 min-h-0 overflow-hidden flex flex-col [&>*]:flex-1 [&>*]:min-h-0">{children}</div>

@@ -747,13 +747,15 @@ export function UserDetailSidebar({
         )}
       </SidebarCard>
 
-      {/* ── Customer portal (super-admin) ────────────────────────────────── */}
+      {/* ── View as this user (super-admin) ──────────────────────────────── */}
       {canViewAs && (
-        <SidebarCard icon={Eye} title="Customer Portal">
+        <SidebarCard icon={Eye} title="View as user">
           <div className="space-y-3">
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Open the B2B portal exactly as this user sees it — their email decides the
-              Metakocka customer, so you get their preorders, orders and invoices (or the
+              Open the app exactly as this user sees it, with their access. An admin
+              user opens on the admin home with only their sections; a user without
+              admin access opens the B2B portal — their email decides the Metakocka
+              customer, so you get their preorders, orders and invoices (or the
               no-account page if nothing matches). Anything saved there is theirs.
             </p>
             <ViewAsUserButton userId={user.id} className="w-full justify-center" />

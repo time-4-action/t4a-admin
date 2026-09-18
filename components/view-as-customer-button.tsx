@@ -1,9 +1,10 @@
 "use client";
 
-// "View portal as this customer" / "View portal as this user" — starts an admin
-// impersonation (lib/portal-impersonation.ts) and jumps into the portal. Used
-// wherever an admin looks at one Metakocka partner (preorder customer modal,
-// Documents customer pages) and, super-admin only, on the Auth0 user detail page.
+// "View portal as this customer" / "View as this user" — starts an admin
+// impersonation (lib/portal-impersonation.ts) and jumps to where that subject
+// lands. Used wherever an admin looks at one Metakocka partner (preorder customer
+// modal, Documents customer pages) and, super-admin only, on the Auth0 user
+// detail page.
 
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -40,9 +41,11 @@ export function ViewAsCustomerButton({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(userId ? { userId, returnTo: pathname } : { partnerMkId, returnTo: pathname }),
       });
-      const j = (await r.json().catch(() => ({}))) as { error?: string };
+      const j = (await r.json().catch(() => ({}))) as { error?: string; redirect?: string };
       if (!r.ok) throw new Error(j.error ?? `Could not open the portal (${r.status})`);
-      router.push(to);
+      // A user is taken where a real login by them lands (the server decides from
+      // their roles: admin home or portal); a customer goes where the caller asked.
+      router.push(userId ? j.redirect || to : to);
       router.refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -70,14 +73,16 @@ export function ViewAsCustomerButton({
   );
 }
 
-// Super-admin only: the portal exactly as this Auth0 user gets it (their email
-// decides the Metakocka partner — or the no-account page, if none matches).
+// Super-admin only: the app exactly as this Auth0 user gets it — with their
+// roles, so an admin user opens on the admin home with only their sections, and
+// a role-less user on the portal (their email decides the Metakocka partner — or
+// the no-account page, if none matches).
 export function ViewAsUserButton({ userId, className, to = "/portal/invoices" }: { userId: string; className?: string; to?: string }) {
   return (
     <ViewAsCustomerButton
       userId={userId}
-      label="View portal as this user"
-      title="Open the B2B portal exactly as this user sees it"
+      label="View as this user"
+      title="Open the app exactly as this user sees it — with their roles"
       to={to}
       className={className}
     />

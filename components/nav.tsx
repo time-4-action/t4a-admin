@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { canSee, isSuperAdmin, type SectionKey } from "@/lib/access";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { viewingAsName, type ViewingAs } from "@/components/viewing-as";
 import {
   LayoutDashboard,
   Users,
@@ -249,7 +250,10 @@ function isLinkActive(link: NavLinkDef, links: NavLinkDef[], pathname: string): 
 
 type NavUser = { name?: string | null; email?: string | null; picture?: string | null };
 
-export default function Nav({ user, roles = [] }: { user?: NavUser; roles?: string[] }) {
+// `roles` are the EFFECTIVE roles (app/layout.tsx): while a super-admin views the
+// app as another user they are that user's, so the sections listed are exactly
+// the ones that user can open; `viewingAs` then names them in the user block.
+export default function Nav({ user, roles = [], viewingAs }: { user?: NavUser; roles?: string[]; viewingAs?: ViewingAs | null }) {
   const [open, setOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
@@ -453,13 +457,22 @@ export default function Nav({ user, roles = [] }: { user?: NavUser; roles?: stri
             )}>
               {isOpen ? (
                 <>
-                  <UserAvatar user={user} size={26} />
+                  <UserAvatar user={viewingAs ? { name: viewingAsName(viewingAs) } : user} size={26} />
                   <div className="flex-1 min-w-0">
-                    {user.name && (
-                      <p className="text-[12px] font-medium text-foreground truncate leading-tight">{user.name}</p>
-                    )}
-                    {user.email && (
-                      <p className="text-[10px] text-muted-foreground truncate leading-tight">{user.email}</p>
+                    {viewingAs ? (
+                      <>
+                        <p className="text-[12px] font-medium text-foreground truncate leading-tight">{viewingAsName(viewingAs)}</p>
+                        <p className="text-[10px] text-amber-600 dark:text-amber-400 truncate leading-tight">viewed by {user.email ?? user.name}</p>
+                      </>
+                    ) : (
+                      <>
+                        {user.name && (
+                          <p className="text-[12px] font-medium text-foreground truncate leading-tight">{user.name}</p>
+                        )}
+                        {user.email && (
+                          <p className="text-[10px] text-muted-foreground truncate leading-tight">{user.email}</p>
+                        )}
+                      </>
                     )}
                   </div>
                   <a

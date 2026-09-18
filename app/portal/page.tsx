@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth0 } from "@/lib/auth";
 import { hasAnyAccess, rolesFromIdToken } from "@/lib/access";
-import { readImpersonation } from "@/lib/portal-impersonation";
+import { effectiveRoles, readImpersonation } from "@/lib/portal-impersonation";
 import { PortalLanding } from "./landing";
 
 export const runtime = "nodejs";
@@ -18,8 +18,11 @@ export default async function PortalIndex({
   if (session) {
     // An admin who signed in from the landing (the logged-out root redirects
     // here) belongs on the admin home — unless they are viewing as a customer.
-    const admin = hasAnyAccess(rolesFromIdToken(session.tokenSet?.idToken));
-    if (admin && !(await readImpersonation())) redirect("/");
+    // Judged by the effective roles: viewing as an admin user goes to the admin
+    // home too, viewing as a role-less user stays in the portal, like their login.
+    const imp = await readImpersonation();
+    const admin = hasAnyAccess(effectiveRoles(rolesFromIdToken(session.tokenSet?.idToken), imp));
+    if (admin && imp?.kind !== "customer") redirect("/");
     redirect("/portal/invoices");
   }
   const { returnTo } = await searchParams;

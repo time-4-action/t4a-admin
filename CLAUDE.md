@@ -569,17 +569,29 @@ whole Metakocka directory with each customer's preorder activity across campaign
 fed by `GET /api/admin/preorder/customers?activity=1`, which the `customers`
 section gates together with `/api/admin/portal/*`),
 the preorder customer modal and the Documents customer header.
-**View portal as a user (super-admin only).** The same cookie carries a second
+**View the app as a user (super-admin only).** The same cookie carries a second
 kind: `POST /api/admin/portal/impersonate { userId, returnTo }` (`canImpersonateUser`
-= `isSuperAdmin`) stores the Auth0 user's id + email + name, and `getPortalViewer()`
-then resolves the partner from **that email** exactly as a real login would (no
-match ⇒ `/portal/no-account` showing that email via `getPortalIdentityEmail()`).
-`readImpersonation()` checks the role the cookie's kind requires, so a cookie of
-the `user` kind is ignored for anyone but a super-admin. Entry point: the
-**Customer Portal** card on the user detail sidebar (`/users/[id]`,
-`ViewAsUserButton` in `components/view-as-customer-button.tsx`, rendered only
-when the page's viewer is a super-admin). `ViewingAs` (`components/viewing-as.ts`)
-is the discriminated union the banner and portal nav render.
+= `isSuperAdmin`) loads the Auth0 user's **roles** (Management API) and stores
+them with the id + email + name. Those roles become the **effective roles** of
+every request while the view lasts — `effectiveRoles(sessionRoles, imp)` in
+`lib/portal-impersonation-codec.ts` is the one rule, applied by the middleware
+(`lib/proxy.ts` verifies the cookie itself, Web Crypto HMAC, edge-safe),
+`getCurrentRoles()` (`lib/current-user.ts`; `getSessionRoles()` is the real
+session), the root layout (nav sections) and the home page — so an **admin user**
+lands on `/` with exactly the sections they hold (`/forbidden` where they would,
+that page offers "Stop viewing"), and a **role-less user** lands on the portal,
+`getPortalViewer()` resolving the partner from **that email** exactly as a real
+login would (no match ⇒ `/portal/no-account` showing that email via
+`getPortalIdentityEmail()`). The route answers `redirect` (`/` or
+`/portal/invoices`) and the button follows it. `readImpersonation()` checks the
+role the cookie's kind requires against the **real** session, so a `user` cookie
+is ignored for anyone but a super-admin — and since a super-admin already holds
+every section, the swap can only narrow access. Entry point: the **View as user**
+card on the user detail sidebar (`/users/[id]`, `ViewAsUserButton` in
+`components/view-as-customer-button.tsx`, rendered only when the page's viewer
+is a super-admin). `ViewingAs` (`components/viewing-as.ts`, the user kind carries
+`roles` + `admin`) is the discriminated union the banner (shown on admin pages
+too while viewing as a user) and both navs render.
 | Customer picker (admin) | `/documents` | Search a partner by name/email/tax. |
 | Customer docs (admin) | `/documents/{offers,orders,invoices,credit-notes}` | Per-family lists for the picked customer (customer kept in localStorage via `use-customer.ts`). |
 | Detail (admin) | `/documents/{offers,orders,invoices,credit-notes}/[mkId]` | Same detail view, any partner. |
