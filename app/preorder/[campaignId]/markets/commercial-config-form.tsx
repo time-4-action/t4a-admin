@@ -196,8 +196,8 @@ export function CommercialConfigForm({ value, onChange, inherited, campaign, pri
           {customerKind === "business"
             ? "A company pays the net partner price and is zero-rated unless VAT is switched on here."
             : customerKind === "person"
-              ? "An individual pays the RRP with VAT inside it — choose where that rate comes from."
-              : `Individuals pay the RRP with VAT inside it; companies pay the partner price and are zero-rated. Change how VAT applies to everyone in this ${layer}.`}
+              ? "An individual pays the net partner price plus VAT on top — choose where that rate comes from."
+              : `Everyone pays the net partner price; individuals get VAT added on top, companies are zero-rated. Change how VAT applies to everyone in this ${layer}.`}
         </p>
         {customerKind !== "business" && (
           <VatModeRow value={value} set={set} reset={reset} has={has} inheritedPolicy={inherited.effective.pricing.vatPolicy} inheritedSource={src.vat} />

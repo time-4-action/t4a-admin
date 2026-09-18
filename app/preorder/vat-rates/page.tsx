@@ -1,7 +1,8 @@
 import { Percent } from "lucide-react";
 import { VatRatesClient } from "./vat-rates-client";
 
-// Preorder → VAT rates: the global per-country VAT table consumer preorders use.
+// Preorder → VAT rates: the global per-country VAT table (added on top of the partner
+// price for individuals; companies are zero-rated by default).
 export default function VatRatesPage() {
   return (
     <div className="flex flex-col h-full">
@@ -11,7 +12,7 @@ export default function VatRatesPage() {
         </span>
         <div className="min-w-0">
           <h1 className="font-display text-lg font-medium tracking-tight text-foreground leading-tight">VAT rates</h1>
-          <p className="text-[11px] text-muted-foreground leading-tight">Per-country VAT for consumer (RRP) preorders · campaigns may override</p>
+          <p className="text-[11px] text-muted-foreground leading-tight">Per-country VAT added to individuals&apos; partner prices · autosaved · campaigns may override</p>
         </div>
       </header>
       <VatRatesClient />

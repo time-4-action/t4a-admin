@@ -10,8 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   DollarSign, Euro, MessageSquare, Gauge, Bot, ShieldCheck, ShieldAlert,
   Check, AlertTriangle, RotateCcw, Trash2, Pencil, Lock, UserCog, Loader2,
-  ExternalLink,
+  ExternalLink, Eye,
 } from "lucide-react";
+import { ViewAsUserButton } from "@/components/view-as-customer-button";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
@@ -430,10 +431,13 @@ export function UserDetailSidebar({
   user,
   allRoles,
   currentRoles,
+  canViewAs = false,
 }: {
   user: { id: string; name: string; email: string; picture?: string; limit: LimitDoc };
   allRoles: Role[];
   currentRoles: Role[];
+  // Super-admin only: shows the "view the portal as this user" card.
+  canViewAs?: boolean;
 }) {
   const router = useRouter();
   const { currency, toDisplay, toUsd } = useCurrency();
@@ -742,6 +746,20 @@ export function UserDetailSidebar({
           </DndContext>
         )}
       </SidebarCard>
+
+      {/* ── Customer portal (super-admin) ────────────────────────────────── */}
+      {canViewAs && (
+        <SidebarCard icon={Eye} title="Customer Portal">
+          <div className="space-y-3">
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              Open the B2B portal exactly as this user sees it — their email decides the
+              Metakocka customer, so you get their preorders, orders and invoices (or the
+              no-account page if nothing matches). Anything saved there is theirs.
+            </p>
+            <ViewAsUserButton userId={user.id} className="w-full justify-center" />
+          </div>
+        </SidebarCard>
+      )}
 
       {/* ── Danger Zone ──────────────────────────────────────────────────── */}
       <SidebarCard icon={Lock} title="Danger Zone">

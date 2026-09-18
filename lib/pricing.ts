@@ -5,20 +5,29 @@
 // Pure and framework-agnostic (imported client & server); no `server-only`.
 //
 // Rules
+//  • EVERYONE orders at the PARTNER price, which is NET (excl. VAT). The RRP is a
+//                reference figure only — what the goods retail for — and is never what
+//                anybody is charged.
 //  • A customer is a "business" (Metakocka carries a tax id) or a "person".
-//  • Business  → PARTNER price, which is NET (excl. VAT), and 0% VAT (zero-rated).
-//  • Person    → RRP, which is GROSS (VAT-inclusive). VAT is EXTRACTED from the RRP at
-//                the customer's country rate — never added on top:
-//                €100 RRP in SI (22%) = €81.97 net + €18.03 VAT = €100.
+//  • Business  → partner price, 0% VAT (zero-rated) by default. A market / customer
+//                rule may switch VAT on for companies too.
+//  • Person    → partner price + their country's VAT ADDED ON TOP:
+//                €82 partner price in SI (22%) = €82 net + €18.04 VAT = €100.04.
 //  • The VAT rate of a country comes from: campaign override → global setting →
 //                configured fallback → otherwise it is MISSING and the order is blocked.
 //                A missing rate is never guessed.
 //  • A market or customer rule can change the VAT policy (VatPolicy): switch VAT off
 //                (exempt, 0%), pin one fixed rate for everyone in the layer, or charge
-//                VAT to companies too (on top of the net partner price).
+//                VAT to companies too.
 //  • Volume tiers apply to both kinds; the threshold is compared with the customer's
-//                WHOLE-ORDER subtotal (all tabs) in their own price basis (business: net,
-//                person: gross). Each tab keeps its own ladder / percentage.
+//                WHOLE-ORDER net subtotal (all tabs). Each tab keeps its own ladder /
+//                percentage. The tier comes off the net unit, so VAT is charged on the
+//                discounted price.
+//
+// `PriceBasis` survives for SUBMISSIONS FROZEN BEFORE this change: those snapshots
+// carry `basis: "rrp"` (individuals were charged the VAT-inclusive RRP) and must keep
+// rendering and registering exactly as they were submitted. Nothing new is ever
+// resolved onto the "rrp" basis — see `basisFor`.
 //
 // Money is handled as INTEGER CENTS. Prices enter as decimals (what admins type and
 // what MK returns), are rounded to cents once, and every operation after that is
@@ -148,8 +157,10 @@ export function addVat(netC: Cents, ratePct: number): VatSplit {
 
 // ── policy ───────────────────────────────────────────────────────────────────
 
-export function basisFor(kind: CustomerKind): PriceBasis {
-  return kind === "person" ? "rrp" : "partner";
+// The basis every customer is resolved onto today: the partner price, for companies
+// and individuals alike. (Legacy snapshots may still carry "rrp"; see the note above.)
+export function basisFor(_kind: CustomerKind): PriceBasis {
+  return "partner";
 }
 
 function isoOf(v: unknown): string | null {
@@ -227,9 +238,10 @@ export function resolveVatRate(input: {
 
 // ── rows & lines ─────────────────────────────────────────────────────────────
 
-// The unit price a customer orders a row at, in their basis. Partner basis keeps the
-// legacy fallback chain (discounted → partner → rrp) so a sheet without partner
-// prices still works; RRP basis never falls back to a net price.
+// The unit price a customer orders a row at. Everybody is on the partner basis: the
+// manually discounted price if the sheet carries one, else the partner price, else —
+// as a last resort, so a half-filled sheet still works — the RRP. The "rrp" basis is
+// only reached by a legacy snapshot and never falls back to a net price.
 export function unitPriceFor(
   row: Pick<PreorderRow, "discountedPrice" | "partnerPrice" | "rrp">,
   basis: PriceBasis = "partner",
@@ -252,8 +264,9 @@ export type LinePricing = {
   lineGross: number;
 };
 
-// Price one line: apply the tier to the unit, then split (person) or zero-rate
-// (business), then multiply by the quantity.
+// Price one line: apply the tier to the unit, then add the VAT on top of the
+// discounted net (legacy "rrp" snapshots extract it from the gross instead), then
+// multiply by the quantity.
 export function priceLine(input: { basis: PriceBasis; unit: number; qty: number; tierPct: number; vatRate: number }): LinePricing {
   const qty = Math.max(0, Math.floor(input.qty || 0));
   const unitC = toCents(input.unit);
@@ -320,8 +333,8 @@ export type PreorderTabTotal = {
   tabId: string;
   tabName: string;
   qty: number;
-  amount: number; // this tab's basis subtotal, before its volume discount
-  orderAmount: number; // the WHOLE order's basis subtotal — what the tiers are measured against
+  amount: number; // this tab's net subtotal, before its volume discount
+  orderAmount: number; // the WHOLE order's net subtotal — what the tiers are measured against
   tier: PreorderTier | null; // the tier this tab reached (on the order subtotal)
   discountPct: number; // 0 when no tier applies
   discount: number; // Σ per-line (unit − discounted unit) × qty
@@ -438,8 +451,8 @@ export function fmtVatRate(rate: number | null | undefined): string {
   return `${Number.isInteger(rate) ? rate : rate.toFixed(2).replace(/\.?0+$/, "")}%`;
 }
 
-// Short human line for totals ("incl. 22% VAT", "excl. VAT · 0% (company)",
-// "excl. VAT · +22% VAT").
+// Short human line for totals ("excl. VAT · +22% VAT", "excl. VAT · 0% (company)";
+// "incl. 22% VAT" only on a legacy RRP-basis snapshot).
 export function vatLabel(ctx: PricingContext | null | undefined): string {
   if (!ctx) return "";
   if (ctx.vat.rate == null) return "VAT rate not configured";

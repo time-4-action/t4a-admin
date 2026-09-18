@@ -153,7 +153,7 @@ export function MarketChip({
 
 // ── Resolver warnings, in plain English ──────────────────────────────────────
 // lib/preorder-effective.ts reports machine codes ("vat-missing:DE",
-// "rrp-missing:<sku>", …). Group the per-product ones and spell every code out so
+// "unpriced:<sku>", …). Group the per-product ones and spell every code out so
 // an admin reads a sentence, not a log line.
 export function describeWarnings(codes: string[]): string[] {
   const out: string[] = [];
@@ -163,7 +163,7 @@ export function describeWarnings(codes: string[]): string[] {
     const i = w.indexOf(":");
     const kind = i === -1 ? w : w.slice(0, i);
     const arg = i === -1 ? "" : w.slice(i + 1);
-    if (kind === "price-missing" || kind === "rrp-missing" || kind === "stale-assortment-id") {
+    if (kind === "price-missing" || kind === "unpriced" || kind === "stale-assortment-id") {
       const more = /^\+(\d+) more$/.exec(arg);
       if (more) extra = { ...extra, [kind]: Number(more[1]) };
       else (grouped[kind] ??= []).push(arg);
@@ -178,7 +178,7 @@ export function describeWarnings(codes: string[]): string[] {
         );
         break;
       case "kind-unknown":
-        out.push("Company or individual is unknown for this customer — priced as a company (partner price, 0% VAT).");
+        out.push("Company or individual is unknown for this customer — treated as a company (0% VAT).");
         break;
       case "market-missing":
         out.push("The market pinned on this customer's rule no longer exists — matched by country instead.");
@@ -199,9 +199,9 @@ export function describeWarnings(codes: string[]): string[] {
     const shown = items.slice(0, 5).join(", ");
     return { n, tail: shown + (n > 5 ? `, … (+${n - 5} more)` : "") };
   };
-  if (grouped["rrp-missing"]) {
-    const { n, tail } = list("rrp-missing");
-    out.push(`${n} product${n === 1 ? " has" : "s have"} no RRP and ${n === 1 ? "is" : "are"} hidden from this individual — fill the RRP on the sheet to offer ${n === 1 ? "it" : "them"}: ${tail}.`);
+  if (grouped["unpriced"]) {
+    const { n, tail } = list("unpriced");
+    out.push(`${n} product${n === 1 ? " has" : "s have"} no price at all and cannot be ordered — fill the partner price on the sheet to offer ${n === 1 ? "it" : "them"}: ${tail}.`);
   }
   if (grouped["price-missing"]) {
     const { n, tail } = list("price-missing");

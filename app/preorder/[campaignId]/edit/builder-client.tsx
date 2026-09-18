@@ -42,6 +42,7 @@ import {
   EyeOff,
   Upload,
   FileSpreadsheet,
+  Download,
   RefreshCw,
   GripVertical,
   Percent,
@@ -142,8 +143,8 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   const [repricedAt, setRepricedAt] = useState<number | null>(null);
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
 
-  // Rows a customer could not be priced for: no RRP (hidden from individuals) / no
-  // partner price (companies would fall back to the RRP). Per tab for the summary.
+  // Rows with a price gap: no partner price (everyone orders at it — the sheet falls
+  // back to the RRP) / no RRP (the reference column stays empty). Per tab for the summary.
   const unpriced = useMemo(() => {
     const rrp: string[] = [];
     const partner: string[] = [];
@@ -556,13 +557,13 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
           {unpriced.rrp.length > 0 && (
             <span>
-              <span className="font-semibold">{unpriced.rrp.length} product{unpriced.rrp.length === 1 ? "" : "s"} without an RRP</span> — hidden from individuals until priced
+              <span className="font-semibold">{unpriced.rrp.length} product{unpriced.rrp.length === 1 ? "" : "s"} without an RRP</span> — no reference retail price shown
               {unpriced.rrpTabs.length > 0 && <span className="text-amber-700/80 dark:text-amber-300/70"> ({unpriced.rrpTabs.join(", ")})</span>}
             </span>
           )}
           {unpriced.partner.length > 0 && (
             <span>
-              <span className="font-semibold">{unpriced.partner.length} without a partner price</span> — companies would pay the RRP
+              <span className="font-semibold">{unpriced.partner.length} without a partner price</span> — customers would be charged the RRP instead
               {unpriced.partnerTabs.length > 0 && <span className="text-amber-700/80 dark:text-amber-300/70"> ({unpriced.partnerTabs.join(", ")})</span>}
             </span>
           )}
@@ -835,6 +836,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
       )}
       {csvTab && (
         <CsvImportDialog
+          tabName={campaign.tabs.find((t) => t.id === csvTab)?.name ?? null}
           rrpPricelist={campaign.rrpPricelist ?? null}
           partnerPricelist={campaign.partnerPricelist ?? null}
           onClose={() => setCsvTab(null)}
@@ -1846,10 +1848,30 @@ function ProductPickerDialog({
   );
 }
 
-// ── CSV / SKU import: paste codes, resolve, add grouped by parent ──
+// ── SKU import: a spreadsheet or pasted codes → resolved → added grouped by parent ──
+//
+// Two ways in, one text box: a dropped / chosen file (.xlsx parsed server-side by
+// lib/sku-xlsx.ts, CSV / text read in the browser) lands its codes in the box next
+// to anything pasted, so what is about to be imported is always visible. After a
+// run the codes that resolved leave the box and the ones that did not stay, ready
+// to be corrected and sent again.
+function parseCodes(raw: string): string[] {
+  return Array.from(
+    new Set(
+      raw
+        .split(/[\s,;]+/)
+        .map((c) => c.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+const SKU_FILE_ACCEPT = ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.csv,text/csv,text/plain";
+
 function CsvImportDialog({
-  rrpPricelist, partnerPricelist, onClose, onAddGroups,
+  tabName, rrpPricelist, partnerPricelist, onClose, onAddGroups,
 }: {
+  tabName: string | null;
   rrpPricelist: string | null;
   partnerPricelist: string | null;
   onClose: () => void;
@@ -1857,87 +1879,233 @@ function CsvImportDialog({
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [notFound, setNotFound] = useState<string[]>([]);
-  const [done, setDone] = useState<number | null>(null);
+  const [reading, setReading] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [file, setFile] = useState<{ name: string; codes: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ variants: number; products: number; notFound: string[] } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  function parseCodes(raw: string): string[] {
-    return Array.from(
-      new Set(
-        raw
-          .split(/[\s,;]+/)
-          .map((s) => s.trim())
-          .filter(Boolean),
-      ),
-    );
+  const codes = useMemo(() => parseCodes(text), [text]);
+  const rawCount = text.split(/[\s,;]+/).filter(Boolean).length;
+
+  async function loadFile(f: File) {
+    setReading(true);
+    setError(null);
+    setResult(null);
+    try {
+      let list: string[];
+      if (/\.xlsx$/i.test(f.name)) {
+        const fd = new FormData();
+        fd.append("file", f);
+        const r = await fetch(`/api/admin/preorder/products/import`, { method: "POST", body: fd });
+        const data = (await r.json().catch(() => null)) as { codes?: string[]; error?: string } | null;
+        if (!r.ok || !data?.codes) throw new Error(data?.error ?? `Could not read ${f.name} (${r.status}).`);
+        list = data.codes;
+      } else if (/\.(csv|txt)$/i.test(f.name) || f.type.startsWith("text/")) {
+        list = parseCodes(await f.text());
+      } else {
+        throw new Error(`${f.name} is not a spreadsheet — use .xlsx or .csv.`);
+      }
+      if (list.length === 0) throw new Error(`No codes found in ${f.name}. Put one SKU or EAN per row.`);
+      setFile({ name: f.name, codes: list.length });
+      setText((prev) => (prev.trim() ? prev.replace(/\s+$/, "") + "\n" : "") + list.join("\n"));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setReading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
   }
 
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const content = await file.text();
-    setText((prev) => (prev ? prev + "\n" : "") + content);
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) void loadFile(f);
   }
 
   async function run() {
-    const codes = parseCodes(text);
     if (codes.length === 0) return;
     setBusy(true);
-    setNotFound([]);
-    setDone(null);
+    setError(null);
+    setResult(null);
     try {
       const r = await fetch(`/api/admin/preorder/products/resolve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ codes, rrpPricelist, partnerPricelist }),
       });
-      const data = await r.json();
-      const groups: GroupDraft[] = data.groups ?? [];
-      onAddGroups(groups);
-      setNotFound(data.notFound ?? []);
-      setDone(groups.reduce((n: number, g: GroupDraft) => n + g.rows.length, 0));
+      const data = (await r.json().catch(() => null)) as { groups?: GroupDraft[]; notFound?: string[]; error?: string } | null;
+      if (!r.ok || !data) throw new Error(data?.error ?? `The catalogue lookup failed (${r.status}). Try again.`);
+      const groups = data.groups ?? [];
+      const notFound = data.notFound ?? [];
+      if (groups.length > 0) onAddGroups(groups);
+      setResult({ variants: groups.reduce((n, g) => n + g.rows.length, 0), products: groups.length, notFound });
+      // What resolved is in the sheet now; what did not stays here to be fixed.
+      setText(notFound.join("\n"));
+      setFile(null);
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   }
 
+  const added = result !== null && result.variants > 0;
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Upload className="w-4 h-4 text-lime-600" /> Import SKUs</DialogTitle>
+      <DialogContent className="sm:max-w-xl gap-0 p-0 overflow-hidden">
+        <DialogHeader className="px-6 pt-6 pb-4 text-left">
+          <DialogTitle className="text-[15px]">Import SKUs</DialogTitle>
+          <DialogDescription className="text-[12px] leading-relaxed">
+            Add products to {tabName ? <span className="font-medium text-foreground">{tabName}</span> : "this tab"} by SKU or EAN. Each code is looked up in
+            the catalogue and placed under its parent product.
+          </DialogDescription>
         </DialogHeader>
-        <p className="text-[12px] text-muted-foreground">
-          Paste SKU / EAN codes (any separator) or upload a CSV. Each resolves against the
-          catalogue and is grouped under its parent product.
-        </p>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={6}
-          placeholder={"P01250001071\nP01250001076, 4262434061897\n…"}
-          className="w-full rounded-md border border-border bg-background px-3 py-2 text-[12px] font-mono focus:border-ring focus:outline-none"
-        />
-        <div className="flex items-center gap-2">
-          <label className="text-[12px] text-muted-foreground inline-flex items-center gap-1.5 cursor-pointer hover:text-foreground">
-            <FileSpreadsheet className="w-3.5 h-3.5" /> Upload CSV
-            <input type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={onFile} />
-          </label>
-          <div className="flex-1" />
-          <Button size="sm" variant="outline" onClick={onClose}>Close</Button>
-          <Button size="sm" onClick={run} disabled={busy || !text.trim()}>
-            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-            Import
-          </Button>
+
+        <div className="px-6 pb-5 space-y-4">
+          {/* File — the obvious first move */}
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (!reading) setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            className={cn(
+              "rounded-xl border border-dashed px-5 py-5 transition-colors",
+              dragging ? "border-lime-500 bg-lime-500/10" : "border-border bg-muted/30",
+            )}
+          >
+            <div className="flex items-center gap-4">
+              <span
+                className={cn(
+                  "flex size-11 shrink-0 items-center justify-center rounded-lg transition-colors",
+                  dragging ? "bg-lime-500/20 text-lime-700 dark:text-lime-300" : "bg-lime-500/10 text-lime-700 dark:text-lime-400",
+                )}
+              >
+                {reading ? <Loader2 className="size-5 animate-spin" /> : <FileSpreadsheet className="size-5" />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-medium text-foreground">
+                  {reading ? "Reading the file…" : dragging ? "Drop it to read the codes" : "Drop a spreadsheet here"}
+                </p>
+                <p className="text-[12px] text-muted-foreground mt-0.5">.xlsx or .csv, one code per row. Extra columns are ignored.</p>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={reading} className="h-8 text-[12px]">
+                <Upload className="size-3.5" /> Choose file
+              </Button>
+              <Button asChild size="sm" variant="ghost" className="h-8 text-[12px] text-muted-foreground hover:text-foreground">
+                <a href="/api/admin/preorder/products/template" download>
+                  <Download className="size-3.5" /> Download template
+                </a>
+              </Button>
+              {file && (
+                <span className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-background border border-border px-2 h-7 text-[11px] text-muted-foreground max-w-full">
+                  <Check className="size-3 text-lime-600 shrink-0" />
+                  <span className="truncate">{file.name}</span>
+                  <span className="tabular-nums shrink-0">· {file.codes} code{file.codes === 1 ? "" : "s"}</span>
+                </span>
+              )}
+              <input ref={fileRef} type="file" accept={SKU_FILE_ACCEPT} className="hidden" onChange={(e) => e.target.files?.[0] && void loadFile(e.target.files[0])} />
+            </div>
+          </div>
+
+          {/* Paste — the quiet second path */}
+          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+            <span className="h-px flex-1 bg-border" />
+            or paste codes
+            <span className="h-px flex-1 bg-border" />
+          </div>
+
+          <div>
+            <textarea
+              value={text}
+              onChange={(e) => {
+                setText(e.target.value);
+                if (result) setResult(null);
+              }}
+              rows={5}
+              spellCheck={false}
+              placeholder={"P01250001071\nP01250001076, 4262434061897\n…"}
+              className={cn(
+                "w-full rounded-lg border bg-background px-3 py-2.5 text-[12px] font-mono leading-relaxed resize-y",
+                "focus:outline-none focus:ring-[3px] focus:ring-lime-500/25 focus:border-lime-500/60",
+                result?.notFound.length ? "border-amber-400/70" : "border-border",
+              )}
+            />
+            <div className="mt-1.5 flex items-center justify-between text-[11px] text-muted-foreground min-h-4">
+              <span className="tabular-nums">
+                {codes.length === 0
+                  ? "Any separator works — new lines, commas, spaces."
+                  : `${codes.length} code${codes.length === 1 ? "" : "s"}${rawCount > codes.length ? ` · ${rawCount - codes.length} duplicate${rawCount - codes.length === 1 ? "" : "s"} removed` : ""}`}
+              </span>
+              {text && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setText("");
+                    setFile(null);
+                    setResult(null);
+                    setError(null);
+                  }}
+                  className="hover:text-foreground"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Outcome — tells you what happened and what to do next */}
+          {error && (
+            <div className="rounded-lg border border-rose-300/60 bg-rose-50 dark:bg-rose-950/30 px-3.5 py-2.5 text-[12px] text-rose-700 dark:text-rose-300 flex gap-2">
+              <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+              {error}
+            </div>
+          )}
+          {result && (
+            <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border/60 text-[12px]">
+              <div className={cn("px-3.5 py-2.5 flex gap-2", added ? "text-foreground" : "text-muted-foreground")}>
+                <Check className={cn("size-3.5 shrink-0 mt-0.5", added ? "text-lime-600" : "text-muted-foreground")} />
+                {added ? (
+                  <span>
+                    Added <span className="font-medium">{result.variants} variant{result.variants === 1 ? "" : "s"}</span> from {result.products} product
+                    {result.products === 1 ? "" : "s"} to the sheet.
+                  </span>
+                ) : (
+                  <span>Nothing was added.</span>
+                )}
+              </div>
+              {result.notFound.length > 0 && (
+                <div className="px-3.5 py-2.5 flex gap-2 text-amber-700 dark:text-amber-300">
+                  <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+                  <span>
+                    {result.notFound.length} code{result.notFound.length === 1 ? " isn't" : "s aren't"} in the catalogue. {result.notFound.length === 1 ? "It's" : "They're"} left
+                    above — fix {result.notFound.length === 1 ? "it" : "them"} and add again.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
-        {done !== null && (
-          <p className="text-[12px] text-lime-600 dark:text-lime-400">Imported {done} variant{done === 1 ? "" : "s"}.</p>
-        )}
-        {notFound.length > 0 && (
-          <p className="text-[12px] text-amber-600 dark:text-amber-400">
-            Not found: <span className="font-mono">{notFound.slice(0, 12).join(", ")}</span>
-            {notFound.length > 12 ? ` +${notFound.length - 12} more` : ""}
-          </p>
-        )}
+
+        <DialogFooter className="px-6 py-4 border-t border-border bg-muted/20 sm:justify-between sm:items-center">
+          <p className="text-[11px] text-muted-foreground hidden sm:block">Products already on the sheet are added again — delete duplicates afterwards.</p>
+          <div className="flex gap-2 justify-end">
+            <Button size="sm" variant="outline" onClick={onClose} className="h-8 text-[12px]">
+              {added ? "Done" : "Cancel"}
+            </Button>
+            <Button size="sm" onClick={run} disabled={busy || reading || codes.length === 0} className="h-8 text-[12px] min-w-28">
+              {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+              {busy ? "Looking up…" : codes.length === 0 ? "Add codes" : `Add ${codes.length} code${codes.length === 1 ? "" : "s"}`}
+            </Button>
+          </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

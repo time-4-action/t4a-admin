@@ -569,6 +569,17 @@ whole Metakocka directory with each customer's preorder activity across campaign
 fed by `GET /api/admin/preorder/customers?activity=1`, which the `customers`
 section gates together with `/api/admin/portal/*`),
 the preorder customer modal and the Documents customer header.
+**View portal as a user (super-admin only).** The same cookie carries a second
+kind: `POST /api/admin/portal/impersonate { userId, returnTo }` (`canImpersonateUser`
+= `isSuperAdmin`) stores the Auth0 user's id + email + name, and `getPortalViewer()`
+then resolves the partner from **that email** exactly as a real login would (no
+match ⇒ `/portal/no-account` showing that email via `getPortalIdentityEmail()`).
+`readImpersonation()` checks the role the cookie's kind requires, so a cookie of
+the `user` kind is ignored for anyone but a super-admin. Entry point: the
+**Customer Portal** card on the user detail sidebar (`/users/[id]`,
+`ViewAsUserButton` in `components/view-as-customer-button.tsx`, rendered only
+when the page's viewer is a super-admin). `ViewingAs` (`components/viewing-as.ts`)
+is the discriminated union the banner and portal nav render.
 | Customer picker (admin) | `/documents` | Search a partner by name/email/tax. |
 | Customer docs (admin) | `/documents/{offers,orders,invoices,credit-notes}` | Per-family lists for the picked customer (customer kept in localStorage via `use-customer.ts`). |
 | Detail (admin) | `/documents/{offers,orders,invoices,credit-notes}/[mkId]` | Same detail view, any partner. |
@@ -651,7 +662,7 @@ from client input.
 | Page | Path | Notes |
 |---|---|---|
 | Campaigns | `/preorder` | List + create; `marketCount` / override badges. |
-| VAT rates | `/preorder/vat-rates` | Global per-country VAT table + fallback rate (consumer preorders). Nav entry of the Preorder section. |
+| VAT rates | `/preorder/vat-rates` | Global per-country VAT table (added on top of the partner price for individuals) + fallback rate; autosaves; .xlsx template download + import. Nav entry of the Preorder section. |
 | Overview | `/preorder/[id]` | KPIs (incl. In Metakocka / Published / Integration failures), latest preorders. Every campaign page renders the shared `CampaignHeader` (`app/preorder/[campaignId]/campaign-nav.tsx`): a fixed-height title row (back · title + meta · actions) over the `CampaignNav` underline tab strip (Overview · Sheet · Markets & Customers · Preorders · Preview), so the tabs sit on the same pixels everywhere. Page-specific toolbars (sheet settings, preview sheet tabs) live **below** the header, never inside it; small view switchers go in `navExtra` (right end of the tab row). |
 | Sheet | `/preorder/[id]/edit` | Builder (autosaves `tabs`). Row eye toggle = **restricted** (not in the default assortment). Re-price also refreshes the price books. |
 | Markets & Customers | `/preorder/[id]/markets` | List-based: summary strip + **Customers** view (directory table, company/individual split) and **Markets** view (a full-width priority list — drag to reorder) and **Countries** view (table for assignment) **Markets, customers and countries all open in the large editor modal** (`market-modal.tsx`, `customer-modal.tsx`, `country-modal.tsx` on `components/ui/editor-modal.tsx`; a country shows its market select + a searchable, kind-filtered, paged customer list): header + tab strip — a customer gets Overview · Placement · Pricing & terms · Volume discounts · Assortment, a market gets Market · Pricing & terms · Volume discounts · Assortment — the config tabs are slices of `commercial-config-form.tsx` (`section` prop). See below. |
@@ -713,18 +724,26 @@ one read).
 #### Pricing & VAT (`lib/pricing.ts` — the one money service)
 
 Every row carries **two prices**, always shown to everyone: `rrp` (**gross**,
-VAT-inclusive consumer price) and `partnerPrice` (**net**, excl. VAT — stored net
-since the VAT work; `pickMkListNetPrice` / `pickMkListGrossPrice` in
-`lib/metakocka.ts`, `json/product_list` is read with `show_tax_factor`). Who pays
-which is decided by the customer's **kind** (`customerKind()`: tax id ⇒
-`business`, else `person`):
+VAT-inclusive recommended retail price — **reference only**, so a partner knows
+what the goods sell for; nobody is ever charged it) and `partnerPrice` (**net**,
+excl. VAT — stored net since the VAT work; `pickMkListNetPrice` /
+`pickMkListGrossPrice` in `lib/metakocka.ts`, `json/product_list` is read with
+`show_tax_factor`). **Everyone orders at the partner price** (`discountedPrice`
+beats `partnerPrice`; the RRP is only a last-resort fallback for a row with no
+partner price). The customer's **kind** (`customerKind()`: tax id ⇒ `business`,
+else `person`) decides the VAT only:
 
-- **company → partner price, 0% VAT (zero-rated)**; **individual → RRP with the
-  country's VAT extracted from it** — never added on top (€100 RRP in SI = 81.97
-  net + 18.03 VAT). Volume tiers apply to both, compared with the subtotal in
-  the customer's basis. **The threshold is the WHOLE order's subtotal** (every
-  tab together, `PreorderTabTotal.orderAmount`), never the tab alone — a tab
-  keeps its own ladder (thresholds + percentages), but the same order total
+- **company → 0% VAT (zero-rated)** unless the layer's policy charges companies;
+  **individual → the country's VAT ADDED ON TOP** of the net partner price
+  (`addVat`: €82 net in SI = 82 + 18.04 VAT = €100.04). The tier comes off the net
+  unit first, so VAT is charged on the discounted price. `basisFor()` therefore
+  always answers `"partner"`; `PriceBasis = "rrp"` survives only on **legacy
+  snapshots** (submissions frozen before this change charged individuals the
+  VAT-inclusive RRP with the VAT extracted — `splitGross`) and those keep
+  rendering / registering exactly as submitted. Volume tiers apply to both kinds,
+  compared with the net subtotal. **The threshold is the WHOLE order's subtotal**
+  (every tab together, `PreorderTabTotal.orderAmount`), never the tab alone — a
+  tab keeps its own ladder (thresholds + percentages), but the same order total
   unlocks every tab's ladder (`priceOrder` collects all tabs first, then
   evaluates each ladder against the order amount). Tier widgets
   (`TabTierBanner`, `SheetContextBar`) therefore take the full `tabs`.
@@ -732,29 +751,35 @@ which is decided by the customer's **kind** (`customerKind()`: tax id ⇒
   configured fallback → `missing`** (`resolveVatRate`). Global rates live in the
   `VatSettings` singleton (`models/vat-settings.ts`, `lib/vat-settings.ts`; edited
   at **Preorder → VAT rates** `/preorder/vat-rates`, `GET/PUT
-  /api/admin/preorder/vat` — preorder section, like everything else here). Campaign
+  /api/admin/preorder/vat` — preorder section, like everything else here; the page
+  **autosaves** (debounced PUT of the whole table) and offers an **.xlsx round
+  trip**: `GET …/vat/template` downloads Country · Code · VAT % pre-filled with the
+  current rates, `POST …/vat/import` (multipart `file`) parses one back —
+  `lib/vat-xlsx.ts` on `exceljs`, server-side only; a row sets its country's rate,
+  a blank cell clears it, countries absent from the file are untouched; nothing is
+  saved by the import route, the page merges and autosaves). Campaign
   overrides are `campaign.vatOverrides[{iso, rate}]` (PATCH on the campaign; the
   Sheet page's **Pricing & VAT** toolbar → `edit/vat-modal.tsx`, Global vs
   Campaign override, Reset to global). **A missing rate is never guessed**: the
   resolver warns `vat-missing:<iso>`, the portal shows an amber banner and
   disables submit, and `saveOrSubmitPreorder` answers `422 vat-missing` (admins
-  too; drafts still save). An individual ordering a row without an RRP gets
-  `422 rrp-missing`.
+  too; drafts still save). A row with no price at all (no partner / discounted
+  price and no RRP) is resolved as `unpriced` (warning `unpriced:<sku>`), listed
+  but not orderable — submitting it answers `422 unpriced`.
 - **Layer VAT policy** (`VatPolicy`, the config keys `vatMode` / `vatRate` /
   `vatCompanies`, editable in the market and customer modals under Pricing &
   terms → VAT, `vatPolicyFor` in the resolver, provenance `sources.vat`):
   `vatMode` = `country` (default, the rate chain above) | `exempt` (VAT switched
   off, 0%, source `exempt`) | `fixed` (one `vatRate` for every individual in the
   layer, source `market` / `customer`); `vatCompanies: true` charges VAT to
-  companies too — added ON TOP of the net partner price (MK line `price` +
-  `tax_factor`). Rule beats market beats campaign default per key.
+  companies too, the same way as individuals (net partner price + `tax_factor`).
+  Rule beats market beats campaign default per key.
 - The resolver puts a `PricingContext` (`{ kind, basis, countryIso, vat }`) on
   the effective campaign root (`campaign.pricing`, also
   `effective.pricing.ctx`); `campaignFromSnapshot` restores it from the
   snapshot, so every fill component prices the same way with no prop threading
   (`rowUnitPrice(row, basis)`, `computePricedOrder`, `PricingBanner`,
-  `VatBreakdown`). The admin builder has no context and prices on the partner
-  basis.
+  `TotalsLadder`). The admin builder has no context and prices without VAT.
 - Money is **integer cents** (`toCents`/`splitGross`/`priceLine`/`priceOrder`);
   VAT is split per line and totals are the Σ of the lines (invoice-style — a
   one-shot split of the order total could differ by a cent).
@@ -782,18 +807,19 @@ line = the frozen LIST unit price `unitPrice` + the earned tier as the line
 `discount` % — never baked into the price, so MK shows price and discount
 separately like a hand-entered order; `allocationFromDocument` applies the
 discount when reading the order back. The `receiver` (delivery recipient) is
-sent as a copy of the `partner`. The VAT treatment is the snapshot's: a
-company's lines go as `price` = net, an individual's as `price_with_tax` = gross
-RRP; each line carries the rate as MK's documented `tax_factor` ("0.22"). When a
-**Metakocka tax code** is configured for the rate (VAT rates page → optional
-codes table, `VatSettings.taxCodes`, frozen into `snapshot.pricing.mkTaxCode` at
-submit and re-looked-up at register time) it is sent as `tax` instead — the way
-round for lines MK refuses a factor for (the 0 % company line: MK answered
-"Extra columns not supported yet on SalesOrder Products" to `tax_factor: "0"`),
-`MK_ZERO_TAX_CODE` being the env equivalent for 0 %. `MK_LINE_TAX_MODE=code`
-makes a code mandatory for every rate. `GET /api/admin/preorder/vat/mk-tax-codes`
-discovers the account's codes from the sheets' product price lists for the
-page's dropdown. A snapshot without `pricing` cannot be registered):
+sent as a copy of the `partner`. The VAT treatment is the snapshot's: every line
+goes as `price` = net partner price + the rate as MK's documented `tax_factor`
+("0.22" for an individual, "0" for a zero-rated company — MK adds the VAT); a
+**legacy RRP-basis snapshot** still goes as `price_with_tax` = gross RRP. When a
+**Metakocka tax code** is stored for the rate (`VatSettings.taxCodes` — no longer
+edited in the UI, the VAT rates page's codes panel was removed; the PUT keeps
+the stored codes unless `taxCodes` is sent; frozen into
+`snapshot.pricing.mkTaxCode` at submit and re-looked-up at register time) it is
+sent as `tax` instead — the way round for lines MK refuses a factor for (the 0 %
+company line: MK answered "Extra columns not supported yet on SalesOrder
+Products" to `tax_factor: "0"`), `MK_ZERO_TAX_CODE` being the env equivalent
+for 0 %. `MK_LINE_TAX_MODE=code` makes a code mandatory for every rate. A
+snapshot without `pricing` cannot be registered):
 
 1. **Lookup first, every time**: `get_document { doc_type: "sales_order", buyer_order }`
    with the deterministic key `buyerOrderKey(id, rev) = T4A<id>.<rev>` (MK's
@@ -909,7 +935,7 @@ Tests: `npm test` (vitest; `server-only` is stubbed, Mongo tests use
 `mongodb-memory-server`) — pricing/VAT service (cents, splits, rate priority,
 line + order pricing), VAT settings, resolver precedence / assortment / pricing
 / tiers / pricing context, snapshot immutability incl. frozen VAT, countries,
-submit idempotency & race, B2B/B2C MK payloads, vat-missing / rrp-missing
+submit idempotency & race, B2B/B2C MK payloads, vat-missing / unpriced
 blocks, MK failure/retry/adoption, publication, Documents visibility, markets
 API, directory upserts. `npm run typecheck` = `tsc --noEmit`.
 

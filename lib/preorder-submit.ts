@@ -41,7 +41,7 @@ export type SubmitInput = {
   vat?: VatConfig;
 };
 
-export type SubmitError = "locked" | "campaign-not-open" | "min-order" | "invalid" | "vat-missing" | "rrp-missing";
+export type SubmitError = "locked" | "campaign-not-open" | "min-order" | "invalid" | "vat-missing" | "unpriced";
 
 export type SubmitResult =
   | { ok: true; doc: IPreorderSubmission; dropped: string[]; register: RegisterResult | null }
@@ -91,19 +91,19 @@ export async function saveOrSubmitPreorder(input: SubmitInput): Promise<SubmitRe
       message: `No VAT rate is configured for ${where}, so this preorder cannot be submitted yet. Please contact us.`,
     };
   }
-  // A consumer orders at the RRP; a row without one has no price to order at. The
-  // sheet shows such rows as "not orderable" with a remove link, so this only fires
-  // for a stale draft / a forged request.
-  if (submit && ctx?.basis === "rrp") {
-    const noRrp = flattenRows(effective)
+  // A row without any price has nothing to order at. The sheet shows such rows as
+  // "not orderable" with a remove link, so this only fires for a stale draft / a
+  // forged request.
+  if (submit) {
+    const noPrice = flattenRows(effective)
       .filter(({ row }) => cleanQty[row.id] > 0 && row.unpriced)
       .map(({ row }) => row.name || row.code);
-    if (noRrp.length) {
+    if (noPrice.length) {
       return {
         ok: false,
         status: 422,
-        error: "rrp-missing",
-        message: `${noRrp.length === 1 ? "This product has" : "These products have"} no consumer price yet and cannot be ordered by an individual — remove ${noRrp.length === 1 ? "it" : "them"} from your preorder: ${noRrp.slice(0, 5).join(", ")}${noRrp.length > 5 ? ", …" : ""}.`,
+        error: "unpriced",
+        message: `${noPrice.length === 1 ? "This product has" : "These products have"} no price yet and cannot be ordered — remove ${noPrice.length === 1 ? "it" : "them"} from your preorder: ${noPrice.slice(0, 5).join(", ")}${noPrice.length > 5 ? ", …" : ""}.`,
       };
     }
   }

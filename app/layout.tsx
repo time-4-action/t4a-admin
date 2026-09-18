@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "flag-icons/css/flag-icons.min.css";
 import "./globals.css";
 import AppShell from "@/components/app-shell";
+import type { ViewingAs } from "@/components/viewing-as";
 import { CurrencyProvider } from "@/lib/currency-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { auth0 } from "@/lib/auth";
@@ -33,9 +34,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const session = await auth0.getSession();
   const user = session?.user;
   const roles = rolesFromIdToken(session?.tokenSet?.idToken);
-  // An admin viewing the portal as a customer (signed cookie + eligible role).
+  // An admin viewing the portal as a customer or as another user (signed cookie +
+  // eligible role).
   const imp = session ? await readImpersonation() : null;
-  const viewingAs = imp ? { partnerMkId: imp.partnerMkId, partnerName: imp.partnerName } : null;
+  const viewingAs: ViewingAs | null = !imp
+    ? null
+    : imp.kind === "user"
+      ? { kind: "user", userId: imp.userId, email: imp.email, name: imp.name }
+      : { kind: "customer", partnerMkId: imp.partnerMkId, partnerName: imp.partnerName };
 
   return (
     <html lang="en" suppressHydrationWarning>

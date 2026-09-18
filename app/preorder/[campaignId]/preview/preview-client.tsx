@@ -441,13 +441,13 @@ function EffectiveConfigCard({ effective, loading, campaignId, partnerMkId }: { 
           <div className="flex items-start gap-2">
             <span className="text-muted-foreground w-20 shrink-0">Customer</span>
             <span className="text-foreground min-w-0 truncate">
-              {CUSTOMER_KIND_LABELS[m.pricing.ctx.kind]} · {m.pricing.ctx.basis === "rrp" ? "RRP incl. VAT" : "partner price excl. VAT"}
+              {CUSTOMER_KIND_LABELS[m.pricing.ctx.kind]} · partner price excl. VAT{(m.pricing.ctx.vat.rate ?? 0) > 0 ? " + VAT" : ""}
             </span>
           </div>
           <div className="flex items-start gap-2">
             <span className="text-muted-foreground w-20 shrink-0">VAT</span>
             <span className={cn("min-w-0 truncate", m.pricing.ctx.vat.rate == null ? "text-amber-700 dark:text-amber-300 font-medium" : "text-foreground")}>
-              {m.pricing.ctx.vat.rate == null ? `not configured${m.countryIso ? ` for ${m.countryIso}` : ""}` : `${fmtVatRate(m.pricing.ctx.vat.rate)}${m.countryIso && m.pricing.ctx.basis === "rrp" ? ` · ${m.countryIso}` : ""}`}
+              {m.pricing.ctx.vat.rate == null ? `not configured${m.countryIso ? ` for ${m.countryIso}` : ""}` : `${fmtVatRate(m.pricing.ctx.vat.rate)}${m.countryIso && (m.pricing.ctx.vat.source === "global" || m.pricing.ctx.vat.source === "campaign") ? ` · ${m.countryIso}` : ""}`}
             </span>
             <span
               className={cn(

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { viewingAsName, type ViewingAs } from "@/components/viewing-as";
 import { ReceiptText, FileMinus, ClipboardList, Building2, LogOut, Menu, X, ShoppingCart } from "lucide-react";
 
 // The B2B customer portal shell. Shown to any authenticated non-admin (they hold
@@ -41,7 +42,7 @@ function Avatar({ user }: { user?: PortalUser }) {
   );
 }
 
-export default function PortalNav({ user, viewingAs }: { user?: PortalUser; viewingAs?: { partnerMkId: string; partnerName: string } | null }) {
+export default function PortalNav({ user, viewingAs }: { user?: PortalUser; viewingAs?: ViewingAs | null }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -112,11 +113,11 @@ export default function PortalNav({ user, viewingAs }: { user?: PortalUser; view
         </div>
         {user && (
           <div className="flex items-center rounded-xl px-3 py-2 gap-2.5">
-            <Avatar user={viewingAs ? { name: viewingAs.partnerName } : user} />
+            <Avatar user={viewingAs ? { name: viewingAsName(viewingAs) } : user} />
             <div className="flex-1 min-w-0">
               {viewingAs ? (
                 <>
-                  <p className="text-[12px] font-medium text-foreground truncate leading-tight">{viewingAs.partnerName}</p>
+                  <p className="text-[12px] font-medium text-foreground truncate leading-tight">{viewingAsName(viewingAs)}</p>
                   <p className="text-[10px] text-amber-600 dark:text-amber-400 truncate leading-tight">viewed by {user.email ?? user.name}</p>
                 </>
               ) : (

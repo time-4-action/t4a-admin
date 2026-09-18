@@ -3,6 +3,7 @@ import { usePathname } from "next/navigation";
 import Nav from "@/components/nav";
 import PortalNav from "@/components/portal-nav";
 import { ViewingAsBanner } from "@/components/viewing-as-banner";
+import type { ViewingAs } from "@/components/viewing-as";
 
 // Chooses the chrome by route: the stripped-down B2B portal shell under /portal,
 // the full admin sidebar everywhere else. Middleware (lib/proxy.ts) already
@@ -11,7 +12,7 @@ import { ViewingAsBanner } from "@/components/viewing-as-banner";
 
 type ShellUser = { name?: string | null; email?: string | null; picture?: string | null };
 
-export type ViewingAs = { partnerMkId: string; partnerName: string };
+export type { ViewingAs } from "@/components/viewing-as";
 
 export default function AppShell({
   user,
@@ -21,7 +22,7 @@ export default function AppShell({
 }: {
   user?: ShellUser;
   roles?: string[];
-  // Set when an admin is viewing the portal as a customer (lib/portal-impersonation.ts).
+  // Set when an admin is viewing the portal as someone else (lib/portal-impersonation.ts).
   viewingAs?: ViewingAs | null;
   children: React.ReactNode;
 }) {

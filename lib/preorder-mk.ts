@@ -155,9 +155,10 @@ async function markFailed(id: Types.ObjectId, error: string, buyerOrder: string)
 // volume tier as the line's `discount` % — MK then shows price and discount
 // separately, like a hand-entered order, instead of one opaque net figure (the
 // document carries no price list and no document-level discount). The VAT treatment
-// is the snapshot's too: a company's lines go as NET price + tax_factor (0 when
-// zero-rated, the rate when the layer charges companies), an individual's as the
-// GROSS RRP + the country's tax_factor (MK backs out the VAT).
+// is the snapshot's too: lines go as the NET partner price + tax_factor (0 for a
+// zero-rated company, the country's rate for an individual — MK adds the VAT on top).
+// A legacy snapshot frozen on the RRP basis still goes as GROSS RRP + tax_factor (MK
+// backs the VAT out), exactly as it was submitted.
 async function buildOrderInput(
   doc: IPreorderSubmission,
   port: MkOrderPort,
@@ -195,8 +196,8 @@ async function buildOrderInput(
     if (l.unitGross == null || l.unitNet == null) {
       return { ok: false, error: `Line ${l.code} carries no frozen VAT figures — unlock and resubmit.` };
     }
-    // List price = the frozen pre-tier unit in the customer's basis (gross RRP for an
-    // individual, net partner price for a company); the tier rides as `discount`.
+    // List price = the frozen pre-tier unit (net partner price; gross RRP only on a
+    // legacy snapshot); the tier rides as `discount`.
     const discount = l.tierPct && l.tierPct > 0 ? l.tierPct : undefined;
     lines.push(
       pricing.basis === "rrp"
@@ -214,7 +215,7 @@ async function buildOrderInput(
   const vatNote =
     pricing.basis === "rrp"
       ? `VAT: ${CUSTOMER_KIND_LABELS[pricing.kind]}, RRP incl. ${fmtVatRate(pricing.vatRate)} VAT (${pricing.countryIso ?? "?"}, ${VAT_SOURCE_LABELS[pricing.vatSource].toLowerCase()})`
-      : `VAT: ${CUSTOMER_KIND_LABELS[pricing.kind]}, partner prices excl. VAT, ${fmtVatRate(pricing.vatRate)} ${pricing.vatRate > 0 ? "added" : `(${VAT_SOURCE_LABELS[pricing.vatSource].toLowerCase()})`}`;
+      : `VAT: ${CUSTOMER_KIND_LABELS[pricing.kind]}, partner prices excl. VAT, ${fmtVatRate(pricing.vatRate)} ${pricing.vatRate > 0 ? `added (${pricing.countryIso ?? "?"}, ${VAT_SOURCE_LABELS[pricing.vatSource].toLowerCase()})` : `(${VAT_SOURCE_LABELS[pricing.vatSource].toLowerCase()})`}`;
   const notes =
     [doc.terms?.comment?.trim(), tierNotes.length ? `Volume discounts — ${tierNotes.join("; ")}` : "", vatNote].filter(Boolean).join("\n") ||
     undefined;

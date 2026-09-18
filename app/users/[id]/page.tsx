@@ -3,6 +3,8 @@ import { UserUsage } from "@/models/user-usage";
 import { UserLimit } from "@/models/user-limit";
 import { Conversation } from "@/models/conversation";
 import { getMgmtClient } from "@/lib/mgmt";
+import { getCurrentRoles } from "@/lib/current-user";
+import { canImpersonateUser } from "@/lib/portal-impersonation";
 import { isDevRole, isAiRole } from "@/lib/ai-role";
 import { UserDetailStats, UserUsageTable, UserDetailSidebar, UserConversations } from "./user-detail-client";
 import { DetailCrumbBar } from "@/components/detail-crumb-bar";
@@ -35,14 +37,17 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
   await connectDB();
   const mgmt = getMgmtClient();
 
-  const [auth0User, usageDocs, limitDoc, convCount, userRolesRes, allRolesRes] = await Promise.all([
+  const [auth0User, usageDocs, limitDoc, convCount, userRolesRes, allRolesRes, viewerRoles] = await Promise.all([
     mgmt.users.get(id),
     UserUsage.find({ userId: id }),
     UserLimit.findOne({ userId: id }),
     Conversation.countDocuments({ userId: id }),
     mgmt.users.roles.list(id),
     mgmt.roles.list(),
+    getCurrentRoles(),
   ]);
+  // "View portal as this user" is super-admin only (the API enforces it too).
+  const canViewAs = canImpersonateUser(viewerRoles);
 
   const currentRoles = ((userRolesRes as any).data as any[])
     .filter((r: any) => !isDevRole(r.name))
@@ -153,6 +158,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
             user={{ id, name: auth0User.name ?? "", email: auth0User.email ?? "", picture: auth0User.picture, limit: plainLimit }}
             allRoles={allRoles}
             currentRoles={currentRoles}
+            canViewAs={canViewAs}
           />
         </aside>
       </div>

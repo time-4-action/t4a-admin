@@ -254,32 +254,32 @@ describe("submission → Metakocka order", () => {
   });
 });
 
-describe("consumer (B2C) submissions — RRP incl. VAT", () => {
-  it("individual: MK lines carry the gross RRP + the country's tax factor; snapshot freezes the VAT decision", async () => {
+describe("consumer (B2C) submissions — partner price + VAT on top", () => {
+  it("individual: MK lines carry the net partner price + the country's tax factor; snapshot freezes the VAT decision", async () => {
     const campaign = await makeCampaign();
     const mk = new MkFake();
     const r = await submit(campaign, mk, { s1: 100, m1: 20 }, "submit", "customer", person);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const input = mk.creates[0];
-    // 100 × 200 RRP = 20 000 in Sails ⇒ Gold 10 % as the line discount on the 200 gross; SI 22 % inside it.
-    expect(input.lines[0]).toEqual({ code: "SKU-s1", amount: 100, priceWithTax: 200, discount: 10, taxFactor: 0.22, tax: "EX4" });
-    expect(input.lines[1]).toEqual({ code: "SKU-m1", amount: 20, priceWithTax: 100, taxFactor: 0.22, tax: "EX4" });
-    expect(input.notes).toContain("VAT: Individual, RRP incl. 22% VAT (SI, global rate)");
+    // 100 × 100 + 20 × 50 = 11 000 net on the order ⇒ Gold 10 % as the line discount on the 100 net; SI 22 % added by MK.
+    expect(input.lines[0]).toEqual({ code: "SKU-s1", amount: 100, price: 100, discount: 10, taxFactor: 0.22, tax: "EX4" });
+    expect(input.lines[1]).toEqual({ code: "SKU-m1", amount: 20, price: 50, taxFactor: 0.22, tax: "EX4" });
+    expect(input.notes).toContain("VAT: Individual, partner prices excl. VAT, 22% added (SI, global rate)");
     const view = toSubmissionView(r.doc);
     expect(view.snapshot?.pricing).toEqual({
       kind: "person",
-      basis: "rrp",
+      basis: "partner",
       countryIso: "SI",
       vatRate: 22,
       vatSource: "global",
       mkTaxCode: "EX4",
-      totals: { net: 100 * 147.54 + 20 * 81.97, vat: 100 * 32.46 + 20 * 18.03, gross: 20000 },
+      totals: { net: 10000, vat: 2200, gross: 12200 },
     });
-    expect(view.snapshot?.lines[0]).toMatchObject({ unitPrice: 200, rrp: 200, partnerPrice: 100, unitNet: 147.54, unitVat: 32.46, unitGross: 180 });
-    expect(view.totals?.net).toBe(20000);
-    // MK's own total (from the gross lines) equals the frozen gross.
-    expect(Number(mk.orders.get("mk1")?.sumAll)).toBe(20000);
+    expect(view.snapshot?.lines[0]).toMatchObject({ unitPrice: 100, rrp: 200, partnerPrice: 100, unitNet: 90, unitVat: 19.8, unitGross: 109.8 });
+    expect(view.totals?.net).toBe(10000);
+    // MK's own total (net lines + the factor) equals the frozen gross.
+    expect(Number(mk.orders.get("mk1")?.sumAll)).toBe(12200);
   });
 
   it("campaign VAT override beats the global rate", async () => {
@@ -287,8 +287,8 @@ describe("consumer (B2C) submissions — RRP incl. VAT", () => {
     const mk = new MkFake();
     const r = await submit(campaign, mk, { m1: 1 }, "submit", "customer", person);
     if (!r.ok) throw new Error("submit failed");
-    expect(mk.creates[0].lines[0]).toEqual({ code: "SKU-m1", amount: 1, priceWithTax: 100, taxFactor: 0.095, tax: "EX3" });
-    expect(toSubmissionView(r.doc).snapshot?.pricing).toMatchObject({ vatRate: 9.5, vatSource: "campaign", totals: { net: 91.32, vat: 8.68, gross: 100 } });
+    expect(mk.creates[0].lines[0]).toEqual({ code: "SKU-m1", amount: 1, price: 50, taxFactor: 0.095, tax: "EX3" });
+    expect(toSubmissionView(r.doc).snapshot?.pricing).toMatchObject({ vatRate: 9.5, vatSource: "campaign", totals: { net: 50, vat: 4.75, gross: 54.75 } });
   });
 
   it("no VAT rate for the customer's country ⇒ 422 vat-missing, no MK order, for admins too; drafts still save", async () => {
@@ -308,7 +308,7 @@ describe("consumer (B2C) submissions — RRP incl. VAT", () => {
     // A fallback rate unblocks it.
     const f = await saveOrSubmitPreorder({ campaignDoc: campaign, partner: noVat, quantities: { m1: 1 }, terms: undefined, action: "submit", actor: { source: "customer" }, port: mk, vat: { ...vatConfig, fallbackRate: 20 } });
     expect(f.ok).toBe(true);
-    expect(mk.creates[0].lines[0]).toEqual({ code: "SKU-m1", amount: 1, priceWithTax: 100, taxFactor: 0.2, tax: "EX2" });
+    expect(mk.creates[0].lines[0]).toEqual({ code: "SKU-m1", amount: 1, price: 50, taxFactor: 0.2, tax: "EX2" });
     expect(f.ok && toSubmissionView(f.doc).snapshot?.pricing?.vatSource).toBe("fallback");
   });
 
@@ -322,25 +322,40 @@ describe("consumer (B2C) submissions — RRP incl. VAT", () => {
     expect(Number(mk.orders.get("mk1")?.sumAll)).toBe(122);
   });
 
-  it("a VAT-exempt market: individuals pay the RRP with no VAT inside it", async () => {
+  it("a VAT-exempt market: individuals pay the partner price with no VAT added", async () => {
     const campaign = await makeCampaign({ markets: [{ id: "ex", name: "Export", color: "sky", countries: ["SI"], config: { vatMode: "exempt" } }] });
     const mk = new MkFake();
     const r = await submit(campaign, mk, { m1: 1 }, "submit", "customer", person);
     if (!r.ok) throw new Error("submit failed");
-    expect(mk.creates[0].lines[0]).toEqual({ code: "SKU-m1", amount: 1, priceWithTax: 100, taxFactor: 0, tax: "000" });
-    expect(toSubmissionView(r.doc).snapshot?.pricing).toMatchObject({ vatRate: 0, vatSource: "exempt", totals: { net: 100, vat: 0, gross: 100 } });
+    expect(mk.creates[0].lines[0]).toEqual({ code: "SKU-m1", amount: 1, price: 50, taxFactor: 0, tax: "000" });
+    expect(toSubmissionView(r.doc).snapshot?.pricing).toMatchObject({ vatRate: 0, vatSource: "exempt", totals: { net: 50, vat: 0, gross: 50 } });
   });
 
-  it("an individual cannot order a row without an RRP — submit names it, a draft still saves", async () => {
+  it("a customer-specific VAT rate beats the country rate for an individual", async () => {
+    const campaign = await makeCampaign({ customerRules: [{ partnerMkId: "p2", partnerName: "Jane", config: { vatMode: "fixed", vatRate: 10 } }] });
+    const mk = new MkFake();
+    const r = await submit(campaign, mk, { m1: 1 }, "submit", "customer", person);
+    if (!r.ok) throw new Error("submit failed");
+    expect(mk.creates[0].lines[0]).toEqual({ code: "SKU-m1", amount: 1, price: 50, taxFactor: 0.1, tax: null });
+    expect(toSubmissionView(r.doc).snapshot?.pricing).toMatchObject({ vatRate: 10, vatSource: "customer", totals: { net: 50, vat: 5, gross: 55 } });
+  });
+
+  it("a missing RRP changes nothing — everyone orders at the partner price; a row with no price at all cannot be submitted", async () => {
     const c = baseCampaign();
     c.tabs[1].groups[0].rows[0].rrp = null;
     const campaign = await makeCampaign({ tabs: c.tabs });
     const mk = new MkFake();
-    const r = await submit(campaign, mk, { m1: 1, s1: 1 }, "submit", "customer", person);
-    expect(r.ok === false && [r.status, r.error]).toEqual([422, "rrp-missing"]);
-    expect(r.ok === false && r.message).toContain("Product m1");
-    expect(mk.creates).toHaveLength(0);
-    const d = await submit(campaign, mk, { m1: 1, s1: 1 }, "save", "customer", person);
+    const r = await submit(campaign, mk, { m1: 1 }, "submit", "customer", person);
+    expect(r.ok).toBe(true);
+    expect(mk.creates[0].lines[0]).toEqual({ code: "SKU-m1", amount: 1, price: 50, taxFactor: 0.22, tax: "EX4" });
+
+    const c2 = baseCampaign();
+    Object.assign(c2.tabs[1].groups[0].rows[0], { rrp: null, partnerPrice: null, discountedPrice: null });
+    const campaign2 = await makeCampaign({ tabs: c2.tabs });
+    const r2 = await submit(campaign2, mk, { m1: 1, s1: 1 }, "submit", "customer", person);
+    expect(r2.ok === false && [r2.status, r2.error]).toEqual([422, "unpriced"]);
+    expect(r2.ok === false && r2.message).toContain("Product m1");
+    const d = await submit(campaign2, mk, { m1: 1, s1: 1 }, "save", "customer", person);
     expect(d.ok && d.doc.lines.map((l) => l.rowId).sort()).toEqual(["m1", "s1"]);
   });
 
@@ -357,7 +372,7 @@ describe("consumer (B2C) submissions — RRP incl. VAT", () => {
     mk.mode = "ok";
     const retry = await registerSalesOrder(r.doc._id, { source: "admin", email: "a" }, { port: mk });
     expect(retry.state).toBe("created");
-    expect(mk.creates.at(-1)?.lines[0]).toEqual({ code: "SKU-m1", amount: 1, priceWithTax: 100, taxFactor: 0.22, tax: "EX4" });
+    expect(mk.creates.at(-1)?.lines[0]).toEqual({ code: "SKU-m1", amount: 1, price: 50, taxFactor: 0.22, tax: "EX4" });
   });
 });
 
@@ -419,10 +434,10 @@ describe("re-pricing a submitted preorder", () => {
     const rp = await repriceSubmission(stale, { partner: personPartner });
     expect(rp.ok).toBe(true);
     if (!rp.ok) return;
-    expect(toSubmissionView(rp.doc).snapshot?.pricing).toMatchObject({ kind: "person", basis: "rrp", vatRate: 22, vatSource: "global" });
+    expect(toSubmissionView(rp.doc).snapshot?.pricing).toMatchObject({ kind: "person", basis: "partner", vatRate: 22, vatSource: "global" });
     const retry = await registerSalesOrder(rp.doc._id, { source: "admin", email: "a" }, { port: mk });
     expect(retry.state).toBe("created");
-    expect(mk.creates.at(-1)?.lines[0]).toEqual({ code: "SKU-s1", amount: 2, priceWithTax: 200, taxFactor: 0.22, tax: "EX4" });
+    expect(mk.creates.at(-1)?.lines[0]).toEqual({ code: "SKU-s1", amount: 2, price: 100, taxFactor: 0.22, tax: "EX4" });
   });
 
   it("refuses to re-price a preorder that already has a Metakocka order", async () => {

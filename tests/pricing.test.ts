@@ -53,8 +53,11 @@ describe("integer cents", () => {
 describe("VAT rate resolution", () => {
   it("companies are always zero-rated, even with a campaign override for their country", () => {
     expect(resolveVatRate({ kind: "business", countryIso: "SI", campaignOverrides: [{ iso: "SI", rate: 22 }], global })).toEqual({ rate: 0, source: "zero-rated" });
+  });
+
+  it("everyone is resolved onto the partner price basis — the RRP is reference only", () => {
     expect(basisFor("business")).toBe("partner");
-    expect(basisFor("person")).toBe("rrp");
+    expect(basisFor("person")).toBe("partner");
   });
 
   it("individuals: campaign override > global > fallback > missing", () => {
@@ -103,7 +106,15 @@ describe("VAT rate resolution", () => {
 });
 
 describe("line pricing", () => {
-  it("individual: RRP basis, tier off the gross, VAT extracted per unit", () => {
+  it("individual: partner basis, tier off the net, VAT ADDED per unit on the discounted price", () => {
+    const lp = priceLine({ basis: "partner", unit: 100, qty: 3, tierPct: 10, vatRate: 22 });
+    expect(lp).toMatchObject({ unit: 100, tierPct: 10, unitFinal: 90, unitNet: 90, unitVat: 19.8, unitGross: 109.8 });
+    expect(lp.lineNet).toBe(270);
+    expect(lp.lineVat).toBe(59.4);
+    expect(lp.lineGross).toBe(329.4);
+  });
+
+  it("legacy RRP-basis snapshot: tier off the gross, VAT extracted per unit", () => {
     const lp = priceLine({ basis: "rrp", unit: 100, qty: 3, tierPct: 10, vatRate: 22 });
     expect(lp).toMatchObject({ unit: 100, tierPct: 10, unitFinal: 90, unitNet: 73.77, unitVat: 16.23, unitGross: 90 });
     expect(lp.lineGross).toBe(270);
@@ -122,7 +133,7 @@ describe("line pricing", () => {
     expect(lp).toMatchObject({ unitNet: 100, unitVat: 22, unitGross: 122, lineNet: 200, lineVat: 44, lineGross: 244 });
   });
 
-  it("unitPriceFor: partner basis keeps the legacy fallback chain, RRP basis never falls back", () => {
+  it("unitPriceFor: discounted → partner → RRP fallback; the legacy RRP basis never falls back", () => {
     expect(unitPriceFor({ discountedPrice: 80, partnerPrice: 100, rrp: 200 }, "partner")).toBe(80);
     expect(unitPriceFor({ discountedPrice: null, partnerPrice: null, rrp: 200 }, "partner")).toBe(200);
     expect(unitPriceFor({ discountedPrice: 80, partnerPrice: 100, rrp: 200 }, "rrp")).toBe(200);
@@ -133,7 +144,8 @@ describe("line pricing", () => {
 describe("priceOrder", () => {
   const qty = { s1: 10, s2: 2, m1: 1 };
   const company: PricingContext = { kind: "business", basis: "partner", countryIso: "SI", vat: { rate: 0, source: "zero-rated" } };
-  const person: PricingContext = { kind: "person", basis: "rrp", countryIso: "SI", vat: { rate: 22, source: "global" } };
+  const person: PricingContext = { kind: "person", basis: "partner", countryIso: "SI", vat: { rate: 22, source: "global" } };
+  const legacyPerson: PricingContext = { kind: "person", basis: "rrp", countryIso: "SI", vat: { rate: 22, source: "global" } };
 
   it("company: partner basis, tier on the net subtotal, no VAT", () => {
     const o = priceOrder({ ...baseCampaign(), pricing: company }, (r) => qty[r.id as keyof typeof qty] ?? 0);
@@ -144,8 +156,19 @@ describe("priceOrder", () => {
     expect(o.vat).toEqual({ rate: 0, net: 1285, vat: 0, gross: 1285 });
   });
 
-  it("individual: RRP basis (rrp = 2× partner in the fixtures), tier on the gross subtotal, VAT inside", () => {
+  it("individual: the SAME partner prices and tier as a company, VAT added on top of the discounted net", () => {
     const o = priceOrder({ ...baseCampaign(), pricing: person }, (r) => qty[r.id as keyof typeof qty] ?? 0);
+    // Identical basis figures to the company case — the manual discountedPrice counts too.
+    expect(o.tabs[0]).toMatchObject({ amount: 1300, discountPct: 5, discount: 65, net: 1235 });
+    expect(o.totals).toEqual({ qty: 13, amount: 1350, discount: 65, net: 1285 });
+    // 22 % on the net-after-tier of every line: 1285 net + 282.70 VAT.
+    expect(o.vat).toEqual({ rate: 22, net: 1285, vat: 282.7, gross: 1567.7 });
+    expect(o.tabs[0].lines.s1).toMatchObject({ unit: 100, unitFinal: 95, unitNet: 95, unitVat: 20.9, unitGross: 115.9, lineGross: 1159 });
+    expect(o.tabs[0].lines.s2).toMatchObject({ unit: 150, unitFinal: 142.5, unitVat: 31.35 }); // discounted price, not the 200 partner price
+  });
+
+  it("legacy RRP-basis snapshot: rrp = 2× partner in the fixtures, tier on the gross subtotal, VAT inside", () => {
+    const o = priceOrder({ ...baseCampaign(), pricing: legacyPerson }, (r) => qty[r.id as keyof typeof qty] ?? 0);
     // Sails: 10×200 + 2×400 = 2800 ≥ Silver ⇒ 5 %; the manual discountedPrice is a partner concept and is ignored.
     expect(o.tabs[0]).toMatchObject({ amount: 2800, discountPct: 5, discount: 140, net: 2660 });
     expect(o.totals).toEqual({ qty: 13, amount: 2900, discount: 140, net: 2760 });
@@ -186,7 +209,8 @@ describe("priceOrder", () => {
     const o = priceOrder({ ...baseCampaign(), pricing: missing }, (r) => qty[r.id as keyof typeof qty] ?? 0);
     expect(o.vat).toBeNull();
     expect(vatLabel(missing)).toBe("VAT rate not configured");
-    expect(vatLabel(person)).toBe("incl. 22% VAT");
+    expect(vatLabel(person)).toBe("excl. VAT · +22% VAT");
+    expect(vatLabel(legacyPerson)).toBe("incl. 22% VAT");
     expect(vatLabel(company)).toBe("excl. VAT · 0% (company)");
   });
 });

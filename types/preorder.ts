@@ -49,9 +49,9 @@ export type PreorderRow = {
   variantLabel?: string | null; // "fin / model / size" column
   size?: string | null;
   tag?: RowTag;
-  rrp?: number | null; // RRP — GROSS, VAT-inclusive (what an individual pays)
-  partnerPrice?: number | null; // partner price — NET, excl. VAT (what a company pays, zero-rated)
-  discountedPrice?: number | null; // discounted partner price (net)
+  rrp?: number | null; // RRP — the recommended retail price, GROSS. Reference only: shown, never charged
+  partnerPrice?: number | null; // partner price — NET, excl. VAT. What EVERYONE orders at (VAT added for individuals)
+  discountedPrice?: number | null; // manually discounted partner price (net) — beats partnerPrice when set
   image?: string | null;
   order: number;
   // Not in the DEFAULT assortment: visible only where a market / customer rule
@@ -62,8 +62,8 @@ export type PreorderRow = {
   taxCode?: string | null;
   // Where the effective unit price came from. Set by the resolver only — never stored.
   priceSource?: "sheet" | "manual" | "book" | "fallback";
-  // No price for THIS customer (an individual and the row has no RRP): shown, but
-  // cannot be ordered. Set by the resolver only — never stored.
+  // No price at all (no partner / discounted price and no RRP to fall back on):
+  // shown, but cannot be ordered. Set by the resolver only — never stored.
   unpriced?: boolean;
 };
 
@@ -82,9 +82,8 @@ export type PreorderGroup = {
 // order (every tab together) and every line in this tab gets `discountPct` off. The
 // ladder (thresholds + percentages) is per tab, the amount that unlocks it is the full
 // order. Tiers never stack — the single highest threshold the order subtotal reaches
-// is the one that applies. Thresholds are compared against the subtotal exactly as the
-// customer sees it, in their own price basis: companies on partner prices excl. VAT,
-// individuals on RRP incl. VAT (campaign currency either way).
+// is the one that applies. Thresholds are compared against the net subtotal exactly as
+// the customer sees it — partner prices excl. VAT, in the campaign currency.
 export type PreorderTier = {
   id: string;
   name: string; // what the partner is told they reached, e.g. "Gold"
@@ -131,9 +130,10 @@ export type PreorderCampaign = {
   rrpPricelist?: string | null;
   partnerPricelist?: string | null;
   tabs: PreorderTab[];
-  // How THIS customer is priced (kind, basis, VAT). Set by the effective-campaign
-  // resolver and restored from a submission's snapshot — never stored on the campaign.
-  // Absent on the admin's raw sheet (builder), which prices on the partner basis.
+  // How THIS customer is priced (kind, VAT; the basis is always the partner price —
+  // "rrp" only on a legacy snapshot). Set by the effective-campaign resolver and
+  // restored from a submission's snapshot — never stored on the campaign. Absent on
+  // the admin's raw sheet (builder), which prices without VAT.
   pricing?: PricingContext | null;
   createdBy?: string | null;
   createdAt?: string | null;
@@ -301,9 +301,9 @@ export type SubmissionLine = {
   lineStatus?: LineStatus;
 };
 
-// `amount` is the line sum in the customer's price basis (company: partner net,
-// individual: RRP gross); `discount` is the Σ of the per-tab volume discounts earned;
-// `net` is what the customer actually pays in that basis — it is NOT the VAT-net (that
+// `amount` is the line sum at partner prices (net, excl. VAT; a legacy RRP-basis
+// snapshot: gross); `discount` is the Σ of the per-tab volume discounts earned; `net`
+// is `amount − discount` — the payable amount BEFORE VAT (the VAT-inclusive figure
 // lives in the snapshot's `pricing.totals`). Both are absent on submissions saved before
 // volume discounts existed — read them through totalsNet()/totalsDiscount().
 export type PreorderSubmissionTotals = {
@@ -373,8 +373,8 @@ export type SnapshotLine = {
   groupId: string;
   groupName: string;
   qty: number;
-  unitPrice: number; // the USED unit price in the customer's basis, before volume discounts
-  rrp?: number | null; // gross RRP as shown
+  unitPrice: number; // the USED unit price (net partner price; gross RRP on a legacy snapshot), before volume discounts
+  rrp?: number | null; // gross RRP as shown (reference)
   partnerPrice?: number | null; // net partner price as shown
   taxCode?: string | null; // legacy MK tax code; lines now carry tax_factor
   priceSource: NonNullable<PreorderRow["priceSource"]>;

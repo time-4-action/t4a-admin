@@ -178,9 +178,11 @@ function TagPill({ tag }: { tag?: PreorderRow["tag"] }) {
 }
 
 // ── Pricing banner ───────────────────────────────────────────────────────────
-// Tells the customer how THEY are priced: a company orders at partner prices,
-// zero-rated; an individual at the RRP with their country's VAT inside it. When the
-// VAT rate is not configured the banner turns amber — the order cannot be submitted.
+// Tells the customer how THEY are priced: everyone orders at partner prices — a
+// company zero-rated (unless the layer charges VAT), an individual with their
+// country's VAT added on top. A legacy RRP-basis snapshot still reads "incl. VAT".
+// When the VAT rate is not configured the banner turns amber — the order cannot be
+// submitted.
 export function PricingBanner({ pricing, className, bare }: { pricing: PricingContext | null | undefined; className?: string; bare?: boolean }) {
   if (!pricing) return null;
   const missing = vatIsMissing(pricing);
@@ -212,16 +214,22 @@ export function PricingBanner({ pricing, className, bare }: { pricing: PricingCo
               : ` (${fmtVatRate(pricing.vat.rate)}, ${pricing.vat.source === "exempt" ? "VAT exempt" : "zero-rated"}).`}{" "}
             The RRP column is shown for reference.
           </>
-        ) : pricing.vat.source === "exempt" ? (
+        ) : pricing.basis === "rrp" ? (
           <>
-            <span className="font-semibold text-foreground">You order as an individual</span> — retail prices (RRP), VAT exempt (0%). The partner column is
-            shown for reference.
+            <span className="font-semibold text-foreground">You order as an individual</span> — retail prices (RRP) incl.{" "}
+            {fmtVatRate(pricing.vat.rate)} VAT{pricing.countryIso ? ` (${pricing.countryIso})` : ""}. VAT is included in every price shown. The partner
+            column is shown for reference.
+          </>
+        ) : (pricing.vat.rate ?? 0) > 0 ? (
+          <>
+            <span className="font-semibold text-foreground">You order as an individual</span> — partner prices, excl. VAT.{" "}
+            {fmtVatRate(pricing.vat.rate)} VAT{pricing.countryIso ? ` (${pricing.countryIso})` : ""} is added on top of every price at checkout. The RRP
+            column is shown for reference.
           </>
         ) : (
           <>
-            <span className="font-semibold text-foreground">You order as an individual</span> — retail prices (RRP) incl.{" "}
-            {fmtVatRate(pricing.vat.rate)} VAT{pricing.countryIso ? ` (${pricing.countryIso})` : ""}. VAT is included in every price shown, never added on
-            top. The partner column is shown for reference.
+            <span className="font-semibold text-foreground">You order as an individual</span> — partner prices, excl. VAT ({fmtVatRate(pricing.vat.rate)},{" "}
+            {pricing.vat.source === "exempt" ? "VAT exempt" : "zero-rated"}). The RRP column is shown for reference.
           </>
         )}
       </div>
@@ -314,7 +322,7 @@ export function PreorderGridTab({
           <tr className="border-b border-border bg-muted/20">
             <th className={cn(th, "text-left pl-4 min-w-[220px]")}>Product</th>
             <th className={cn(th, "text-left")}>SKU</th>
-            <th className={cn(th, "text-right")}>{priceHeader("RRP", "incl. VAT", basis === "rrp")}</th>
+            <th className={cn(th, "text-right")}>{priceHeader("RRP", basis === "rrp" ? "incl. VAT" : "reference", basis === "rrp")}</th>
             <th className={cn(th, "text-right")}>{priceHeader("Partner", "excl. VAT", basis === "partner")}</th>
             <th className={cn(th, "text-right w-28")}>{qtyHeader ?? "Qty"}</th>
             <th className={cn(th, "text-right pr-4 w-24")}>Total</th>
@@ -404,7 +412,7 @@ function GroupRows({
               </td>
               <td className="px-2 py-1.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap">{r.code}</td>
               <td colSpan={2} className="px-2 py-1.5 text-right text-[11px] text-amber-700 dark:text-amber-300">
-                <span className="inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> no consumer price yet — not orderable</span>
+                <span className="inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> no price yet — not orderable</span>
               </td>
               <td className="px-2 py-1.5 text-right">
                 {qty > 0 && !readOnly ? (
@@ -463,6 +471,38 @@ function groupCartCount(group: PreorderTab["groups"][number], q: QtyMap): number
 }
 function groupHero(group: PreorderTab["groups"][number]): string | null {
   return group.images?.[0] ?? group.rows.find((r) => r.image)?.image ?? null;
+}
+
+function rowLabel(r: PreorderRow): string {
+  return (r.variantLabel ?? r.size ?? r.name ?? "").trim();
+}
+
+/**
+ * Short per-variant labels for a group's rows: the run of leading words shared by
+ * every row (typically the product name, e.g. "Patrik AEON Foil Set") is lifted out
+ * as `prefix`, and each row keeps only its own tail ("SL 750"). A row whose whole
+ * label is the prefix keeps it in full. `prefix` is null when the group name already
+ * says it (or there is nothing shared), so the caller only shows it when it adds
+ * information.
+ */
+function variantLabels(group: PreorderTab["groups"][number]): { prefix: string | null; short: Record<string, string> } {
+  const full = group.rows.map((r) => rowLabel(r));
+  const words = full.map((s) => s.split(/\s+/).filter(Boolean));
+  let n = 0;
+  if (words.length > 1) {
+    const first = words[0];
+    outer: for (; n < first.length; n++) {
+      for (const w of words) if (w[n]?.toLowerCase() !== first[n].toLowerCase()) break outer;
+    }
+  }
+  const prefix = n > 0 ? words[0].slice(0, n).join(" ") : "";
+  const short: Record<string, string> = {};
+  group.rows.forEach((r, i) => {
+    const tail = words[i].slice(n).join(" ").replace(/^[\s\-–—·:,/|]+/, "");
+    short[r.id] = tail || full[i];
+  });
+  const redundant = !prefix || group.name.toLowerCase().includes(prefix.toLowerCase());
+  return { prefix: redundant ? null : prefix, short };
 }
 
 export function PreorderGuidedTab({
@@ -639,12 +679,22 @@ function ProductDetailModal({
 
   const cart = groupCartCount(group, quantities);
   const subtotal = group.rows.reduce((s, r) => s + (quantities[r.id] || 0) * rowUnitPrice(r, basis), 0);
+  // Variant rows carry only what tells them apart: the words every row shares (the
+  // product name repeated on each variant) move up into one caption, so a long list
+  // reads "SL 750 / SL 900 / CR 900 …" instead of eleven truncated copies of the same
+  // prefix. Rows have no thumbnail of their own — pointing at a row shows its picture
+  // in the gallery instead.
+  const variants = useMemo(() => variantLabels(group), [group]);
+  const showRow = (r: PreorderRow) => {
+    const i = r.image ? gallery.indexOf(r.image) : -1;
+    if (i >= 0) setIndex(i);
+  };
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-3xl p-0 overflow-hidden gap-0">
+      <DialogContent className="sm:max-w-4xl p-0 overflow-hidden gap-0">
         <DialogTitle className="sr-only">{group.name}</DialogTitle>
-        <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_1.25fr] max-h-[85vh]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 max-h-[85vh] overflow-y-auto sm:overflow-visible">
           {/* Gallery */}
           <div className="bg-muted/40 p-4 flex flex-col gap-3 border-b sm:border-b-0 sm:border-r border-border min-w-0">
             <div className="relative group/gallery">
@@ -686,67 +736,59 @@ function ProductDetailModal({
               )}
             </div>
             {gallery.length > 1 && (
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => thumbsRef.current?.scrollBy({ left: -160, behavior: "smooth" })}
-                  aria-label="Scroll thumbnails left"
-                  className="h-7 w-7 shrink-0 rounded-full border border-border bg-background text-muted-foreground hover:text-foreground flex items-center justify-center"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                </button>
-                <div ref={thumbsRef} className="flex-1 min-w-0 flex gap-2 overflow-x-auto scrollbar-none py-0.5 px-0.5 snap-x">
-                  {gallery.map((img, i) => (
-                    <button
-                      key={img}
-                      type="button"
-                      onClick={() => setIndex(i)}
-                      aria-current={i === index ? "true" : undefined}
-                      className={cn("w-12 h-12 rounded-lg overflow-hidden border-2 shrink-0 snap-start transition-colors", i === index ? "border-lime-500" : "border-transparent hover:border-border")}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={img} alt="" className="w-full h-full object-cover" />
-                    </button>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => thumbsRef.current?.scrollBy({ left: 160, behavior: "smooth" })}
-                  aria-label="Scroll thumbnails right"
-                  className="h-7 w-7 shrink-0 rounded-full border border-border bg-background text-muted-foreground hover:text-foreground flex items-center justify-center"
-                >
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
+              <div ref={thumbsRef} className="flex gap-2 overflow-x-auto scrollbar-none py-0.5 px-0.5 snap-x">
+                {gallery.map((img, i) => (
+                  <button
+                    key={img}
+                    type="button"
+                    onClick={() => setIndex(i)}
+                    aria-current={i === index ? "true" : undefined}
+                    className={cn("w-12 h-12 rounded-lg overflow-hidden border-2 shrink-0 snap-start transition-colors", i === index ? "border-lime-500" : "border-transparent hover:border-border")}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img} alt="" className="w-full h-full object-cover" />
+                  </button>
+                ))}
               </div>
+            )}
+            {group.description && (
+              <p className="text-[12px] text-muted-foreground leading-relaxed whitespace-pre-line line-clamp-3">{group.description}</p>
             )}
           </div>
 
-          {/* Details + variants */}
-          <div className="flex flex-col min-h-0">
+          {/* Details + variants — sized by the gallery column, scrolling inside it */}
+          <div className="relative min-h-[60vh] sm:min-h-0">
+          <div className="sm:absolute sm:inset-0 flex flex-col min-h-0 h-full">
             <div className="p-4 pb-2">
               <h2 className="text-[15px] font-semibold text-foreground leading-tight">{group.name}</h2>
-              {group.description && (
-                <p className="text-[12px] text-muted-foreground mt-1.5 whitespace-pre-line line-clamp-4">{group.description}</p>
-              )}
+              <div className="text-[11px] text-muted-foreground mt-1">
+                {variants.prefix && <span className="text-foreground/80 font-medium">{variants.prefix} · </span>}
+                {group.rows.length} variant{group.rows.length === 1 ? "" : "s"}
+              </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-4 divide-y divide-border/60">
+            <div className="relative flex-1 min-h-0">
+              <div className="h-full overflow-y-auto px-4 pb-4 divide-y divide-border/60">
               {group.rows.map((r) => {
                 const qty = quantities[r.id] || 0;
                 const unit = rowUnitPrice(r, basis);
                 const other = basis === "rrp" ? (r.discountedPrice ?? r.partnerPrice ?? null) : (r.rrp ?? null);
                 return (
-                  <div key={r.id} className="flex items-center gap-2.5 py-2.5">
-                    <RowThumb row={r} />
+                  <div
+                    key={r.id}
+                    onMouseEnter={() => showRow(r)}
+                    onFocusCapture={() => showRow(r)}
+                    className="flex items-center gap-3 py-2"
+                  >
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1">
-                        <span className="text-[12px] font-medium text-foreground truncate">{r.variantLabel ?? r.size ?? r.name}</span>
+                      <div className="flex items-start gap-1">
+                        <span className="text-[12px] font-medium text-foreground leading-snug line-clamp-2">{variants.short[r.id]}</span>
                         <TagPill tag={r.tag} />
                       </div>
                       <div className="text-[10px] text-muted-foreground font-mono truncate">{r.code}</div>
                     </div>
                     {r.unpriced ? (
                       <span className="text-[11px] text-amber-700 dark:text-amber-300 text-right inline-flex items-center gap-1 shrink-0">
-                        <AlertTriangle className="w-3 h-3" /> no consumer price yet
+                        <AlertTriangle className="w-3 h-3" /> no price yet
                         {qty > 0 && (
                           <button type="button" onClick={() => onQty(r.id, 0)} className="underline ml-1">remove {qty}</button>
                         )}
@@ -767,6 +809,9 @@ function ProductDetailModal({
                   </div>
                 );
               })}
+              </div>
+              {/* Fade hints at more variants below the fold; the padding above keeps the last row clear of it. */}
+              <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-5 bg-gradient-to-t from-background to-transparent" />
             </div>
             <div className="flex items-center justify-between gap-2 p-4 border-t border-border bg-muted/20">
               <div className="text-[12px] text-muted-foreground">
@@ -782,6 +827,7 @@ function ProductDetailModal({
                 Done
               </button>
             </div>
+          </div>
           </div>
         </div>
       </DialogContent>
@@ -983,7 +1029,9 @@ export function SheetContextBar({
                 ? `VAT rate not configured${pricing.countryIso ? ` for ${pricing.countryIso}` : ""} — cannot submit`
                 : company
                   ? `Partner prices · ${(pricing.vat.rate ?? 0) > 0 ? `+${fmtVatRate(pricing.vat.rate)} VAT` : `${fmtVatRate(pricing.vat.rate)} VAT, ${pricing.vat.source === "exempt" ? "exempt" : "zero-rated"}`}`
-                  : `RRP · incl. ${fmtVatRate(pricing.vat.rate)} VAT${pricing.countryIso ? ` (${pricing.countryIso})` : ""}`}
+                  : pricing.basis === "rrp"
+                    ? `RRP · incl. ${fmtVatRate(pricing.vat.rate)} VAT${pricing.countryIso ? ` (${pricing.countryIso})` : ""}`
+                    : `Partner prices · ${(pricing.vat.rate ?? 0) > 0 ? `+${fmtVatRate(pricing.vat.rate)} VAT${pricing.countryIso ? ` (${pricing.countryIso})` : ""}` : `${fmtVatRate(pricing.vat.rate)} VAT, ${pricing.vat.source === "exempt" ? "exempt" : "zero-rated"}`}`}
             </div>
           </div>
         </div>
@@ -1052,59 +1100,104 @@ export function SheetContextBar({
   );
 }
 
-// ── VAT breakdown ────────────────────────────────────────────────────────────
-// Under a total: what the figure includes. An individual sees the net / VAT split of
-// their VAT-inclusive total; a company sees "excl. VAT · zero-rated". Without a pricing
-// context (admin builder) it says nothing.
-export function VatBreakdown({
+// ── Totals ladder ────────────────────────────────────────────────────────────
+// The bottom of every order summary, receipt-style: one figure per row, the amount
+// the customer actually pays in bold last. Anyone charged VAT (an individual, a
+// company in a layer that charges it) reads Net → VAT → Total; a zero-rated company
+// reads Total with a quiet "VAT · not charged" row; a legacy RRP-basis snapshot shows
+// its VAT-inclusive total with the VAT it contains. Without a pricing context (admin
+// builder) it is just the total. `payable` is the order's net in the customer's basis
+// (`totalsNet`); the VAT figures come from the priced order.
+/** VAT is added on top of the net figure (individuals, or companies in a layer that charges it). */
+function vatCharged(pricing: PricingContext | null | undefined): boolean {
+  return !!pricing && pricing.basis === "partner" && (pricing.vat.rate ?? 0) > 0;
+}
+
+export function TotalsLadder({
   pricing,
   vat,
+  payable,
   currency,
-  className,
+  totalLabel = "Total",
+  afterDiscount = false,
+  size = "md",
 }: {
   pricing: PricingContext | null | undefined;
   vat: OrderVatTotals | null | undefined;
+  payable: number;
   currency: string;
-  className?: string;
+  totalLabel?: string;
+  /** Discount rows sit above: the net row then reads "Net" rather than "Subtotal". */
+  afterDiscount?: boolean;
+  size?: "md" | "lg";
 }) {
-  if (!pricing) return null;
+  const row = "flex items-baseline justify-between gap-3 text-[13px]";
+  const muted = "text-muted-foreground";
+  const totalCls = cn("font-bold tabular-nums text-foreground", size === "lg" ? "text-[18px]" : "text-[16px]");
+  // The rule above Total only separates it from the ladder's own rows.
+  const Total = ({ label, value, divided }: { label: string; value: number; divided?: boolean }) => (
+    <div className={cn(row, divided && "pt-1.5 mt-1.5 border-t border-border/60")}>
+      <span className={muted}>{label}</span>
+      <span className={totalCls}>{fmtMoney(value, currency)}</span>
+    </div>
+  );
+
+  if (!pricing) return <Total label={totalLabel} value={payable} />;
+
   if (vatIsMissing(pricing)) {
-    return <div className={cn("text-[10px] text-amber-700 dark:text-amber-400 text-right -mt-0.5", className)}>VAT rate not configured</div>;
-  }
-  if (pricing.basis === "partner") {
-    if ((pricing.vat.rate ?? 0) > 0) {
-      return (
-        <div className={cn("text-[10px] text-muted-foreground -mt-0.5 space-y-px", className)}>
-          <div className="text-right">excl. VAT · {fmtVatRate(pricing.vat.rate)} VAT added</div>
-          {vat && vat.gross > 0 && (
-            <div className="flex items-center justify-between tabular-nums">
-              <span>
-                Net {fmtMoney(vat.net, currency)} + VAT {fmtMoney(vat.vat, currency)}
-              </span>
-              <span>= {fmtMoney(vat.gross, currency)}</span>
-            </div>
-          )}
+    return (
+      <>
+        <Total label={`${totalLabel} · excl. VAT`} value={payable} />
+        <div className={cn(row, "text-amber-700 dark:text-amber-400")}>
+          <span>VAT</span>
+          <span className="text-[12px]">rate not configured</span>
         </div>
+      </>
+    );
+  }
+
+  const rate = pricing.vat.rate ?? 0;
+  const net = vat?.net ?? payable;
+  const vatAmount = vat?.vat ?? 0;
+  const gross = vat?.gross ?? payable;
+
+  if (pricing.basis === "partner") {
+    if (rate > 0) {
+      return (
+        <>
+          <div className={row}>
+            <span className={muted}>{afterDiscount ? "Net" : "Subtotal"} <span className="text-muted-foreground/70">· excl. VAT</span></span>
+            <span className={cn("tabular-nums", muted)}>{fmtMoney(net, currency)}</span>
+          </div>
+          <div className={row}>
+            <span className={muted}>VAT {fmtVatRate(rate)}</span>
+            <span className={cn("tabular-nums", muted)}>{fmtMoney(vatAmount, currency)}</span>
+          </div>
+          <Total label={totalLabel} value={gross} divided />
+        </>
       );
     }
     return (
-      <div className={cn("text-[10px] text-muted-foreground text-right -mt-0.5", className)}>
-        excl. VAT · {fmtVatRate(pricing.vat.rate)} ({CUSTOMER_KIND_LABELS[pricing.kind].toLowerCase()}, {pricing.vat.source === "exempt" ? "VAT exempt" : "zero-rated"})
-      </div>
+      <>
+        <Total label={totalLabel} value={payable} />
+        <div className={cn(row, "text-[12px]")}>
+          <span className={muted}>VAT</span>
+          <span className={muted}>
+            not charged <span className="text-muted-foreground/70">· {CUSTOMER_KIND_LABELS[pricing.kind].toLowerCase()}, {pricing.vat.source === "exempt" ? "exempt" : "zero-rated"}</span>
+          </span>
+        </div>
+      </>
     );
   }
+  // Legacy RRP basis: the payable figure already includes VAT.
   return (
-    <div className={cn("text-[10px] text-muted-foreground -mt-0.5 space-y-px", className)}>
-      <div className="text-right">incl. {fmtVatRate(pricing.vat.rate)} VAT</div>
-      {vat && vat.gross > 0 && (
-        <div className="flex items-center justify-between tabular-nums">
-          <span>
-            Net {fmtMoney(vat.net, currency)} · VAT {fmtMoney(vat.vat, currency)}
-          </span>
-          <span>= {fmtMoney(vat.gross, currency)}</span>
-        </div>
-      )}
-    </div>
+    <>
+      <Total label={`${totalLabel} · incl. VAT`} value={gross} />
+      <div className={cn(row, "text-[12px]")}>
+        <span className={muted}>of which VAT {fmtVatRate(rate)}</span>
+        <span className={cn("tabular-nums", muted)}>{fmtMoney(vatAmount, currency)}</span>
+      </div>
+    </>
   );
 }
 
@@ -1150,16 +1243,21 @@ export function OrderSummaryPanel({
             </div>
           </>
         )}
-        <div className="flex items-baseline justify-between">
-          <span className="text-[13px] text-muted-foreground">{confirmed ? "Ordered total" : "Total"}</span>
-          <span className="text-[18px] font-bold tabular-nums text-foreground">{fmtMoney(totalsNet(totals), currency)}</span>
-        </div>
-        <VatBreakdown pricing={pricing} vat={priced.vat} currency={currency} />
+        <TotalsLadder
+          pricing={pricing}
+          vat={priced.vat}
+          payable={totalsNet(totals)}
+          currency={currency}
+          totalLabel={confirmed ? "Ordered total" : "Total"}
+          afterDiscount={discounted > 0}
+          size="lg"
+        />
         {confirmed && (
           <div className="mt-1 pt-1 border-t border-border/50">
             <div className="flex items-baseline justify-between">
               <span className="text-[13px] text-lime-700 dark:text-lime-400">
                 Confirmed{confirmed.qty > 0 ? ` · ${confirmed.qty}` : ""}
+                {vatCharged(pricing) && <span className="text-muted-foreground/70"> · excl. VAT</span>}
               </span>
               <span className="text-[16px] font-bold tabular-nums text-lime-700 dark:text-lime-400">
                 {fmtMoney(totalsNet(confirmed), currency)}
@@ -1327,13 +1425,14 @@ export function PreorderReviewModal({
                 </div>
               </>
             )}
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">
-                Total · {totals.qty} item{totals.qty === 1 ? "" : "s"}
-              </span>
-              <span className="text-[16px] font-bold tabular-nums text-foreground">{fmtMoney(totalsNet(totals), currency)}</span>
-            </div>
-            <VatBreakdown pricing={pricing} vat={priced.vat} currency={currency} />
+            <TotalsLadder
+              pricing={pricing}
+              vat={priced.vat}
+              payable={totalsNet(totals)}
+              currency={currency}
+              totalLabel={`Total · ${totals.qty} item${totals.qty === 1 ? "" : "s"}`}
+              afterDiscount={discount > 0}
+            />
           </div>
         )}
         {vatMissing && (
@@ -1493,7 +1592,10 @@ export function OrderSummaryPanelSkeleton({ confirmed = false }: { confirmed?: b
           {/* text-[18px] → 27px line */}
           <SkeletonLine lh="h-[27px]" h="h-4" w="w-24" delay={80} />
         </div>
-        <div className="text-[10px] text-muted-foreground text-right -mt-0.5">VAT</div>
+        <div className="flex items-baseline justify-between text-[12px] text-muted-foreground">
+          <span>VAT</span>
+          <SkeletonLine lh="h-[18px]" h="h-3" w="w-16" delay={100} />
+        </div>
         {confirmed && (
           <div className="mt-1 pt-1 border-t border-border/50">
             <div className="flex items-baseline justify-between">

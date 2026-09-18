@@ -177,7 +177,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
   // No configured VAT rate for this customer's country: nothing can be submitted.
   const vatMissing = vatIsMissing(campaign?.pricing);
 
-  // Rows this customer cannot order (no consumer price) that still carry a quantity —
+  // Rows this customer cannot order (no price at all) that still carry a quantity —
   // e.g. saved before the price was removed. They block submit until removed.
   const unpricedFilled = useMemo(
     () => (sheet ? flattenRows(sheet).filter(({ row }) => row.unpriced && (quantities[row.id] || 0) > 0) : []),
@@ -581,7 +581,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
                   <div className="px-4 py-2.5 text-[12px] text-amber-800 dark:text-amber-300 flex items-start gap-2.5 bg-amber-50/70 dark:bg-amber-950/30">
                     <AlertTriangle className="w-4 h-4 shrink-0 mt-px text-amber-600" />
                     <div className="min-w-0">
-                      <span className="font-semibold">{unpricedFilled.length} product{unpricedFilled.length === 1 ? "" : "s"} in your preorder {unpricedFilled.length === 1 ? "has" : "have"} no consumer price yet</span>{" "}
+                      <span className="font-semibold">{unpricedFilled.length} product{unpricedFilled.length === 1 ? "" : "s"} in your preorder {unpricedFilled.length === 1 ? "has" : "have"} no price yet</span>{" "}
                       and cannot be ordered: {unpricedFilled.slice(0, 4).map(({ row }) => row.name).join(", ")}{unpricedFilled.length > 4 ? ", …" : ""}.{" "}
                       <button
                         type="button"
