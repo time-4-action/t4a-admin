@@ -78,16 +78,17 @@ export type PreorderGroup = {
   rows: PreorderRow[];
 };
 
-// A volume-discount tier on a tab: reach `minAmount` of ordered value INSIDE that tab
-// and every line in it gets `discountPct` off. Tiers are per tab and never stack — the
-// single highest threshold the tab subtotal reaches is the one that applies. Thresholds
-// are compared against the subtotal exactly as the customer sees it, in their own price
-// basis: companies on partner prices excl. VAT, individuals on RRP incl. VAT (campaign
-// currency either way).
+// A volume-discount tier on a tab: reach `minAmount` of ordered value across the WHOLE
+// order (every tab together) and every line in this tab gets `discountPct` off. The
+// ladder (thresholds + percentages) is per tab, the amount that unlocks it is the full
+// order. Tiers never stack — the single highest threshold the order subtotal reaches
+// is the one that applies. Thresholds are compared against the subtotal exactly as the
+// customer sees it, in their own price basis: companies on partner prices excl. VAT,
+// individuals on RRP incl. VAT (campaign currency either way).
 export type PreorderTier = {
   id: string;
   name: string; // what the partner is told they reached, e.g. "Gold"
-  minAmount: number; // qualify at or above this tab subtotal
+  minAmount: number; // qualify at or above this ORDER subtotal
   discountPct: number; // 0–100, off every line in the tab
 };
 

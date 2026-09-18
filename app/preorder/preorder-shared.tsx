@@ -822,9 +822,12 @@ function Stepper({ value, onChange }: { value: number; onChange: (n: number) => 
 
 // ── Volume discount tiers ────────────────────────────────────────────────────
 // What the partner sees of a tab's discount ladder: the tier they've reached, how far
-// the next one is, and the whole ladder. Renders nothing when the tab has no tiers.
+// the next one is, and the whole ladder. The thresholds are measured against the
+// WHOLE order (every tab), so the caller passes all `tabs` — the widget only shows
+// the ladder of `tab`. Renders nothing when the tab has no tiers.
 export function TabTierBanner({
   tab,
+  tabs,
   quantities,
   currency,
   className,
@@ -832,6 +835,7 @@ export function TabTierBanner({
   bare,
 }: {
   tab: PreorderTab;
+  tabs: PreorderTab[]; // the whole sheet — the order subtotal unlocks the tiers
   quantities: QtyMap;
   currency: string;
   className?: string;
@@ -839,14 +843,18 @@ export function TabTierBanner({
   bare?: boolean; // no border / radius — the caller frames it
 }) {
   const ladder = activeTiers(tab.tiers);
-  const totals = useMemo(() => computeTabTotals({ tabs: [tab], pricing: pricing ?? null }, quantities)[0], [tab, quantities, pricing]);
-  if (ladder.length === 0) return null;
+  const totals = useMemo(
+    () => computeTabTotals({ tabs, pricing: pricing ?? null }, quantities).find((t) => t.tabId === tab.id) ?? null,
+    [tab.id, tabs, quantities, pricing],
+  );
+  if (ladder.length === 0 || !totals) return null;
 
   const reached = totals.tier;
   const next = totals.nextTier;
-  // Progress towards the next tier, measured from the tier already reached.
+  // Progress towards the next tier, measured from the tier already reached, on the
+  // order subtotal.
   const from = reached?.minAmount ?? 0;
-  const pct = next ? Math.min(100, Math.max(0, ((totals.amount - from) / (next.minAmount - from)) * 100)) : 100;
+  const pct = next ? Math.min(100, Math.max(0, ((totals.orderAmount - from) / (next.minAmount - from)) * 100)) : 100;
 
   return (
     <div
@@ -883,7 +891,7 @@ export function TabTierBanner({
             />
           </div>
           <div className="mt-1 text-[11px] text-muted-foreground">
-            {fmtMoney(totals.toNextTier, currency)} more in this tab unlocks{" "}
+            {fmtMoney(totals.toNextTier, currency)} more on your order unlocks{" "}
             <span className="font-medium text-foreground">{next.name || "the next tier"}</span> · −{next.discountPct}%
           </div>
         </div>
@@ -919,29 +927,36 @@ export function TabTierBanner({
 // ── Sheet context bar ────────────────────────────────────────────────────────
 // One dense row above the products: who is ordering and how they are priced (left),
 // the tab's volume-discount ladder as a stepped track with the current position
-// (middle), and what the reached tier saves (right). Replaces the stacked
-// pricing sentence + discount banner on the customer's and the admin's order views.
+// (middle), and what the reached tier saves (right). The position is the WHOLE
+// order's subtotal (every tab), which is what unlocks the tiers — so `tabs` is the
+// full sheet and `tab` only picks the ladder shown. Replaces the stacked pricing
+// sentence + discount banner on the customer's and the admin's order views.
 export function SheetContextBar({
   pricing,
   tab,
+  tabs,
   quantities,
   currency,
   className,
 }: {
   pricing: PricingContext | null | undefined;
   tab: PreorderTab | null;
+  tabs: PreorderTab[]; // the whole sheet — the order subtotal unlocks the tiers
   quantities: QtyMap;
   currency: string;
   className?: string;
 }) {
   const ladder = tab ? activeTiers(tab.tiers) : [];
-  const totals = useMemo(() => (tab ? computeTabTotals({ tabs: [tab], pricing: pricing ?? null }, quantities)[0] : null), [tab, quantities, pricing]);
+  const totals = useMemo(
+    () => (tab ? computeTabTotals({ tabs, pricing: pricing ?? null }, quantities).find((t) => t.tabId === tab.id) ?? null : null),
+    [tab, tabs, quantities, pricing],
+  );
   if (!pricing && ladder.length === 0) return null;
   const missing = vatIsMissing(pricing);
   const company = pricing?.kind === "business";
   const reached = totals?.tier ?? null;
   const next = totals?.nextTier ?? null;
-  const amount = totals?.amount ?? 0;
+  const amount = totals?.orderAmount ?? 0;
   // Tiers sit at EQUAL spacing along the track (thresholds can be wildly apart —
   // €10k then €4bn — so a proportional track would pile every marker at the left).
   // The current position is interpolated inside the segment it is in.
@@ -1002,7 +1017,7 @@ export function SheetContextBar({
           </div>
           <div className="mt-2 flex items-center justify-between gap-3 text-[11px]">
             <span className="text-muted-foreground tabular-nums">
-              {fmtMoney(amount, currency)} in {tab?.name || "this section"}
+              {fmtMoney(amount, currency)} on the whole order
             </span>
             <span className="text-muted-foreground tabular-nums truncate">
               {next

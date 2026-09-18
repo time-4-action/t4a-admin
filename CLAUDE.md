@@ -722,7 +722,12 @@ which is decided by the customer's **kind** (`customerKind()`: tax id ⇒
 - **company → partner price, 0% VAT (zero-rated)**; **individual → RRP with the
   country's VAT extracted from it** — never added on top (€100 RRP in SI = 81.97
   net + 18.03 VAT). Volume tiers apply to both, compared with the subtotal in
-  the customer's basis.
+  the customer's basis. **The threshold is the WHOLE order's subtotal** (every
+  tab together, `PreorderTabTotal.orderAmount`), never the tab alone — a tab
+  keeps its own ladder (thresholds + percentages), but the same order total
+  unlocks every tab's ladder (`priceOrder` collects all tabs first, then
+  evaluates each ladder against the order amount). Tier widgets
+  (`TabTierBanner`, `SheetContextBar`) therefore take the full `tabs`.
 - The VAT rate of a country resolves **campaign override → global table →
   configured fallback → `missing`** (`resolveVatRate`). Global rates live in the
   `VatSettings` singleton (`models/vat-settings.ts`, `lib/vat-settings.ts`; edited

@@ -307,7 +307,7 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
             )}
             <PricingBanner pricing={campaign.pricing} className="mb-4" />
             {activeTab && (
-              <TabTierBanner tab={activeTab} quantities={quantities} currency={currency} pricing={campaign.pricing} className="mb-4" />
+              <TabTierBanner tab={activeTab} tabs={campaign.tabs} quantities={quantities} currency={currency} pricing={campaign.pricing} className="mb-4" />
             )}
             {!activeTab ? (
               <div className="text-center text-[13px] text-muted-foreground py-16">This sheet has no tabs yet.</div>

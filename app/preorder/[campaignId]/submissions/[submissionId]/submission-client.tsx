@@ -430,7 +430,7 @@ export default function SubmissionClient({
               {/* What the customer saw while filling: how they are priced and the discount they reached. */}
               {sheet.pricing && activeTab && (
                 <div className="bg-muted/10">
-                  <SheetContextBar pricing={sheet.pricing} tab={activeTab} quantities={quantities} currency={currency} />
+                  <SheetContextBar pricing={sheet.pricing} tab={activeTab} tabs={sheet.tabs} quantities={quantities} currency={currency} />
                 </div>
               )}
               {isLegacy && (

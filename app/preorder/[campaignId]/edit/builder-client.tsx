@@ -1225,9 +1225,10 @@ const VariantTable = memo(function VariantTable({
 });
 
 // ── Price-list selector: pick which Metakocka list feeds a price column ──
-// ── Volume discount tiers (per tab) ─────────────────────────────────────────
-// A tab's ladder: order enough value INSIDE this tab and every line in it drops by
-// the tier's percentage. Tiers never stack — only the highest one reached applies.
+// ── Volume discount tiers (per tab ladder, order-wide threshold) ─────────────
+// A tab's ladder: once the WHOLE order (every tab together) reaches a threshold,
+// every line in this tab drops by the tier's percentage. Tiers never stack — only
+// the highest one reached applies.
 function TierEditor({
   tab,
   currency,
@@ -1311,8 +1312,8 @@ function TierEditor({
             </button>
           </TooltipTrigger>
           <TooltipContent side="bottom" align="start">
-            Spend enough inside <span className="font-medium">{tab.name || "this tab"}</span> and every line in it drops by that tier&rsquo;s
-            percentage. Only the highest tier reached applies; each tab counts on its own. Thresholds are compared with the customer's subtotal in their own price basis — companies on partner prices excl. VAT, individuals on RRP incl. VAT.
+            Once the whole order (every tab together) reaches a threshold, every line in <span className="font-medium">{tab.name || "this tab"}</span> drops by that tier&rsquo;s
+            percentage. Only the highest tier reached applies; each tab has its own ladder, but the same order total unlocks them all. Thresholds are compared with the customer's order subtotal in their own price basis — companies on partner prices excl. VAT, individuals on RRP incl. VAT.
           </TooltipContent>
         </Tooltip>
         <span className="text-[12px] text-muted-foreground tabular-nums">

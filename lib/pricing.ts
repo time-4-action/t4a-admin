@@ -17,7 +17,8 @@
 //                (exempt, 0%), pin one fixed rate for everyone in the layer, or charge
 //                VAT to companies too (on top of the net partner price).
 //  • Volume tiers apply to both kinds; the threshold is compared with the customer's
-//                subtotal in their own price basis (business: net, person: gross).
+//                WHOLE-ORDER subtotal (all tabs) in their own price basis (business: net,
+//                person: gross). Each tab keeps its own ladder / percentage.
 //
 // Money is handled as INTEGER CENTS. Prices enter as decimals (what admins type and
 // what MK returns), are rounded to cents once, and every operation after that is
@@ -276,9 +277,12 @@ export function priceLine(input: { basis: PriceBasis; unit: number; qty: number;
 }
 
 // ── volume discount tiers ────────────────────────────────────────────────────
-// A tab's tiers turn its subtotal into a discount: order enough within the tab and
-// every line in it drops by the tier's percentage. Tiers never stack — exactly one
-// (the highest threshold reached) applies.
+// A tab's tiers turn the ORDER subtotal into a discount on that tab: the thresholds
+// are compared with the whole order (every tab together), and once one is reached
+// every line in the tab drops by the tier's percentage. Each tab keeps its own
+// ladder (different percentages / thresholds per product family), but the amount
+// that unlocks them is always the full order. Tiers never stack — exactly one (the
+// highest threshold reached) applies per tab.
 
 // The usable tiers of a tab, cleaned and sorted by threshold ascending. A tier with a
 // non-positive percentage is inert (it would discount nothing) and is dropped here so
@@ -316,13 +320,14 @@ export type PreorderTabTotal = {
   tabId: string;
   tabName: string;
   qty: number;
-  amount: number; // basis subtotal, before the tab's volume discount
-  tier: PreorderTier | null; // the tier this tab reached
+  amount: number; // this tab's basis subtotal, before its volume discount
+  orderAmount: number; // the WHOLE order's basis subtotal — what the tiers are measured against
+  tier: PreorderTier | null; // the tier this tab reached (on the order subtotal)
   discountPct: number; // 0 when no tier applies
   discount: number; // Σ per-line (unit − discounted unit) × qty
   net: number; // amount − discount (what is actually payable, in the basis)
   nextTier: PreorderTier | null; // the tier just out of reach
-  toNextTier: number; // how much more this tab needs to reach it
+  toNextTier: number; // how much more the ORDER needs to reach it
 };
 
 export type PricedTab = PreorderTabTotal & { lines: Record<string, LinePricing> }; // by rowId
@@ -365,7 +370,9 @@ export function priceOrder(
   let vatC = 0;
   let grossC = 0;
 
-  const tabs: PricedTab[] = campaign.tabs.map((tab) => {
+  // Pass 1 — collect every ordered line; the tiers are measured against the
+  // subtotal of the WHOLE order, so it has to be known before any tab is priced.
+  const collected = campaign.tabs.map((tab) => {
     const ordered: { row: PreorderRow; qty: number; unitC: Cents }[] = [];
     let qty = 0;
     let amountC = 0;
@@ -379,8 +386,15 @@ export function priceOrder(
         amountC += mulCents(unitC, q);
       }
     }
+    return { tab, ordered, qty, amountC };
+  });
+  const orderAmountC = collected.reduce((sum, t) => sum + t.amountC, 0);
+  const orderAmount = fromCents(orderAmountC);
+
+  // Pass 2 — each tab's own ladder, unlocked by the order subtotal.
+  const tabs: PricedTab[] = collected.map(({ tab, ordered, qty, amountC }) => {
     const amount = fromCents(amountC);
-    const tier = tierForAmount(tab.tiers, amount);
+    const tier = tierForAmount(tab.tiers, orderAmount);
     const discountPct = tier?.discountPct ?? 0;
     const lines: Record<string, LinePricing> = {};
     let discountC = 0;
@@ -392,18 +406,19 @@ export function priceOrder(
       vatC += toCents(lp.lineVat);
       grossC += toCents(lp.lineGross);
     }
-    const next = nextTierAfter(tab.tiers, amount);
+    const next = nextTierAfter(tab.tiers, orderAmount);
     return {
       tabId: tab.id,
       tabName: tab.name,
       qty,
       amount,
+      orderAmount,
       tier,
       discountPct,
       discount: fromCents(discountC),
       net: fromCents(amountC - discountC),
       nextTier: next,
-      toNextTier: next ? fromCents(Math.max(0, toCents(next.minAmount) - amountC)) : 0,
+      toNextTier: next ? fromCents(Math.max(0, toCents(next.minAmount) - orderAmountC)) : 0,
       lines,
     };
   });

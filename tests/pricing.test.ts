@@ -158,6 +158,22 @@ describe("priceOrder", () => {
     expect(o.tabs[0].lines.s1).toMatchObject({ unit: 200, unitFinal: 190, unitNet: 155.74, unitVat: 34.26, lineGross: 1900 });
   });
 
+  it("tiers are unlocked by the WHOLE order, not the tab alone", () => {
+    // Sails on its own: 5 × 100 = 500 < Silver (1000). Masts adds 12 × 50 = 600 ⇒ the
+    // order is 1100 ≥ Silver, so Sails gets its 5 % even though the tab itself is short.
+    const o = priceOrder({ ...baseCampaign(), pricing: company }, (r) => ({ s1: 5, m1: 12 })[r.id] ?? 0);
+    expect(o.tabs[0]).toMatchObject({ amount: 500, orderAmount: 1100, discountPct: 5, discount: 25, net: 475 });
+    // Masts has no ladder of its own — the order total unlocks nothing there.
+    expect(o.tabs[1]).toMatchObject({ amount: 600, orderAmount: 1100, discountPct: 0, net: 600 });
+    expect(o.totals).toEqual({ qty: 17, amount: 1100, discount: 25, net: 1075 });
+    // Progress towards Gold is measured on the order too.
+    expect(o.tabs[0].nextTier?.id).toBe("t2");
+    expect(o.tabs[0].toNextTier).toBe(3900);
+    // Without the masts the same sails reach nothing.
+    const alone = priceOrder({ ...baseCampaign(), pricing: company }, (r) => ({ s1: 5 })[r.id] ?? 0);
+    expect(alone.tabs[0]).toMatchObject({ amount: 500, orderAmount: 500, discountPct: 0, toNextTier: 500 });
+  });
+
   it("no pricing context (admin builder) prices on the partner basis without VAT totals", () => {
     const o = priceOrder(baseCampaign(), (r) => qty[r.id as keyof typeof qty] ?? 0);
     expect(o.ctx).toBeNull();

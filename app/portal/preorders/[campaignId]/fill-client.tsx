@@ -567,7 +567,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
               )}
               {(sheet.pricing || orphanLines.length > 0 || unpricedFilled.length > 0 || (activeTab && (activeTab.tiers?.length ?? 0) > 0)) && (
               <div className="divide-y divide-border/60 bg-muted/10">
-                <SheetContextBar pricing={sheet.pricing} tab={activeTab} quantities={quantities} currency={currency} />
+                <SheetContextBar pricing={sheet.pricing} tab={activeTab} tabs={sheet.tabs} quantities={quantities} currency={currency} />
                 {orphanLines.length > 0 && (
                   <div className="px-4 py-2.5 text-[12px] text-amber-800 dark:text-amber-300 flex items-start gap-2.5 bg-amber-50/70 dark:bg-amber-950/30">
                     <AlertTriangle className="w-4 h-4 shrink-0 mt-px text-amber-600" />
