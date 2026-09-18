@@ -493,14 +493,16 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
       {/* Campaign-wide: where the RRP / Partner numbers on EVERY tab come from, and how
           VAT applies. Sits above the tab rail on purpose — not a property of the selected tab. */}
       <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6 py-2.5">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <div className="min-w-0">
+        {/* Text + one control group. The group wraps as a UNIT under the text on
+            narrow screens (never one select floating right with the rest below). */}
+        <div className="flex flex-col gap-2 2xl:flex-row 2xl:items-center 2xl:gap-4">
+          <div className="min-w-0 2xl:flex-1">
             <div className="text-[13px] font-semibold text-foreground">Pricing &amp; VAT</div>
             <div className="text-[11px] text-muted-foreground">
               RRP (incl. VAT) and partner price (excl. VAT) on every tab come from these two Metakocka lists. Companies pay the partner price at 0% VAT; individuals pay the RRP with their country&rsquo;s VAT inside it.
             </div>
           </div>
-          <div className="flex-1" />
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
           <InlineField label="RRP" hint="Recommended retail price list (incl. VAT) — what individuals pay; shown to companies for reference">
             <PricelistSelect
               label="RRP list"
@@ -545,6 +547,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
               </span>
             )}
           </Button>
+          </div>
         </div>
       </div>
       <VatModal open={vatOpen} onOpenChange={setVatOpen} campaignId={campaignId} overrides={vatOverrides} marketCountries={marketCountries} onSaved={setVatOverrides} />
@@ -1985,15 +1988,19 @@ function BuilderSkeleton({ campaignId }: { campaignId: string }) {
         }
       />
 
-      <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div>
-          <div className="text-[13px] font-semibold text-foreground">Price lists</div>
-          <div className="text-[11px] text-muted-foreground">Every RRP and partner price on every tab is read from these two Metakocka lists.</div>
+      <div className="shrink-0 border-b border-border bg-muted/30 px-4 md:px-6 py-2.5">
+        <div className="flex flex-col gap-2 2xl:flex-row 2xl:items-center 2xl:gap-4">
+          <div className="min-w-0 2xl:flex-1">
+            <div className="text-[13px] font-semibold text-foreground">Pricing &amp; VAT</div>
+            <div className="text-[11px] text-muted-foreground">Every RRP and partner price on every tab is read from these two Metakocka lists.</div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <InlineField label="RRP"><Skeleton className="h-full w-[230px] rounded-none" delay={100} /></InlineField>
+            <InlineField label="Partner"><Skeleton className="h-full w-[230px] rounded-none" delay={120} /></InlineField>
+            <Button variant="outline" size="sm" className="h-9 bg-background" disabled><RefreshCw className="w-3.5 h-3.5" /> Re-price all tabs</Button>
+            <Button variant="outline" size="sm" className="h-9 bg-background" disabled><Percent className="w-3.5 h-3.5" /> VAT rates</Button>
+          </div>
         </div>
-        <div className="flex-1" />
-        <InlineField label="RRP"><Skeleton className="h-full w-[230px] rounded-none" delay={100} /></InlineField>
-        <InlineField label="Partner"><Skeleton className="h-full w-[230px] rounded-none" delay={120} /></InlineField>
-        <Button variant="outline" size="sm" className="h-9 bg-background" disabled><RefreshCw className="w-3.5 h-3.5" /> Re-price all tabs</Button>
       </div>
 
       <div className="flex-1 min-h-0 flex">
