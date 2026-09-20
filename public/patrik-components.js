@@ -995,6 +995,39 @@
        styles and no data-max; they are detected and left untouched.
        ================================================================== */
 
+    /* LEGACY LAYOUTS (inline-style snippets, no data-max). Two inline values
+       made them collapse on phones and both are fixed here, in place, without
+       touching anything else about them:
+         1. `flex: 0 1 <share>` on every column — flex-GROW 0. Once a column
+            wraps onto its own line its basis is still the desktop share
+            (e.g. 58% - gap), so it sat at its 320px min-width, a stub hugging
+            the left edge, instead of filling the row. Grow 1 makes it fill
+            the line; desktop is untouched because a row's shares already sum
+            to 100% and there is nothing to grow into.
+         2. `padding: <y>px <x>%` on every cell — a fixed horizontal inset.
+            Breathing room between side-by-side columns is pure lost width
+            once they have stacked, so it is rewritten to the same clamp()
+            the current format uses: gone at 480px, fully back by ~1000px. */
+    function healLegacyLayout(root) {
+        if (root.__pcHealed) return;
+        root.__pcHealed = true;
+        if (!root.__pcObserved) {
+            root.__pcObserved = true;
+            observeWidth(root, function (w) {
+                const nw = String(Math.max(1, Math.round(w)));
+                if (root.style.getPropertyValue("--pl-w") !== nw) root.style.setProperty("--pl-w", nw);
+            });
+        }
+        root.querySelectorAll(".patrik-layout-col").forEach(function (col) {
+            if (col.style.flexGrow === "0") col.style.flexGrow = "1";
+        });
+        root.querySelectorAll(".patrik-layout-cell").forEach(function (cell) {
+            const m = /^\s*(\d+(?:\.\d+)?)px\s+(\d+(?:\.\d+)?)%\s*$/.exec(cell.style.padding || "");
+            if (!m || !num(m[2], 0)) return;
+            cell.style.padding = m[1] + "px clamp(0%, calc((var(--pl-w,1200) - 480) * 0.08%), " + m[2] + "%)";
+        });
+    }
+
     const PL_VALIGN = { top: "flex-start", center: "center", bottom: "flex-end", stretch: "stretch" };
     const PL_JUSTIFY = { left: "flex-start", center: "center", right: "flex-end" };
 
@@ -1085,8 +1118,9 @@
     function renderLayout(root) {
         injectLayoutStyles();
         // Legacy snippets (pre data-* format) carry their whole layout as inline
-        // styles and no data-max — they already work; leave them exactly as-is.
-        if (!root.dataset.max && root.getAttribute("style")) return;
+        // styles and no data-max. Their desktop rendering is left exactly as
+        // pasted; only the two things that broke them on phones are healed.
+        if (!root.dataset.max && root.getAttribute("style")) { healLegacyLayout(root); return; }
 
         root.style.setProperty("--pl-max", num(root.dataset.max, 1200) + "px");
         root.style.setProperty("--pl-row-gap", num(root.dataset.rowGap, 56) + "px");

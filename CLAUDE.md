@@ -451,8 +451,12 @@ band paddings, spacer heights and heading sizes scale fluidly via
 widths behave exactly like real devices. **The hosted renderer must therefore
 be the current build of `public/patrik-components.js`** for layout snippets;
 layouts generated before the `data-*` format (inline styles, no `data-max`)
-are detected by the script and left untouched, so already-pasted sections keep
-working. `data-max` is always emitted — it doubles as the format marker. The
+are detected by the script and left as pasted on desktop — `healLegacyLayout`
+only fixes the two inline values that collapsed them on phones: every column's
+inline `flex: 0 1 …` gets `flex-grow: 1` (a wrapped column filled only its
+320px min-width, a stub hugging the left edge) and the cell's fixed
+`padding: Ypx X%` inset is rewritten to the same `clamp()` the current format
+uses. `data-max` is always emitted — it doubles as the format marker. The
 preview panel gains a viewport-width switcher (`PreviewPanel responsive`) to
 check the stacking. The layout itself saves as a `layout` preset like any
 other build.
