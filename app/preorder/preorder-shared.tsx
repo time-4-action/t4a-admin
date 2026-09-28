@@ -37,6 +37,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
+import { TagPill } from "@/app/preorder/tag-pill";
 import {
   rowUnitPrice,
   computeTabTotals,
@@ -46,6 +47,7 @@ import {
   totalsNet,
   totalsDiscount,
   CUSTOMER_KIND_LABELS,
+  tagLabel,
   type PreorderCampaign,
   type PreorderSubmissionTotals,
   type PreorderTab,
@@ -166,18 +168,11 @@ function Zoomable({ src, alt, className }: { src?: string | null; alt?: string; 
   );
 }
 
-function RowThumb({ row }: { row: PreorderRow }) {
-  return <Zoomable src={row.image} alt={row.name} className="w-8 h-8 rounded ring-1 ring-border" />;
+// A variant without its own picture shows the group's cover.
+function RowThumb({ row, cover }: { row: PreorderRow; cover?: string | null }) {
+  return <Zoomable src={row.image ?? cover ?? null} alt={row.name} className="w-8 h-8 rounded ring-1 ring-border" />;
 }
 
-function TagPill({ tag }: { tag?: PreorderRow["tag"] }) {
-  if (!tag) return null;
-  return (
-    <span className="text-[9px] font-bold uppercase text-lime-700 bg-lime-100 dark:bg-lime-900/50 dark:text-lime-300 rounded px-1 shrink-0">
-      {tag === "NEW" ? "NEW" : "PRE"}
-    </span>
-  );
-}
 
 // ── Pricing banner ───────────────────────────────────────────────────────────
 // Tells the customer how THEY are priced: everyone orders at partner prices — a
@@ -323,7 +318,7 @@ export function PreorderGridTab({
         <thead className="sticky top-0 z-10 bg-surface">
           <tr className="border-b border-border bg-muted/20">
             <th className={cn(th, "text-left pl-4 min-w-[220px]")}>Product</th>
-            <th className={cn(th, "text-left")}>SKU</th>
+            <th className={cn(th, "text-left")}>SKU / EAN</th>
             <th className={cn(th, "text-right")}>{priceHeader("RRP", basis === "rrp" ? "incl. VAT" : "reference", basis === "rrp")}</th>
             <th className={cn(th, "text-right")}>{priceHeader("Partner", "excl. VAT", basis === "partner")}</th>
             <th className={cn(th, "text-right w-28")}>{qtyHeader ?? "Qty"}</th>
@@ -336,6 +331,7 @@ export function PreorderGridTab({
             <GroupRows
               key={g.id}
               groupName={g.name}
+              cover={g.images?.[0] ?? null}
               rows={g.rows}
               quantities={quantities}
               onQty={onQty}
@@ -362,6 +358,7 @@ export function PreorderGridTab({
 
 function GroupRows({
   groupName,
+  cover,
   rows,
   quantities,
   onQty,
@@ -373,6 +370,7 @@ function GroupRows({
   basis,
 }: {
   groupName: string;
+  cover?: string | null;
   rows: PreorderRow[];
   quantities: QtyMap;
   onQty?: (rowId: string, qty: number) => void;
@@ -407,12 +405,15 @@ function GroupRows({
             <tr key={r.id} className={cn("border-b border-border/40", qty > 0 ? "bg-amber-50/60 dark:bg-amber-950/20" : "opacity-70")}>
               <td className="pl-4 pr-2 py-1.5">
                 <div className="flex items-center gap-2 min-w-0">
-                  <RowThumb row={r} />
+                  <RowThumb row={r} cover={cover} />
                   <span className="text-[12px] text-foreground truncate">{r.name}</span>
-                  <TagPill tag={r.tag} />
+                  <TagPill tag={r.tag} color={r.tagColor} />
                 </div>
               </td>
-              <td className="px-2 py-1.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap">{r.code}</td>
+              <td className="px-2 py-1.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap leading-tight">
+                <div>{r.code}</div>
+                {r.ean && <div className="text-[10px] text-muted-foreground/70" title="EAN">{r.ean}</div>}
+              </td>
               <td colSpan={2} className="px-2 py-1.5 text-right text-[11px] text-amber-700 dark:text-amber-300">
                 <span className="inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> no price yet — not orderable</span>
               </td>
@@ -432,12 +433,15 @@ function GroupRows({
           <tr key={r.id} className={cn("border-b border-border/40 hover:bg-muted/20", qty > 0 && "bg-muted/25")}>
             <td className="pl-4 pr-2 py-1.5">
               <div className="flex items-center gap-2 min-w-0">
-                <RowThumb row={r} />
+                <RowThumb row={r} cover={cover} />
                 <span className="text-[12px] text-foreground truncate">{r.name}</span>
-                <TagPill tag={r.tag} />
+                <TagPill tag={r.tag} color={r.tagColor} />
               </div>
             </td>
-            <td className="px-2 py-1.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap">{r.code}</td>
+            <td className="px-2 py-1.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap leading-tight">
+                <div>{r.code}</div>
+                {r.ean && <div className="text-[10px] text-muted-foreground/70" title="EAN">{r.ean}</div>}
+              </td>
             {priceCell(r.rrp ?? null, basis === "rrp")}
             {priceCell(partnerShown, basis === "partner")}
             <td className="px-2 py-1.5">
@@ -539,7 +543,7 @@ export function PreorderGuidedTab({
 
   return (
     <div className="space-y-4">
-      <div className="relative max-w-sm">
+      <div data-tour="search" className="relative max-w-sm">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
         <input
           value={search}
@@ -555,8 +559,16 @@ export function PreorderGuidedTab({
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-          {groups.map((g) => (
-            <ProductCard key={g.id} group={g} quantities={quantities} currency={currency} basis={basis} onOpen={() => setOpenGroupId(g.id)} />
+          {groups.map((g, i) => (
+            <ProductCard
+              key={g.id}
+              group={g}
+              quantities={quantities}
+              currency={currency}
+              basis={basis}
+              onOpen={() => setOpenGroupId(g.id)}
+              tour={i === 0 ? "product" : undefined}
+            />
           ))}
         </div>
       )}
@@ -581,23 +593,27 @@ function ProductCard({
   currency,
   basis,
   onOpen,
+  tour,
 }: {
   group: PreorderTab["groups"][number];
   quantities: QtyMap;
   currency: string;
   basis: PriceBasis;
   onOpen: () => void;
+  /** data-tour target for the portal's quick guide. */
+  tour?: string;
 }) {
   const hero = groupHero(group);
   const [lo, hi] = groupPriceRange(group, basis);
   const [olo, ohi] = groupPriceRange(group, basis === "rrp" ? "partner" : "rrp");
   const fmtRange = (a: number, b: number) => (a === 0 ? "—" : a === b ? fmtMoney(a, currency) : `${fmtMoney(a, currency)}–${fmtMoney(b, currency)}`);
   const cart = groupCartCount(group, quantities);
-  const hasNew = group.rows.some((r) => r.tag);
+  const cardTagRow = group.rows.find((r) => tagLabel(r.tag)) ?? null;
   return (
     <button
       type="button"
       onClick={onOpen}
+      data-tour={tour}
       className={cn(
         "group text-left rounded-xl border bg-surface overflow-hidden transition-colors flex flex-col",
         cart > 0 ? "border-foreground/50" : "border-border hover:border-foreground/20",
@@ -610,9 +626,7 @@ function ProductCard({
         ) : (
           <ImageIcon className="w-6 h-6 text-muted-foreground/40" />
         )}
-        {hasNew && (
-          <span className="absolute top-1.5 left-1.5 text-[9px] font-bold uppercase text-lime-700 bg-lime-100 dark:bg-lime-900/70 dark:text-lime-300 rounded px-1 py-0.5">New</span>
-        )}
+        {cardTagRow && <TagPill tag={cardTagRow.tag} color={cardTagRow.tagColor} size="lg" className="absolute top-2.5 left-2.5" />}
         {cart > 0 && (
           <span className="absolute top-1.5 right-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-white bg-lime-600 rounded-full px-1.5 py-0.5">
             <ShoppingCart className="w-2.5 h-2.5" /> {cart}
@@ -784,9 +798,12 @@ function ProductDetailModal({
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start gap-1">
                         <span className="text-[12px] font-medium text-foreground leading-snug line-clamp-2">{variants.short[r.id]}</span>
-                        <TagPill tag={r.tag} />
+                        <TagPill tag={r.tag} color={r.tagColor} />
                       </div>
-                      <div className="text-[10px] text-muted-foreground font-mono truncate">{r.code}</div>
+                      <div className="text-[10px] text-muted-foreground font-mono truncate">
+                        {r.code}
+                        {r.ean && <span className="text-muted-foreground/70"> · EAN {r.ean}</span>}
+                      </div>
                     </div>
                     {r.unpriced ? (
                       <span className="text-[11px] text-amber-700 dark:text-amber-300 text-right inline-flex items-center gap-1 shrink-0">
@@ -1584,7 +1601,7 @@ export function PreorderGridSkeleton({
         <thead className="sticky top-0 z-10 bg-surface">
           <tr className="border-b border-border">
             <th className={cn(th, "text-left pl-4 min-w-[220px]")}>Product</th>
-            <th className={cn(th, "text-left")}>SKU</th>
+            <th className={cn(th, "text-left")}>SKU / EAN</th>
             <th className={cn(th, "text-right")}>RRP</th>
             <th className={cn(th, "text-right")}>Partner</th>
             <th className={cn(th, "text-right w-28")}>{qtyHeader}</th>

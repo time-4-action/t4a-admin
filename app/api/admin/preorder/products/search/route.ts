@@ -1,29 +1,39 @@
 import { NextResponse } from "next/server";
-import { searchProducts, getProduct } from "@/lib/product-api";
+import { searchProducts, getProduct, getCatalogueCodes } from "@/lib/product-api";
+import { searchMkSalesProducts } from "@/lib/metakocka";
 import type { CatalogueProduct, ProductSearchHit } from "@/types/product";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// A parent-level search result for the builder's picker.
+// A parent-level search result for the builder's picker. `source: "metakocka"` marks a
+// product that exists only in Metakocka (the catalogue is built from PNV, so it never
+// sees it) — it has no variants or image; /products/resolve builds its row from MK.
 export type ParentHit = {
   code: string; // PARENT code
   name: string; // parent product_name
   image: string | null;
+  source: "catalogue" | "metakocka";
 };
+
+const MAX_CANDIDATES = 15;
+// MK-only hits get their own budget so a broad query full of catalogue hits still shows them.
+const MAX_MK_CANDIDATES = 10;
 
 // GET /api/admin/preorder/products/search?q=... — search the catalogue and return only
 // PARENT products. Child/variant matches are collapsed to their parent, so each parent
 // appears once (add it to expand into a group of variants via /products/resolve).
+// Metakocka-only products are appended after the catalogue hits.
 export async function GET(request: Request) {
   const q = new URL(request.url).searchParams.get("q")?.trim() ?? "";
   if (q.length < 2) return NextResponse.json({ candidates: [] });
 
-  const res = await searchProducts(q);
-  if (!res.ok) {
-    return NextResponse.json({ candidates: [], error: res.error }, { status: 200 });
-  }
-  const hits = (res.data ?? []) as ProductSearchHit[];
+  const [res, mkHits, catalogueCodes] = await Promise.all([
+    searchProducts(q),
+    searchMkSalesProducts(q, 50),
+    getCatalogueCodes(),
+  ]);
+  const hits = res.ok ? ((res.data ?? []) as ProductSearchHit[]) : [];
 
   // Resolve the top hits to their parent product (getProduct returns the parent whether
   // the code is a parent or a child SKU), then dedupe by parent code. Bounded so a broad
@@ -48,9 +58,24 @@ export async function GET(request: Request) {
         code: p.code,
         name: p.product_name,
         image: p.images?.[0] ?? null,
+        source: "catalogue",
       });
     }),
   );
 
-  return NextResponse.json({ candidates: Array.from(byParent.values()).slice(0, 15) });
+  const candidates = Array.from(byParent.values()).slice(0, MAX_CANDIDATES);
+  // Only when the catalogue's code set is known — otherwise an MK hit could be a
+  // catalogue product (or one of its variants) listed twice.
+  if (catalogueCodes) {
+    let mkCount = 0;
+    for (const p of mkHits) {
+      if (mkCount >= MAX_MK_CANDIDATES) break;
+      if (catalogueCodes.has(p.code) || byParent.has(p.code)) continue;
+      mkCount++;
+      candidates.push({ code: p.code, name: p.name, image: null, source: "metakocka" });
+    }
+  }
+
+  const error = res.ok ? undefined : res.error;
+  return NextResponse.json({ candidates, ...(error ? { error } : {}) });
 }

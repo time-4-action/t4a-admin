@@ -30,6 +30,7 @@ export interface IPreorderRow {
   variantLabel?: string | null;
   size?: string | null;
   tag?: RowTag;
+  tagColor?: string | null;
   rrp?: number | null;
   partnerPrice?: number | null;
   discountedPrice?: number | null;
@@ -145,6 +146,7 @@ const RowSchema = new Schema<IPreorderRow>(
     variantLabel: { type: String, default: null },
     size: { type: String, default: null },
     tag: { type: String, default: null },
+    tagColor: { type: String, default: null },
     rrp: { type: Number, default: null },
     partnerPrice: { type: Number, default: null },
     discountedPrice: { type: Number, default: null },

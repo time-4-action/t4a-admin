@@ -54,7 +54,7 @@ export function buildCommercialSnapshot(
       code: row.code,
       name: row.name,
       variantLabel: row.variantLabel ?? null,
-      image: row.image ?? null,
+      image: row.image ?? group.images?.[0] ?? null, // a variant without its own picture shows the group cover
       tabId: tab.id,
       tabName: tab.name,
       groupId: group.id,

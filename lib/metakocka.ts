@@ -755,6 +755,111 @@ export async function listSalesPricelists(): Promise<MkPricelist[]> {
   return value;
 }
 
+// ── sales product index (MK-only products) ──────────────────────────────────────
+
+// The product catalogue API is built from PNV, so a product that lives only in
+// Metakocka never reaches it. MK's json/product_list has no name search (every
+// name/search parameter is ignored, `code` is exact), so the preorder builder
+// searches an in-memory index of every sales product instead: ~1.7k
+// rows, two pages of 1000, ~2 s. Cached; concurrent callers share one fetch.
+// `activated: false` products stay in the index: an exact SKU / EAN (the import) still
+// resolves them, only the name / prefix search leaves them out.
+export type MkSalesProduct = { code: string; name: string; barcode: string | null; activated: boolean };
+
+const MK_PRODUCT_PAGE = 1000;
+const MK_PRODUCT_MAX_PAGES = 20;
+const MK_PRODUCT_TTL_MS = 10 * 60 * 1000;
+let mkProductCache: { at: number; value: MkSalesProduct[] } | null = null;
+let mkProductInflight: Promise<MkSalesProduct[]> | null = null;
+
+async function fetchMkSalesProducts(): Promise<MkSalesProduct[] | null> {
+  const out: MkSalesProduct[] = [];
+  for (let page = 0; page < MK_PRODUCT_MAX_PAGES; page++) {
+    const res = await callMetakocka(
+      "json/product_list",
+      { sales: "true", limit: String(MK_PRODUCT_PAGE), offset: String(page * MK_PRODUCT_PAGE) },
+      { timeoutMs: 60_000 },
+    );
+    if (!res.ok) return null;
+    const raw = res.data.product_list;
+    const rows = Array.isArray(raw)
+      ? (raw as Record<string, unknown>[])
+      : raw && typeof raw === "object"
+        ? [raw as Record<string, unknown>]
+        : [];
+    for (const p of rows) {
+      const code = str(p.code);
+      if (!code || str(p.service) === "true") continue;
+      out.push({
+        code,
+        name: str(p.name) ?? code,
+        barcode: str(p.barcode) ?? null,
+        activated: str(p.activated) !== "false",
+      });
+    }
+    if (rows.length < MK_PRODUCT_PAGE) break;
+  }
+  return out;
+}
+
+export async function listMkSalesProducts(): Promise<MkSalesProduct[]> {
+  if (mkProductCache && Date.now() - mkProductCache.at < MK_PRODUCT_TTL_MS) {
+    return mkProductCache.value;
+  }
+  mkProductInflight ??= fetchMkSalesProducts()
+    .then((value) => {
+      if (value) mkProductCache = { at: Date.now(), value };
+      return value ?? mkProductCache?.value ?? [];
+    })
+    .finally(() => {
+      mkProductInflight = null;
+    });
+  return mkProductInflight;
+}
+
+// Same matching as the catalogue search: exact code / barcode first (deactivated
+// products included), then code prefix, then names containing every word of the query.
+export async function searchMkSalesProducts(q: string, limit = 15): Promise<MkSalesProduct[]> {
+  const query = q.trim().toLowerCase();
+  if (query.length < 2) return [];
+  const words = query.split(/\s+/).filter(Boolean);
+  const exact: MkSalesProduct[] = [];
+  const prefix: MkSalesProduct[] = [];
+  const byName: MkSalesProduct[] = [];
+  for (const p of await listMkSalesProducts()) {
+    const code = p.code.toLowerCase();
+    if (code === query || p.barcode === query) exact.push(p);
+    else if (!p.activated) continue;
+    else if (code.startsWith(query)) prefix.push(p);
+    else if (words.every((w) => p.name.toLowerCase().includes(w))) byName.push(p);
+  }
+  return [...exact, ...prefix, ...byName].slice(0, limit);
+}
+
+// By exact code, else by barcode (EAN; leading zeros ignored, see normalizeEan).
+export async function getMkSalesProduct(codeOrEan: string): Promise<MkSalesProduct | null> {
+  const want = codeOrEan.trim();
+  const all = await listMkSalesProducts();
+  const byCode = all.find((p) => p.code === want);
+  if (byCode) return byCode;
+  const ean = /^\d{6,14}$/.test(want) ? want.replace(/^0+/, "") : null;
+  if (!ean) return null;
+  return all.find((p) => p.barcode != null && p.barcode.trim().replace(/^0+/, "") === ean) ?? null;
+}
+
+// Metakocka barcodes (EANs) by product code, from the same cached index. The catalogue
+// misses the EAN of many variants; MK is where barcodes are maintained.
+export async function getMkBarcodes(codes: string[]): Promise<Record<string, string>> {
+  const want = new Set(codes.map((c) => c.trim()).filter(Boolean));
+  const out: Record<string, string> = {};
+  if (want.size === 0) return out;
+  for (const p of await listMkSalesProducts()) {
+    const b = p.barcode?.trim();
+    if (b && want.has(p.code)) out[p.code] = b;
+  }
+  return out;
+}
+
 // ── per-product prices (read straight from MK) ─────────────────────────────────
 
 function round2(n: number): number {

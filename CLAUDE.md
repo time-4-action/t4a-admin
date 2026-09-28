@@ -685,7 +685,7 @@ from client input.
 | Preorders | `/preorder/[id]/submissions` | Full table with stage / Metakocka / visibility columns, filters incl. integration failures. |
 | Preorder detail | `/preorder/[id]/submissions/[sid]` | Three panels: **Requested preorder** (frozen snapshot), **Current Metakocka order** (live, compared line by line), **Customer visibility** (Show/Hide order to customer). Unlock detaches the MK order (optionally deletes it). |
 | Preview | `/preorder/[id]/preview` | Pure preview — nothing is saved. Renders the **customer's fill page piece for piece** (`app/portal/preorders/[campaignId]/fill-client.tsx`, unlocked draft state): the header hides the campaign tab strip (`hideNav`), then the same section `TabBar` + `FillModeNav` (Catalogue / Order sheet — shared in `preorder-shared.tsx`), the same framed sheet document (`SheetContextBar` → grid `bare searchable` / guided) and the same sidebar card (summary `bare`, minimum order, Delivery & note, "Your terms") — only the submit slot is the admin's. Pick a partner (`?partner=<mkId>` deep link, `?pick=1` opens the picker) → the sheet renders their **effective** campaign with an admin-only "Effective configuration" card (market, pricing, assortment, discounts, sources, warnings). **There is no admin-side fill.** Placing a preorder for a customer = **View as customer**: the page unlocks the campaign for them (`POST …/customers/[partnerMkId]/access`, the invite-link grant, idempotent — the portal shows a campaign only with a grant) and starts the customer impersonation, landing on `/portal/preorders/<id>`; the admin fills and submits there **as the customer** (one fill flow, the customer's own — min-order and every other customer rule apply). |
-| Portal | `/portal/preorders`, `/portal/preorders/[id]` | Customer list + fill page. After submit the page shows registration state (registering / saved-but-not-registered with Retry / processing) and, once published, **"Your confirmed order"** (requested vs confirmed per line, link to `/portal/orders/<mkId>`). |
+| Portal | `/portal/preorders`, `/portal/preorders/[id]` | Customer list + fill page. **Quick guide**: on the first visit to an editable preorder a spotlight tour (`components/guided-tour.tsx`, steps in `fill-client.tsx`) walks through sections, Catalogue vs Order sheet (it switches the view per step), search, opening a product (photos / zoom / sizes), pricing & volume discount, summary & submit; targets are `data-tour="…"` attributes. Seen-flag in localStorage (`t4a.portal.preorder-guide.v1`); the header's "Quick guide" button replays it. After submit the page shows registration state (registering / saved-but-not-registered with Retry / processing) and, once published, **"Your confirmed order"** (requested vs confirmed per line, link to `/portal/orders/<mkId>`). |
 
 #### Effective campaign resolver (`lib/preorder-effective.ts`, pure)
 
@@ -962,7 +962,65 @@ reference, default `EX4`), `MK_DEFAULT_VAT_RATE` (product VAT % used only to
 gross/net MK list prices lacking a tax factor), `MK_ZERO_TAX_CODE` (a `tax` code for
 zero-rated lines instead of `tax_factor: 0`), `MK_LINE_TAX_MODE` (`code` = a
 configured tax code is mandatory per rate; default: `tax_factor`, codes optional),
-`PRODUCT_API_BASE` / `PRODUCT_API_KEY` (catalogue used by the sheet builder).
+`PRODUCT_API_BASE` / `PRODUCT_API_KEY` (catalogue used by the sheet builder —
+the key must equal the partner portal's `WEBHOOK_API_KEY`, else the API silently
+returns published products only).
+
+**Sheet builder product sources.** The catalogue is built from PNV, so a product
+that lives only in Metakocka is not in it. The builder's search
+(`/api/admin/preorder/products/search`) therefore appends **Metakocka-only** hits
+(`source: "metakocka"`, "Metakocka only" badge) from an in-memory index of every
+activated MK sales product (`listMkSalesProducts` / `searchMkSalesProducts` in
+`lib/metakocka.ts`, 10 min cache — MK's `product_list` has no name search), minus
+codes the catalogue has (`getCatalogueCodes` in `lib/product-api.ts`). Resolve
+(single + SKU import) falls back to MK for codes the catalogue doesn't know: one
+group, one row, priced from MK; a price MK doesn't have comes in as **0** (many
+old MK-only products carry no price list), and re-price keeps it 0.
+
+**SKU import** (`/api/admin/preorder/products/resolve`) takes SKUs **or EANs**: a
+code the catalogue's `/api/product/:code` misses is retried through the catalogue's
+EAN index (`catalogueCodeForEan`, built with `getCatalogueCodes`), then Metakocka by
+code or barcode (`getMkSalesProduct`; deactivated MK products resolve on an exact
+SKU / EAN, only the name search skips them). EANs compare with leading zeros
+dropped. A row's missing EAN is filled from the **Metakocka barcode**
+(`getMkBarcodes`) on resolve and on re-price; customers see the EAN under the SKU.
+Import input may carry a **tag** per code: xlsx columns `SKU / EAN` + `Tag`
+(found by header name, any order; `parseSkuWorkbookEntries`), paste / CSV one
+code per line with the tag after a comma / tab / semicolon (`lib/sku-entries.ts`);
+a variant code / EAN tags that row, a parent code every row it imports. The Import dialog's **Smart grouping** toggle (`lib/preorder-smart-group.ts`)
+merges single-SKU groups whose names differ only in a trailing size token
+("T4A QTS-Wave 71/76") into one group, the token becoming the variant label, and
+appends to a same-named group already on the tab. **Smart variant labels** (`withSmartLabels`,
+same file): a variant's "Size / label" is the part of its name its siblings don't
+share ("Patrik Fin PPW Slot 80" → "80"), applied in `resolve` and, once, by the
+builder on load to rows whose label still equals the full name (typed labels are
+never rewritten; the fix autosaves). The builder table has an editable **EAN**
+column (`row.ean`). Row **tags** are free text
+(`RowTag = string`, max `ROW_TAG_MAX`), edited from a popover on the row pill;
+legacy `"pre-order only"` displays as PRE (`tagLabel`). A tag may carry a colour (`row.tagColor`,
+`#rrggbb`); the colour belongs to the tag text — the builder's tag editor
+(palette + custom picker) recolours every row with that label campaign-wide, and
+a row given an existing tag inherits its colour. One pill component renders tags
+everywhere: `app/preorder/tag-pill.tsx` (`TagPill`, sizes sm/md/lg — the
+catalogue card uses `lg`). **The group cover (`group.images[0]`) is the default
+image of every variant without its own** — in the sheet tables, the builder
+(faded, dashed) and the submission snapshot line.
+
+**Row + group images.** Every row thumbnail and every group header carries an
+image tile (dashed "add" tile when empty) that opens `ImageManagerDialog`
+(`edit/image-modal.tsx`): drag & drop / pick / paste, per-file progress (XHR),
+retry, replace / remove; a group holds several images, the first is the cover
+(`group.images`, "Make cover"). The browser **resizes before uploading** (longest
+side 2000 px, WebP q0.85; GIFs and undecodable files go as picked), then
+`POST /api/admin/preorder/products/image` (multipart `file` + `campaignId`,
+JPG/PNG/WebP/GIF/AVIF ≤ 9 MB — the middleware body limit is 10 MB) stores it through the server
+(`lib/s3.ts`, no presigned browser PUT, so bucket CORS is irrelevant) in the
+**same Hetzner Object Storage bucket as patrik-warranty-form**, under
+`uploads/media/preorder/<campaignId>/<uuid>.<ext>`, and the public URL is saved on
+`row.image` / `group.images`.
+Needs `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_PUBLIC_BASE`,
+`S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` (same values as the warranty form);
+without them the route answers 503.
 
 ### API Routes (`app/api/admin/`)
 
@@ -1008,6 +1066,7 @@ NEXT_PUBLIC_BUILDER_ADMIN_ROLE_NAME  # Role that grants the Builder section (def
 NEXT_PUBLIC_DOCUMENTS_ADMIN_ROLE_NAME # Role that grants the Documents browse section (default: "documents-admin")
 NEXT_PUBLIC_PREORDER_ADMIN_ROLE_NAME  # Role that grants the Preorder section (default: "preorder-admin")
 NEXT_PUBLIC_CUSTOMERS_ADMIN_ROLE_NAME # Role that grants the Customers section on its own (default: "customers-admin"; preorder-admins have it implicitly)
+S3_ENDPOINT / S3_REGION / S3_BUCKET / S3_PUBLIC_BASE / S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY  # Preorder row image uploads (same bucket as the warranty form)
 PORTAL_BASE_URL              # Public origin of the B2B portal used in customer invite links (default: https://b2b.time-4-action.com)
 MK_HOME_COUNTRY              # ISO-2 home country for domestic MK partners without an address country (default: SI)
 MK_PARTNER_SYNC_MODE         # Customer directory sync strategy: all (default) | sharded

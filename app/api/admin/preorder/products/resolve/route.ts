@@ -1,7 +1,16 @@
 import { NextResponse } from "next/server";
-import { getProduct } from "@/lib/product-api";
-import { getMkProductPrices, pickMkListGrossPrice, pickMkListNetPrice, productTaxCode } from "@/lib/metakocka";
+import { getProduct, catalogueCodeForEan } from "@/lib/product-api";
+import {
+  getMkBarcodes,
+  getMkProductPrices,
+  getMkSalesProduct,
+  pickMkListGrossPrice,
+  pickMkListNetPrice,
+  productTaxCode,
+} from "@/lib/metakocka";
 import type { CatalogueProduct } from "@/types/product";
+import { withSmartLabels } from "@/lib/preorder-smart-group";
+import type { MkProductPrice } from "@/types/documents";
 import type { PreorderRow } from "@/types/preorder";
 
 export const runtime = "nodejs";
@@ -89,6 +98,8 @@ function expand(
   } else {
     rows = children.map((c) => nodeToRow(c, parent, sel));
   }
+  // Variant labels = what differs between the variants ("80", "90"), not the full name.
+  if (children.length > 0) rows = withSmartLabels(rows);
   return {
     name: parent.product_name,
     parentCode: parent.code,
@@ -96,6 +107,53 @@ function expand(
     images: (parent.images ?? []).filter(Boolean).slice(0, 8),
     rows,
   };
+}
+
+// A product that exists only in Metakocka (the catalogue is built from PNV and never
+// sees it): one group holding one row, no image or description. Prices are filled by
+// applyMkPrices like any other row.
+async function mkOnlyGroup(code: string): Promise<ProductGroupDraft | null> {
+  const p = await getMkSalesProduct(code);
+  if (!p) return null;
+  return {
+    name: p.name,
+    parentCode: p.code,
+    description: null,
+    images: [],
+    rows: [
+      {
+        source: "catalogue",
+        code: p.code,
+        ean: p.barcode,
+        name: p.name,
+        variantLabel: null,
+        size: null,
+        tag: null,
+        rrp: null,
+        partnerPrice: null,
+        discountedPrice: null,
+        image: null,
+        taxCode: null,
+      },
+    ],
+  };
+}
+
+// Many MK-only products (old models) carry no sales price list at all. They come in at
+// 0 rather than unpriced, so they stay orderable; the admin edits the price in the sheet.
+// Run after applyMkPrices.
+function zeroFillPrices(groups: ProductGroupDraft[]): void {
+  for (const g of groups)
+    for (const r of g.rows) {
+      r.rrp ??= 0;
+      r.partnerPrice ??= 0;
+    }
+}
+
+// The MK list whose title matches the name heuristic — the MK counterpart of pickPrice
+// for a column with no list chosen (an MK-only row has no catalogue prices to fall back on).
+function heuristicMkTitle(entries: MkProductPrice[], re: RegExp): string | null {
+  return entries.find((e) => re.test(e.title))?.title ?? null;
 }
 
 // Override the RRP / partner price columns straight from Metakocka for the selected
@@ -110,23 +168,40 @@ async function applyMkPrices(groups: ProductGroupDraft[], sel: PriceListSelectio
     .filter((r) => r.source === "catalogue" && r.code)
     .map((r) => r.code);
   if (codes.length === 0) return;
-  const mk = await getMkProductPrices(codes);
+  const [mk, barcodes] = await Promise.all([getMkProductPrices(codes), getMkBarcodes(codes)]);
   for (const g of groups)
     for (const r of g.rows) {
       if (r.source !== "catalogue") continue;
+      // The catalogue misses many EANs — Metakocka's barcode fills the gap.
+      if (!r.ean && barcodes[r.code]) r.ean = barcodes[r.code];
       const entries = mk[r.code];
       if (!entries) continue;
       // Always capture the MK tax code (needed to push a submission without re-reading).
       r.taxCode = productTaxCode(entries);
-      if (sel.rrpPricelist) {
-        const p = pickMkListGrossPrice(entries, sel.rrpPricelist, { untaxedIsNet: false });
+      const rrpTitle = sel.rrpPricelist || (r.rrp == null ? heuristicMkTitle(entries, /rrp|retail|msrp/i) : null);
+      if (rrpTitle) {
+        const p = pickMkListGrossPrice(entries, rrpTitle, { untaxedIsNet: false });
         if (p != null) r.rrp = p;
       }
-      if (sel.partnerPricelist) {
-        const p = pickMkListNetPrice(entries, sel.partnerPricelist);
+      const partnerTitle =
+        sel.partnerPricelist || (r.partnerPrice == null ? heuristicMkTitle(entries, /partner/i) : null);
+      if (partnerTitle) {
+        const p = pickMkListNetPrice(entries, partnerTitle);
         if (p != null) r.partnerPrice = p;
       }
     }
+}
+
+// Look a SKU or EAN up in the catalogue. /api/product/:code knows codes only, so a miss
+// retries through the catalogue's EAN index. `code` is the matched parent / variant code
+// (the EAN's own code, never the EAN), so a variant EAN keeps just that variant.
+async function lookupCatalogue(input: string) {
+  const res = await getProduct(input);
+  if (res.ok && res.data) return { res, code: input };
+  const code = await catalogueCodeForEan(input);
+  if (!code) return { res, code: input };
+  const byEan = await getProduct(code);
+  return { res: byEan.ok && byEan.data ? byEan : res, code };
 }
 
 // POST body: { code } → single group, OR { codes: string[] } → one group per parent,
@@ -145,10 +220,22 @@ export async function POST(request: Request) {
 
   // ── Single parent ──
   if (body.code) {
-    const res = await getProduct(body.code.trim());
-    if (!res.ok) return NextResponse.json({ error: res.error }, { status: res.status });
-    const group = expand(res.data as CatalogueProduct, sel);
+    const code = body.code.trim();
+    const { res } = await lookupCatalogue(code);
+    if (res.ok && res.data) {
+      const group = expand(res.data as CatalogueProduct, sel);
+      await applyMkPrices([group], sel);
+      return NextResponse.json({ group });
+    }
+    // Not in the catalogue (or the catalogue is down) → maybe a Metakocka-only product.
+    const group = await mkOnlyGroup(code);
+    if (!group) {
+      return res.ok
+        ? NextResponse.json({ error: "Product not found." }, { status: 404 })
+        : NextResponse.json({ error: res.error }, { status: res.status });
+    }
     await applyMkPrices([group], sel);
+    zeroFillPrices([group]);
     return NextResponse.json({ group });
   }
 
@@ -165,10 +252,10 @@ export async function POST(request: Request) {
   const notFound: string[] = [];
 
   await Promise.all(
-    codes.map(async (code) => {
-      const res = await getProduct(code);
+    codes.map(async (input) => {
+      const { res, code } = await lookupCatalogue(input);
       if (!res.ok || !res.data) {
-        notFound.push(code);
+        notFound.push(input);
         return;
       }
       const parent = res.data as CatalogueProduct;
@@ -182,6 +269,17 @@ export async function POST(request: Request) {
   const groups = Array.from(byParent.values()).map(({ parent, wanted }) =>
     expand(parent, sel, wanted),
   );
+  // Codes the catalogue doesn't know may be Metakocka-only products (by code or barcode) —
+  // one group each.
+  const mkGroups: ProductGroupDraft[] = [];
+  const stillMissing: string[] = [];
+  for (const code of notFound) {
+    const g = await mkOnlyGroup(code);
+    if (!g) stillMissing.push(code);
+    else if (!mkGroups.some((x) => x.parentCode === g.parentCode)) mkGroups.push(g);
+  }
+  groups.push(...mkGroups);
   await applyMkPrices(groups, sel);
-  return NextResponse.json({ groups, notFound });
+  zeroFillPrices(mkGroups);
+  return NextResponse.json({ groups, notFound: stillMissing });
 }

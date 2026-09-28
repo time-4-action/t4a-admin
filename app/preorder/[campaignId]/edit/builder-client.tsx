@@ -1,10 +1,12 @@
 "use client";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { CampaignHeader } from "@/app/preorder/[campaignId]/campaign-nav";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover as PopoverPrimitive } from "radix-ui";
 import {
   Dialog,
   DialogContent,
@@ -49,6 +51,10 @@ import {
   Copy,
   Lock,
   LockOpen,
+  Tag,
+  ImagePlus,
+  X,
+  ClipboardPaste,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
@@ -72,6 +78,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   activeTiers,
+  tagLabel,
+  ROW_TAG_MAX,
   type PreorderCampaign,
   type PreorderRow,
   type PreorderTab,
@@ -83,6 +91,10 @@ import { fmtMoney } from "@/app/preorder/preorder-shared";
 import { VatModal } from "./vat-modal";
 import type { VatOverride } from "@/lib/pricing";
 import type { MkPricelist } from "@/types/documents";
+import { smartGroup, withSmartLabels } from "@/lib/preorder-smart-group";
+import { formatSkuEntries, parseSkuEntries, skuKey, type SkuEntry } from "@/lib/sku-entries";
+import { ImageManagerDialog } from "./image-modal";
+import { TagPill, TAG_COLORS, isHexColor } from "@/app/preorder/tag-pill";
 
 type RowDraft = Omit<PreorderRow, "id" | "order">;
 type GroupDraft = {
@@ -184,7 +196,21 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
       .then(async (r) => {
         const data = await r.json();
         if (!r.ok) throw new Error(data?.error ?? "Not found");
-        setCampaign(data.campaign);
+        // Sheets built before smart labels carry the full variant name as its label —
+        // shorten those once (typed labels are kept) and let the autosave store it.
+        const loaded = data.campaign as PreorderCampaign;
+        let relabelled = false;
+        const tabs = loaded.tabs.map((t) => ({
+          ...t,
+          groups: t.groups.map((g) => {
+            const rows = withSmartLabels(g.rows);
+            if (rows === g.rows) return g;
+            relabelled = true;
+            return { ...g, rows };
+          }),
+        }));
+        setCampaign(relabelled ? { ...loaded, tabs } : loaded);
+        if (relabelled) setDirty(true);
         setActiveTabId(data.campaign.tabs[0]?.id ?? null);
         setVatOverrides(data.campaign.vatOverrides ?? []);
         setMarketCountries(((data.campaign.markets ?? []) as { countries?: string[] }[]).flatMap((m) => m.countries ?? []));
@@ -213,6 +239,36 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
     setCampaign((prev) => (prev ? fn(prev) : prev));
     setDirty(true);
   }, []);
+
+  // Tag colours belong to the tag text: one colour per label across the whole campaign.
+  const tagColors = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const t of campaign?.tabs ?? [])
+      for (const g of t.groups)
+        for (const r of g.rows) {
+          const k = tagLabel(r.tag)?.toUpperCase();
+          if (k && r.tagColor && !m.has(k)) m.set(k, r.tagColor);
+        }
+    return m;
+  }, [campaign]);
+  const setTagColor = useCallback(
+    (tag: string, color: string | null) => {
+      const k = tagLabel(tag)?.toUpperCase();
+      if (!k) return;
+      mutate((c) => ({
+        ...c,
+        tabs: c.tabs.map((t) => ({
+          ...t,
+          groups: t.groups.map((g) => ({
+            ...g,
+            rows: g.rows.map((r) => (tagLabel(r.tag)?.toUpperCase() === k ? { ...r, tagColor: color } : r)),
+          })),
+        })),
+      }));
+    },
+    [mutate],
+  );
+  const tagCtx = useMemo(() => ({ colors: tagColors, setColor: setTagColor }), [tagColors, setTagColor]);
 
   const mutateTab = useCallback(
     (tabId: string, fn: (t: PreorderTab) => PreorderTab) =>
@@ -248,6 +304,27 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   function addGroups(tabId: string, drafts: GroupDraft[]) {
     if (drafts.length === 0) return;
     mutateTab(tabId, (t) => ({ ...t, groups: [...t.groups, ...drafts.map(materializeGroup)] }));
+  }
+  // Import with smart grouping: single-SKU products sharing a base name become one group,
+  // and a group whose name is already on the tab takes the rows instead of a duplicate.
+  function addGroupsSmart(tabId: string, drafts: GroupDraft[]) {
+    if (drafts.length === 0) return;
+    mutateTab(tabId, (t) => {
+      const merged = smartGroup(drafts, t.groups.map((g) => g.name));
+      const groups = [...t.groups];
+      for (const d of merged) {
+        const i = groups.findIndex((g) => g.name.trim().toLowerCase() === d.name.trim().toLowerCase());
+        if (i === -1) {
+          groups.push(materializeGroup(d));
+          continue;
+        }
+        const g = groups[i];
+        const have = new Set(g.rows.map((r) => r.code));
+        const fresh = d.rows.filter((r) => !r.code || !have.has(r.code));
+        groups[i] = { ...g, rows: [...g.rows, ...fresh.map((r, j) => ({ ...r, id: uid(), order: g.rows.length + j }))] };
+      }
+      return { ...t, groups };
+    });
   }
   function addBlankGroup(tabId: string) {
     addGroups(tabId, [{ name: "New group", rows: [] }]);
@@ -392,7 +469,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
         }),
       });
       const data = await res.json();
-      const prices: Record<string, { rrp: number | null; partnerPrice: number | null; taxCode?: string | null }> =
+      const prices: Record<string, { rrp: number | null; partnerPrice: number | null; taxCode?: string | null; ean?: string | null }> =
         data.prices ?? {};
       mutate((c) => ({
         ...c,
@@ -403,7 +480,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
             rows: g.rows.map((row) => {
               if (row.source !== "catalogue") return row;
               const p = prices[row.code];
-              return p ? { ...row, rrp: p.rrp, partnerPrice: p.partnerPrice, taxCode: p.taxCode ?? row.taxCode ?? null } : row;
+              return p ? { ...row, rrp: p.rrp, partnerPrice: p.partnerPrice, taxCode: p.taxCode ?? row.taxCode ?? null, ean: row.ean || p.ean || null } : row;
             }),
           })),
         })),
@@ -442,6 +519,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   if (!campaign) return null;
 
   return (
+    <TagColorsContext.Provider value={tagCtx}>
     <div className="flex flex-col h-full">
       <CampaignHeader
         campaignId={campaignId}
@@ -716,6 +794,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                         sensors={sensors}
                         onToggleCollapse={() => toggleCollapse(g.id)}
                         onRenameGroup={(name) => mutateGroup(activeTab.id, g.id, (gr) => ({ ...gr, name }))}
+                        onSetImages={(images) => mutateGroup(activeTab.id, g.id, (gr) => ({ ...gr, images }))}
                         onDeleteGroup={() => deleteGroup(activeTab.id, g.id)}
                         onAddRow={() => addManualRow(activeTab.id, g.id)}
                         onAddFromCatalogue={() => setPicker({ tabId: activeTab.id, groupId: g.id })}
@@ -840,10 +919,11 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
           rrpPricelist={campaign.rrpPricelist ?? null}
           partnerPricelist={campaign.partnerPricelist ?? null}
           onClose={() => setCsvTab(null)}
-          onAddGroups={(gs) => addGroups(csvTab, gs)}
+          onAddGroups={(gs, smart) => (smart ? addGroupsSmart(csvTab, gs) : addGroups(csvTab, gs))}
         />
       )}
     </div>
+    </TagColorsContext.Provider>
   );
 }
 
@@ -895,10 +975,261 @@ function PriceInput({ value, onCommit, placeholder = "—", warn }: { value?: nu
   );
 }
 
+// A thumbnail that opens the image manager: the row's image, or a group's cover.
+// Empty = a dashed "add image" tile, so rows / groups without a picture stand out.
+function ImageThumb({
+  images, fallback, multiple, title, onChange, size = "sm",
+}: {
+  images: string[];
+  /** Shown faded when there is no image of its own (a variant falls back to the group cover). */
+  fallback?: string | null;
+  multiple: boolean;
+  title: string;
+  onChange: (images: string[]) => void;
+  size?: "sm" | "md";
+}) {
+  const { campaignId } = useParams<{ campaignId: string }>();
+  const [open, setOpen] = useState(false);
+  const box = size === "md" ? "w-9 h-9" : "w-8 h-8";
+  const cover = images[0];
+  const shown = cover ?? fallback ?? null;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={cn(
+          box,
+          "relative rounded-md shrink-0 overflow-hidden transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+          cover
+            ? "ring-1 ring-border hover:ring-2 hover:ring-lime-500"
+            : shown
+              ? "border border-dashed border-border hover:ring-2 hover:ring-lime-500"
+              : "flex items-center justify-center border border-dashed border-border bg-muted/40 text-muted-foreground hover:border-lime-500 hover:text-lime-600 hover:bg-lime-500/10",
+        )}
+        title={cover ? (multiple ? "Group images" : "Change image") : shown ? "Using the group cover — click to give this variant its own image" : "Add an image"}
+        aria-label={cover ? (multiple ? "Group images" : "Change image") : "Add an image"}
+      >
+        {shown ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={shown} alt="" className={cn("w-full h-full object-cover", !cover && "opacity-50")} />
+        ) : (
+          <ImagePlus className="w-3.5 h-3.5" />
+        )}
+        {multiple && images.length > 1 && (
+          <span className="absolute bottom-0 right-0 rounded-tl bg-black/65 text-white text-[9px] font-semibold leading-none px-1 py-0.5 tabular-nums">
+            {images.length}
+          </span>
+        )}
+      </button>
+      {open && (
+        <ImageManagerDialog
+          open={open}
+          onOpenChange={setOpen}
+          title={title}
+          images={images}
+          multiple={multiple}
+          campaignId={campaignId ?? "misc"}
+          onChange={onChange}
+        />
+      )}
+    </>
+  );
+}
+
+// The row's tag pill. Click it (or the tag button that shows on row hover) to open a
+// small editor: type any label or pick a suggestion, pick a colour; Save / Enter
+// applies, Remove clears. A colour is the tag's, not the row's — changing it recolours
+// every row carrying that tag, and a row given an existing tag takes its colour.
+const TAG_SUGGESTIONS = ["NEW", "PRE", "SALE", "LIMITED", "BESTSELLER", "LAST PIECES"];
+
+type TagColorsCtx = { colors: Map<string, string>; setColor: (tag: string, color: string | null) => void };
+const TagColorsContext = createContext<TagColorsCtx>({ colors: new Map(), setColor: () => {} });
+
+function TagEditor({
+  tag, color, onChange,
+}: {
+  tag: string | null;
+  color: string | null;
+  onChange: (patch: { tag: string | null; tagColor: string | null }) => void;
+}) {
+  const { colors, setColor } = useContext(TagColorsContext);
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [pick, setPick] = useState<string | null>(null);
+  const label = tagLabel(tag);
+  const typed = text.trim().slice(0, ROW_TAG_MAX);
+  const typedKey = tagLabel(typed)?.toUpperCase() ?? "";
+
+  function apply(value: string, chosen: string | null) {
+    const t = value.trim().slice(0, ROW_TAG_MAX);
+    if (!t) {
+      if (tag !== null) onChange({ tag: null, tagColor: null });
+      setOpen(false);
+      return;
+    }
+    // Keep the stored legacy value when its displayed label was left untouched.
+    const next = t.toUpperCase() === label?.toUpperCase() ? tag! : t;
+    const known = colors.get(tagLabel(next)!.toUpperCase()) ?? null;
+    if (chosen !== known) setColor(next, chosen); // recolours every row with this tag
+    if (next !== tag || chosen !== color) onChange({ tag: next, tagColor: chosen });
+    setOpen(false);
+  }
+
+  return (
+    <PopoverPrimitive.Root
+      open={open}
+      onOpenChange={(o) => {
+        if (o) {
+          setText(label ?? "");
+          setPick(color);
+        }
+        setOpen(o);
+      }}
+    >
+      <PopoverPrimitive.Trigger asChild>
+        {label ? (
+          <button type="button" className="shrink-0 rounded-md hover:ring-2 hover:ring-lime-500/60 hover:ring-offset-1" title="Edit tag">
+            <TagPill tag={tag} color={color} size="md" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            className={cn(
+              "flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground/40 hover:text-foreground hover:bg-muted",
+              open ? "opacity-100 text-foreground bg-muted" : "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100",
+            )}
+            aria-label="Add tag"
+            title="Add a tag (e.g. NEW, SALE)"
+          >
+            <Tag className="w-3 h-3" />
+          </button>
+        )}
+      </PopoverPrimitive.Trigger>
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Content
+          align="start"
+          sideOffset={6}
+          className="z-50 w-80 rounded-xl border border-border bg-popover p-3.5 shadow-lg outline-none"
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).querySelector("input")?.select();
+          }}
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              apply(text, pick);
+            }}
+            className="space-y-3"
+          >
+            <div className="flex items-center justify-between gap-2 min-h-7">
+              <label htmlFor="row-tag-input" className="text-[12px] font-medium text-foreground">Tag</label>
+              {typed && <TagPill tag={typed} color={pick} size="lg" />}
+            </div>
+            <Input
+              id="row-tag-input"
+              value={text}
+              maxLength={ROW_TAG_MAX}
+              placeholder="e.g. NEW, SALE, Last pieces"
+              onChange={(e) => {
+                setText(e.target.value);
+                // An existing tag brings its colour along.
+                const k = tagLabel(e.target.value.trim())?.toUpperCase();
+                if (k && colors.has(k)) setPick(colors.get(k)!);
+              }}
+              className="h-9 text-[13px]"
+            />
+            <div className="flex flex-wrap gap-1.5">
+              {TAG_SUGGESTIONS.map((sug) => (
+                <button
+                  key={sug}
+                  type="button"
+                  onClick={() => {
+                    setText(sug);
+                    setPick(colors.get(sug) ?? pick);
+                  }}
+                  className={cn(
+                    "h-6 rounded-md border px-2 text-[10px] font-semibold uppercase tracking-wide transition-colors",
+                    typedKey === sug
+                      ? "border-lime-500 bg-lime-500/10 text-lime-700 dark:text-lime-300"
+                      : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30",
+                  )}
+                >
+                  {sug}
+                </button>
+              ))}
+            </div>
+            <div>
+              <div className="text-[11px] font-medium text-muted-foreground mb-1.5">Colour</div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPick(null)}
+                  title="Default"
+                  aria-label="Default colour"
+                  className={cn(
+                    "size-6 rounded-full bg-lime-100 border border-lime-300 dark:bg-lime-900/60 ring-offset-2 ring-offset-popover transition-shadow",
+                    pick == null ? "ring-2 ring-foreground" : "hover:ring-2 hover:ring-border",
+                  )}
+                />
+                {TAG_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setPick(c)}
+                    title={c}
+                    aria-label={`Colour ${c}`}
+                    style={{ backgroundColor: c }}
+                    className={cn(
+                      "size-6 rounded-full ring-offset-2 ring-offset-popover transition-shadow",
+                      pick?.toLowerCase() === c ? "ring-2 ring-foreground" : "hover:ring-2 hover:ring-border",
+                    )}
+                  />
+                ))}
+                <label
+                  title="Custom colour"
+                  className={cn(
+                    "relative size-6 rounded-full overflow-hidden cursor-pointer ring-offset-2 ring-offset-popover",
+                    "bg-[conic-gradient(#ef4444,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#ef4444)]",
+                    pick && !TAG_COLORS.includes(pick.toLowerCase()) ? "ring-2 ring-foreground" : "hover:ring-2 hover:ring-border",
+                  )}
+                >
+                  <input
+                    type="color"
+                    value={isHexColor(pick) ? pick : "#65a30d"}
+                    onChange={(e) => setPick(e.target.value.toLowerCase())}
+                    className="absolute inset-0 opacity-0 cursor-pointer"
+                    aria-label="Custom colour"
+                  />
+                </label>
+              </div>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                Applies to every row tagged {typed ? <span className="font-semibold uppercase">{tagLabel(typed)}</span> : "with this tag"}.
+              </p>
+            </div>
+            <div className="flex items-center justify-between pt-2 border-t border-border/60">
+              {label ? (
+                <button type="button" onClick={() => apply("", null)} className="text-[12px] text-muted-foreground hover:text-destructive">
+                  Remove tag
+                </button>
+              ) : (
+                <span />
+              )}
+              <Button type="submit" size="sm" className="h-7 text-[12px]">Save</Button>
+            </div>
+          </form>
+        </PopoverPrimitive.Content>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
+  );
+}
+
 const RowEditor = memo(function RowEditor({
-  row, onChange, onDelete,
+  row, cover, onChange, onDelete,
 }: {
   row: PreorderRow;
+  cover: string | null;
   onChange: (patch: Partial<PreorderRow>) => void;
   onDelete: () => void;
 }) {
@@ -927,21 +1258,19 @@ const RowEditor = memo(function RowEditor({
       {/* variant */}
       <td className={cell}>
         <div className="flex items-center gap-2 min-w-0">
-          {row.image ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={row.image} alt="" className="w-8 h-8 rounded-md object-cover ring-1 ring-border shrink-0" />
-          ) : (
-            <span className="w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0"><Package className="w-3.5 h-3.5 text-muted-foreground" /></span>
-          )}
+          <ImageThumb
+            images={row.image ? [row.image] : []}
+            fallback={cover}
+            multiple={false}
+            title={`Image · ${row.name || row.code || "variant"}`}
+            onChange={(imgs) => onChange({ image: imgs[0] ?? null })}
+          />
           <input className={cn(inp, "font-medium")} value={row.name} placeholder="Variant name" onChange={(e) => onChange({ name: e.target.value })} />
-          {row.tag && (
-            <span className="text-[9px] font-bold uppercase text-lime-700 bg-lime-100 dark:bg-lime-900/50 dark:text-lime-300 rounded px-1 shrink-0">
-              {row.tag === "NEW" ? "NEW" : "PRE"}
-            </span>
-          )}
+          <TagEditor tag={row.tag ?? null} color={row.tagColor ?? null} onChange={(patch) => onChange(patch)} />
         </div>
       </td>
       <td className={cell}><input className={cn(inp, "font-mono text-[11.5px] text-muted-foreground focus:text-foreground")} value={row.code} placeholder="SKU" onChange={(e) => onChange({ code: e.target.value })} /></td>
+      <td className={cell}><input className={cn(inp, "font-mono text-[11.5px] text-muted-foreground focus:text-foreground")} value={row.ean ?? ""} placeholder="—" inputMode="numeric" onChange={(e) => onChange({ ean: e.target.value.trim() || null })} /></td>
       <td className={cell}><input className={inp} value={row.variantLabel ?? row.size ?? ""} placeholder="size / label" onChange={(e) => onChange({ variantLabel: e.target.value || null })} /></td>
       <td className={cn(cell, "border-l border-l-border/40")}><PriceInput value={row.rrp} onCommit={(n) => onChange({ rrp: n })} warn="No RRP — hidden from individuals until priced" /></td>
       <td className={cell}><PriceInput value={row.partnerPrice} onCommit={(n) => onChange({ partnerPrice: n })} warn="No partner price — companies would pay the RRP" /></td>
@@ -1051,13 +1380,14 @@ function SortableTab({
 
 // ── Sortable group (a parent product): header + variant table, drag via grip ──
 function GroupSection({
-  group, collapsed, sensors, onToggleCollapse, onRenameGroup, onDeleteGroup, onAddRow, onAddFromCatalogue, onUpdateRow, onDeleteRow, onReorderRows, pricing,
+  group, collapsed, sensors, onToggleCollapse, onRenameGroup, onSetImages, onDeleteGroup, onAddRow, onAddFromCatalogue, onUpdateRow, onDeleteRow, onReorderRows, pricing,
 }: {
   group: PreorderGroup;
   collapsed: boolean;
   sensors: ReturnType<typeof useSensors>;
   onToggleCollapse: () => void;
   onRenameGroup: (name: string) => void;
+  onSetImages: (images: string[]) => void;
   onDeleteGroup: () => void;
   onAddRow: () => void;
   onAddFromCatalogue: () => void;
@@ -1089,19 +1419,17 @@ function GroupSection({
         >
           <GripVertical className="w-3.5 h-3.5" />
         </button>
-        <button
-          type="button"
-          onClick={onToggleCollapse}
-          className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-muted text-muted-foreground shrink-0"
-          aria-label={collapsed ? "Expand group" : "Collapse group"}
-          title={collapsed ? "Expand" : "Collapse"}
-        >
-          {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        </button>
+        {/* Same column + size as the variant thumbnails below (grip w-5 + gap = the row's handle cell). */}
+        <ImageThumb
+          images={group.images ?? []}
+          multiple
+          title={`Images · ${group.name || "group"}`}
+          onChange={onSetImages}
+        />
         <input
           value={group.name}
           onChange={(e) => onRenameGroup(e.target.value)}
-          className="h-8 w-full max-w-[360px] rounded-md border border-transparent bg-transparent px-2 text-[14px] font-semibold text-foreground hover:border-border focus:border-ring focus:bg-background focus:outline-none placeholder:text-muted-foreground/50"
+          className="ml-0.5 h-8 w-full max-w-[360px] rounded-md border border-transparent bg-transparent px-2 text-[14px] font-semibold text-foreground hover:border-border focus:border-ring focus:bg-background focus:outline-none placeholder:text-muted-foreground/50"
           placeholder="Group name"
           aria-label="Group name"
         />
@@ -1109,11 +1437,15 @@ function GroupSection({
           {group.rows.length} variant{group.rows.length === 1 ? "" : "s"}
         </span>
         <div className="flex-1" />
-        {collapsed && (
-          <Button variant="ghost" size="xs" onClick={onToggleCollapse} className="text-muted-foreground">
-            Show variants
-          </Button>
-        )}
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className="flex h-7 items-center gap-1 rounded-md px-2 hover:bg-muted text-[12px] text-muted-foreground hover:text-foreground shrink-0"
+          aria-label={collapsed ? "Expand group" : "Collapse group"}
+          title={collapsed ? "Show variants" : "Hide variants"}
+        >
+          {collapsed ? <><ChevronRight className="w-3.5 h-3.5" /> Show variants</> : <ChevronDown className="w-3.5 h-3.5" />}
+        </button>
         <button
           type="button"
           onClick={onDeleteGroup}
@@ -1128,6 +1460,7 @@ function GroupSection({
       {!collapsed && group.rows.length > 0 && (
         <VariantTable
           rows={group.rows}
+          cover={group.images?.[0] ?? null}
           pricing={pricing}
           sensors={sensors}
           onReorderRows={onReorderRows}
@@ -1157,9 +1490,10 @@ function GroupSection({
 type PricingLabels = { rrp: string | null; partner: string | null; currency: string };
 
 const VariantTable = memo(function VariantTable({
-  rows, pricing, sensors, onReorderRows, onUpdateRow, onDeleteRow,
+  rows, cover, pricing, sensors, onReorderRows, onUpdateRow, onDeleteRow,
 }: {
   rows: PreorderRow[];
+  cover: string | null;
   pricing: PricingLabels;
   sensors: ReturnType<typeof useSensors>;
   onReorderRows: (activeId: string, overId: string) => void;
@@ -1179,9 +1513,10 @@ const VariantTable = memo(function VariantTable({
         <table className="w-full text-[12px] table-fixed min-w-[900px]">
           <colgroup>
             <col className="w-7" />
-            <col className="w-[38%]" />
-            <col className="w-[16%]" />
-            <col className="w-[22%]" />
+            <col className="w-[32%]" />
+            <col className="w-[15%]" />
+            <col className="w-[15%]" />
+            <col className="w-[14%]" />
             <col className="w-[110px]" />
             <col className="w-[110px]" />
             <col className="w-[110px]" />
@@ -1192,6 +1527,7 @@ const VariantTable = memo(function VariantTable({
               <th className="py-2" />
               <th className="text-left font-medium px-3 py-2">Variant</th>
               <th className="text-left font-medium px-3 py-2">SKU</th>
+              <th className="text-left font-medium px-3 py-2">EAN</th>
               <th className="text-left font-medium px-3 py-2">Size / label</th>
               <th className="text-right font-medium px-3 py-2 border-l border-l-border/40 whitespace-nowrap min-w-[112px] align-bottom" title={pricing.rrp ? `From the “${pricing.rrp}” price list — what individuals pay` : "Recommended retail price — what individuals pay"}>
                 <div>RRP</div>
@@ -1214,6 +1550,7 @@ const VariantTable = memo(function VariantTable({
                 <RowEditor
                   key={r.id}
                   row={r}
+                  cover={cover}
                   onChange={(patch) => onUpdateRow(r.id, patch)}
                   onDelete={() => onDeleteRow(r.id)}
                 />
@@ -1573,7 +1910,7 @@ function PricelistSelect({
 }
 
 // ── Product picker: search catalogue, add the parent + all its variants as a group ──
-type Hit = { code: string; name: string; image?: string | null };
+type Hit = { code: string; name: string; image?: string | null; source?: "catalogue" | "metakocka" };
 
 // ── Variant picker for ONE group: lists the variants of the group's own product
 // (missing ones get an "Add", present ones a check) and lets you browse any
@@ -1638,7 +1975,7 @@ function VariantPickerDialog({
         .then((r) => r.json())
         .then((data) => {
           if (cancelled) return;
-          setResults((data.candidates ?? []).map((c: { code: string; name: string; image?: string | null }) => ({ code: c.code, name: c.name, image: c.image })));
+          setResults((data.candidates ?? []) as Hit[]);
         })
         .catch(() => !cancelled && setResults([]))
         .finally(() => !cancelled && setSearching(false));
@@ -1693,7 +2030,7 @@ function VariantPickerDialog({
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="text-[12px] font-medium text-foreground truncate">{c.name}</div>
-                  <div className="text-[10px] text-muted-foreground font-mono truncate">{c.code}</div>
+                  <div className="text-[10px] text-muted-foreground font-mono truncate">{c.code}{c.source === "metakocka" && <MkOnlyBadge />}</div>
                 </div>
                 <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1">Browse variants <ChevronRight className="w-3 h-3" /></span>
               </button>
@@ -1760,6 +2097,16 @@ function VariantPickerDialog({
   );
 }
 
+// A search hit that exists only in Metakocka (not in the PNV-built catalogue): no
+// variants or image — it comes in as a single row priced from MK.
+function MkOnlyBadge() {
+  return (
+    <span className="ml-1.5 font-sans rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 px-1 py-px text-[9px] font-medium align-middle">
+      Metakocka only
+    </span>
+  );
+}
+
 function ProductPickerDialog({
   rrpPricelist, partnerPricelist, onClose, onAddGroup,
 }: {
@@ -1784,7 +2131,7 @@ function ProductPickerDialog({
         .then((r) => r.json())
         .then((data) => {
           if (cancelled) return;
-          setResults((data.candidates ?? []).map((c: { code: string; name: string; image?: string | null }) => ({ code: c.code, name: c.name, image: c.image })));
+          setResults((data.candidates ?? []) as Hit[]);
         })
         .catch(() => !cancelled && setResults([]))
         .finally(() => !cancelled && setLoading(false));
@@ -1834,7 +2181,7 @@ function ProductPickerDialog({
               )}
               <div className="min-w-0 flex-1">
                 <div className="text-[12px] font-medium text-foreground truncate">{c.name}</div>
-                <div className="text-[10px] text-muted-foreground font-mono truncate">{c.code}</div>
+                <div className="text-[10px] text-muted-foreground font-mono truncate">{c.code}{c.source === "metakocka" && <MkOnlyBadge />}</div>
               </div>
               <Button size="xs" variant={added.has(c.code) ? "ghost" : "outline"} disabled={resolving === c.code} onClick={() => pick(c)}>
                 {resolving === c.code ? <Loader2 className="w-3 h-3 animate-spin" /> : added.has(c.code) ? <><Check className="w-3 h-3" /> Added</> : <><Plus className="w-3 h-3" /> Add</>}
@@ -1852,18 +2199,32 @@ function ProductPickerDialog({
 //
 // Two ways in, one text box: a dropped / chosen file (.xlsx parsed server-side by
 // lib/sku-xlsx.ts, CSV / text read in the browser) lands its codes in the box next
-// to anything pasted, so what is about to be imported is always visible. After a
-// run the codes that resolved leave the box and the ones that did not stay, ready
-// to be corrected and sent again.
-function parseCodes(raw: string): string[] {
-  return Array.from(
-    new Set(
-      raw
-        .split(/[\s,;]+/)
-        .map((c) => c.trim())
-        .filter(Boolean),
-    ),
-  );
+// to anything pasted, so what is about to be imported is always visible. Each line
+// is a code with an optional tag (lib/sku-entries.ts). After a run the codes that
+// resolved leave the box and the ones that did not stay, ready to be corrected and
+// sent again.
+
+// Put each requested tag on the rows it produced: a variant code or EAN tags that
+// variant; a parent code tags every variant it brought in. The tag's campaign colour
+// (if it already has one) comes along.
+function applyImportTags(groups: GroupDraft[], entries: SkuEntry[], colors: Map<string, string>): GroupDraft[] {
+  const tags = new Map<string, string>();
+  for (const e of entries) {
+    const k = skuKey(e.code);
+    if (k && e.tag) tags.set(k, e.tag);
+  }
+  if (tags.size === 0) return groups;
+  return groups.map((g) => {
+    const groupTag = tags.get(skuKey(g.parentCode) ?? "") ?? null;
+    return {
+      ...g,
+      rows: g.rows.map((r) => {
+        const tag = tags.get(skuKey(r.code) ?? "") ?? tags.get(skuKey(r.ean) ?? "") ?? groupTag;
+        if (!tag) return r;
+        return { ...r, tag, tagColor: colors.get(tagLabel(tag)?.toUpperCase() ?? "") ?? null };
+      }),
+    };
+  });
 }
 
 const SKU_FILE_ACCEPT = ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.csv,text/csv,text/plain";
@@ -1875,9 +2236,12 @@ function CsvImportDialog({
   rrpPricelist: string | null;
   partnerPricelist: string | null;
   onClose: () => void;
-  onAddGroups: (gs: GroupDraft[]) => void;
+  onAddGroups: (gs: GroupDraft[], smart: boolean) => void;
 }) {
   const [text, setText] = useState("");
+  const [mode, setMode] = useState<"file" | "paste">("file");
+  const [showFormat, setShowFormat] = useState(false);
+  const [smart, setSmart] = useState(true);
   const [busy, setBusy] = useState(false);
   const [reading, setReading] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -1886,30 +2250,33 @@ function CsvImportDialog({
   const [result, setResult] = useState<{ variants: number; products: number; notFound: string[] } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const codes = useMemo(() => parseCodes(text), [text]);
-  const rawCount = text.split(/[\s,;]+/).filter(Boolean).length;
+  const { colors } = useContext(TagColorsContext);
+  const entries = useMemo(() => parseSkuEntries(text), [text]);
+  const codes = useMemo(() => entries.map((e) => e.code), [entries]);
+  const tagged = entries.filter((e) => e.tag).length;
+  const notFound = useMemo(() => new Set(result?.notFound ?? []), [result]);
 
   async function loadFile(f: File) {
     setReading(true);
     setError(null);
     setResult(null);
     try {
-      let list: string[];
+      let list: SkuEntry[];
       if (/\.xlsx$/i.test(f.name)) {
         const fd = new FormData();
         fd.append("file", f);
         const r = await fetch(`/api/admin/preorder/products/import`, { method: "POST", body: fd });
-        const data = (await r.json().catch(() => null)) as { codes?: string[]; error?: string } | null;
-        if (!r.ok || !data?.codes) throw new Error(data?.error ?? `Could not read ${f.name} (${r.status}).`);
-        list = data.codes;
+        const data = (await r.json().catch(() => null)) as { entries?: SkuEntry[]; error?: string } | null;
+        if (!r.ok || !data?.entries) throw new Error(data?.error ?? `Could not read ${f.name} (${r.status}).`);
+        list = data.entries;
       } else if (/\.(csv|txt)$/i.test(f.name) || f.type.startsWith("text/")) {
-        list = parseCodes(await f.text());
+        list = parseSkuEntries(await f.text());
       } else {
         throw new Error(`${f.name} is not a spreadsheet — use .xlsx or .csv.`);
       }
-      if (list.length === 0) throw new Error(`No codes found in ${f.name}. Put one SKU or EAN per row.`);
+      if (list.length === 0) throw new Error(`No codes found in ${f.name}. Check the header: SKU / EAN (and optionally Tag).`);
       setFile({ name: f.name, codes: list.length });
-      setText((prev) => (prev.trim() ? prev.replace(/\s+$/, "") + "\n" : "") + list.join("\n"));
+      setText((prev) => (prev.trim() ? prev.replace(/\s+$/, "") + "\n" : "") + formatSkuEntries(list));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1925,6 +2292,17 @@ function CsvImportDialog({
     if (f) void loadFile(f);
   }
 
+  function removeEntry(code: string) {
+    setText(formatSkuEntries(entries.filter((e) => e.code !== code)));
+  }
+
+  function clearAll() {
+    setText("");
+    setFile(null);
+    setResult(null);
+    setError(null);
+  }
+
   async function run() {
     if (codes.length === 0) return;
     setBusy(true);
@@ -1938,12 +2316,14 @@ function CsvImportDialog({
       });
       const data = (await r.json().catch(() => null)) as { groups?: GroupDraft[]; notFound?: string[]; error?: string } | null;
       if (!r.ok || !data) throw new Error(data?.error ?? `The catalogue lookup failed (${r.status}). Try again.`);
-      const groups = data.groups ?? [];
-      const notFound = data.notFound ?? [];
-      if (groups.length > 0) onAddGroups(groups);
-      setResult({ variants: groups.reduce((n, g) => n + g.rows.length, 0), products: groups.length, notFound });
-      // What resolved is in the sheet now; what did not stays here to be fixed.
-      setText(notFound.join("\n"));
+      const groups = applyImportTags(data.groups ?? [], entries, colors);
+      const missingCodes = data.notFound ?? [];
+      if (groups.length > 0) onAddGroups(groups, smart);
+      const products = smart ? smartGroup(groups).length : groups.length;
+      setResult({ variants: groups.reduce((n, g) => n + g.rows.length, 0), products, notFound: missingCodes });
+      // What resolved is in the sheet now; what did not stays in the list to be fixed.
+      const missing = new Set(missingCodes);
+      setText(formatSkuEntries(entries.filter((e) => missing.has(e.code))));
       setFile(null);
     } catch (e) {
       setError((e as Error).message);
@@ -1953,156 +2333,272 @@ function CsvImportDialog({
   }
 
   const added = result !== null && result.variants > 0;
+  const isEan = (c: string) => /^\d{8,14}$/.test(c);
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
+    <Dialog open onOpenChange={(o) => !o && !busy && onClose()}>
       <DialogContent className="sm:max-w-xl gap-0 p-0 overflow-hidden">
         <DialogHeader className="px-6 pt-6 pb-4 text-left">
-          <DialogTitle className="text-[15px]">Import SKUs</DialogTitle>
+          <DialogTitle className="text-[15px]">Import products</DialogTitle>
           <DialogDescription className="text-[12px] leading-relaxed">
-            Add products to {tabName ? <span className="font-medium text-foreground">{tabName}</span> : "this tab"} by SKU or EAN. Each code is looked up in
-            the catalogue and placed under its parent product.
+            Add to {tabName ? <span className="font-medium text-foreground">{tabName}</span> : "this tab"} by SKU or EAN — each code lands under its
+            parent product, optionally with a tag.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="px-6 pb-5 space-y-4">
-          {/* File — the obvious first move */}
-          <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              if (!reading) setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={onDrop}
-            className={cn(
-              "rounded-xl border border-dashed px-5 py-5 transition-colors",
-              dragging ? "border-lime-500 bg-lime-500/10" : "border-border bg-muted/30",
-            )}
-          >
-            <div className="flex items-center gap-4">
-              <span
+        <div className="px-6 pb-5 space-y-4 max-h-[68vh] overflow-y-auto">
+          {/* Outcome of the last run */}
+          {result && (
+            <div
+              className={cn(
+                "rounded-lg px-3.5 py-2.5 text-[12px] flex gap-2",
+                added ? "bg-lime-500/10 text-lime-800 dark:text-lime-300" : "bg-muted text-muted-foreground",
+              )}
+            >
+              <Check className="size-3.5 shrink-0 mt-0.5" />
+              <span>
+                {added ? (
+                  <>
+                    Added <span className="font-semibold">{result.variants} variant{result.variants === 1 ? "" : "s"}</span> in {result.products} product
+                    {result.products === 1 ? "" : "s"}.
+                  </>
+                ) : (
+                  "Nothing was added."
+                )}
+                {result.notFound.length > 0 && (
+                  <span className="text-amber-700 dark:text-amber-300">
+                    {" "}
+                    {result.notFound.length} code{result.notFound.length === 1 ? " wasn't" : "s weren't"} found — fix or remove {result.notFound.length === 1 ? "it" : "them"} below.
+                  </span>
+                )}
+              </span>
+            </div>
+          )}
+
+          {/* Source: file or paste */}
+          <div className="inline-flex rounded-lg bg-muted p-0.5 text-[12px]">
+            {([
+              ["file", "Upload file", FileSpreadsheet],
+              ["paste", "Paste codes", ClipboardPaste],
+            ] as const).map(([m, label, Icon]) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
                 className={cn(
-                  "flex size-11 shrink-0 items-center justify-center rounded-lg transition-colors",
-                  dragging ? "bg-lime-500/20 text-lime-700 dark:text-lime-300" : "bg-lime-500/10 text-lime-700 dark:text-lime-400",
+                  "inline-flex items-center gap-1.5 h-7 px-3 rounded-md font-medium transition-colors",
+                  mode === m ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                {reading ? <Loader2 className="size-5 animate-spin" /> : <FileSpreadsheet className="size-5" />}
+                <Icon className="size-3.5" /> {label}
+              </button>
+            ))}
+          </div>
+
+          {mode === "file" ? (
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => !reading && fileRef.current?.click()}
+              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && fileRef.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                if (!reading) setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+              className={cn(
+                "flex items-center gap-4 rounded-xl border-2 border-dashed px-5 py-5 cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                dragging ? "border-lime-500 bg-lime-500/10" : "border-border hover:border-lime-500/60 hover:bg-lime-500/5",
+              )}
+            >
+              <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-lime-500/10 text-lime-700 dark:text-lime-400">
+                {reading ? <Loader2 className="size-5 animate-spin" /> : file ? <Check className="size-5" /> : <Upload className="size-5" />}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-medium text-foreground">
-                  {reading ? "Reading the file…" : dragging ? "Drop it to read the codes" : "Drop a spreadsheet here"}
+                <p className="text-[13px] font-medium text-foreground truncate">
+                  {reading
+                    ? "Reading the file…"
+                    : dragging
+                      ? "Drop to read the codes"
+                      : file
+                        ? `${file.name} · ${file.codes} code${file.codes === 1 ? "" : "s"}`
+                        : "Drop a spreadsheet, or click to choose"}
                 </p>
-                <p className="text-[12px] text-muted-foreground mt-0.5">.xlsx or .csv, one code per row. Extra columns are ignored.</p>
+                <p className="text-[12px] text-muted-foreground mt-0.5">
+                  {file ? "Drop another file to add more." : ".xlsx or .csv with a SKU / EAN column and an optional Tag column"}
+                </p>
               </div>
+              <input
+                ref={fileRef}
+                type="file"
+                accept={SKU_FILE_ACCEPT}
+                className="hidden"
+                onChange={(e) => e.target.files?.[0] && void loadFile(e.target.files[0])}
+              />
             </div>
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={reading} className="h-8 text-[12px]">
-                <Upload className="size-3.5" /> Choose file
-              </Button>
-              <Button asChild size="sm" variant="ghost" className="h-8 text-[12px] text-muted-foreground hover:text-foreground">
-                <a href="/api/admin/preorder/products/template" download>
-                  <Download className="size-3.5" /> Download template
-                </a>
-              </Button>
-              {file && (
-                <span className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-background border border-border px-2 h-7 text-[11px] text-muted-foreground max-w-full">
-                  <Check className="size-3 text-lime-600 shrink-0" />
-                  <span className="truncate">{file.name}</span>
-                  <span className="tabular-nums shrink-0">· {file.codes} code{file.codes === 1 ? "" : "s"}</span>
-                </span>
-              )}
-              <input ref={fileRef} type="file" accept={SKU_FILE_ACCEPT} className="hidden" onChange={(e) => e.target.files?.[0] && void loadFile(e.target.files[0])} />
-            </div>
-          </div>
-
-          {/* Paste — the quiet second path */}
-          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-            <span className="h-px flex-1 bg-border" />
-            or paste codes
-            <span className="h-px flex-1 bg-border" />
-          </div>
-
-          <div>
+          ) : (
             <textarea
+              autoFocus
               value={text}
               onChange={(e) => {
                 setText(e.target.value);
                 if (result) setResult(null);
               }}
-              rows={5}
+              rows={6}
               spellCheck={false}
-              placeholder={"P01250001071\nP01250001076, 4262434061897\n…"}
-              className={cn(
-                "w-full rounded-lg border bg-background px-3 py-2.5 text-[12px] font-mono leading-relaxed resize-y",
-                "focus:outline-none focus:ring-[3px] focus:ring-lime-500/25 focus:border-lime-500/60",
-                result?.notFound.length ? "border-amber-400/70" : "border-border",
-              )}
+              placeholder={"P07260003140, NEW\n4262434064904\tSALE\nP07260003145"}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-[12px] font-mono leading-relaxed resize-y focus:outline-none focus:ring-[3px] focus:ring-lime-500/25 focus:border-lime-500/60"
             />
-            <div className="mt-1.5 flex items-center justify-between text-[11px] text-muted-foreground min-h-4">
-              <span className="tabular-nums">
-                {codes.length === 0
-                  ? "Any separator works — new lines, commas, spaces."
-                  : `${codes.length} code${codes.length === 1 ? "" : "s"}${rawCount > codes.length ? ` · ${rawCount - codes.length} duplicate${rawCount - codes.length === 1 ? "" : "s"} removed` : ""}`}
-              </span>
-              {text && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setText("");
-                    setFile(null);
-                    setResult(null);
-                    setError(null);
-                  }}
-                  className="hover:text-foreground"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-          </div>
+          )}
 
-          {/* Outcome — tells you what happened and what to do next */}
+          {/* Format help + template, one quiet line */}
+          <div className="-mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
+            <button
+              type="button"
+              onClick={() => setShowFormat((v) => !v)}
+              className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+              aria-expanded={showFormat}
+            >
+              <Info className="size-3.5" /> How to format
+              <ChevronDown className={cn("size-3.5 transition-transform", showFormat && "rotate-180")} />
+            </button>
+            <a href="/api/admin/preorder/products/template" download className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
+              <Download className="size-3.5" /> Template (.xlsx)
+            </a>
+          </div>
+          {showFormat && (
+            <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2.5 text-[12px]">
+              <div className="rounded-md border border-border bg-background overflow-hidden text-[11.5px]">
+                <div className="grid grid-cols-[1.4fr_1fr] bg-muted/50 border-b border-border font-semibold text-foreground">
+                  <span className="px-3 py-1.5 border-r border-border">SKU / EAN</span>
+                  <span className="px-3 py-1.5">
+                    Tag <span className="font-normal text-muted-foreground">(optional)</span>
+                  </span>
+                </div>
+                {[
+                  ["P07260003140", "NEW"],
+                  ["4262434064904", "SALE"],
+                  ["P07260003145", ""],
+                ].map(([c, t]) => (
+                  <div key={c} className="grid grid-cols-[1.4fr_1fr] border-b last:border-b-0 border-border/60 font-mono text-muted-foreground">
+                    <span className="px-3 py-1 border-r border-border/60">{c}</span>
+                    <span className="px-3 py-1">{t ? <TagPill tag={t} color={colors.get(t) ?? null} /> : <span className="opacity-50">—</span>}</span>
+                  </div>
+                ))}
+              </div>
+              <ul className="space-y-1 text-muted-foreground leading-relaxed list-disc pl-4">
+                <li>
+                  <span className="text-foreground font-medium">Spreadsheet:</span> keep the header row — columns are found by name (SKU / EAN, Tag), in any order.
+                </li>
+                <li>
+                  <span className="text-foreground font-medium">Paste:</span> one code per line; the tag goes after a comma, tab or semicolon.
+                </li>
+                <li>A parent product&rsquo;s code imports all its variants and tags each one.</li>
+              </ul>
+            </div>
+          )}
+
           {error && (
             <div className="rounded-lg border border-rose-300/60 bg-rose-50 dark:bg-rose-950/30 px-3.5 py-2.5 text-[12px] text-rose-700 dark:text-rose-300 flex gap-2">
               <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
               {error}
             </div>
           )}
-          {result && (
-            <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border/60 text-[12px]">
-              <div className={cn("px-3.5 py-2.5 flex gap-2", added ? "text-foreground" : "text-muted-foreground")}>
-                <Check className={cn("size-3.5 shrink-0 mt-0.5", added ? "text-lime-600" : "text-muted-foreground")} />
-                {added ? (
-                  <span>
-                    Added <span className="font-medium">{result.variants} variant{result.variants === 1 ? "" : "s"}</span> from {result.products} product
-                    {result.products === 1 ? "" : "s"} to the sheet.
-                  </span>
-                ) : (
-                  <span>Nothing was added.</span>
-                )}
-              </div>
-              {result.notFound.length > 0 && (
-                <div className="px-3.5 py-2.5 flex gap-2 text-amber-700 dark:text-amber-300">
-                  <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
-                  <span>
-                    {result.notFound.length} code{result.notFound.length === 1 ? " isn't" : "s aren't"} in the catalogue. {result.notFound.length === 1 ? "It's" : "They're"} left
-                    above — fix {result.notFound.length === 1 ? "it" : "them"} and add again.
-                  </span>
+
+          {/* What will be imported */}
+          {entries.length > 0 && (
+            <div className="rounded-lg border border-border overflow-hidden">
+              <div className="flex items-center justify-between gap-2 px-3 py-2 bg-muted/40 border-b border-border text-[12px]">
+                <span className="font-medium text-foreground tabular-nums">
+                  {entries.length} code{entries.length === 1 ? "" : "s"}
+                  {tagged > 0 && <span className="font-normal text-muted-foreground"> · {tagged} tagged</span>}
+                  {notFound.size > 0 && <span className="font-normal text-amber-700 dark:text-amber-300"> · {notFound.size} not found</span>}
+                </span>
+                <div className="flex items-center gap-3">
+                  {mode === "file" && (
+                    <button type="button" onClick={() => setMode("paste")} className="text-muted-foreground hover:text-foreground">
+                      Edit as text
+                    </button>
+                  )}
+                  <button type="button" onClick={clearAll} className="text-muted-foreground hover:text-foreground">
+                    Clear
+                  </button>
                 </div>
-              )}
+              </div>
+              <ul className="max-h-56 overflow-y-auto divide-y divide-border/50">
+                {entries.map((e) => {
+                  const missing = notFound.has(e.code);
+                  return (
+                    <li key={e.code} className={cn("group/e flex items-center gap-2.5 px-3 h-9 text-[12px]", missing && "bg-amber-50/70 dark:bg-amber-950/20")}>
+                      <span
+                        className={cn(
+                          "w-9 shrink-0 text-center rounded text-[9px] font-semibold uppercase tracking-wide py-0.5",
+                          isEan(e.code) ? "bg-sky-500/10 text-sky-700 dark:text-sky-300" : "bg-muted text-muted-foreground",
+                        )}
+                      >
+                        {isEan(e.code) ? "EAN" : "SKU"}
+                      </span>
+                      <span className="font-mono text-foreground truncate">{e.code}</span>
+                      {missing && <span className="text-[11px] text-amber-700 dark:text-amber-300 shrink-0">not found</span>}
+                      <span className="flex-1" />
+                      {e.tag && <TagPill tag={e.tag} color={colors.get(tagLabel(e.tag)?.toUpperCase() ?? "") ?? null} />}
+                      <button
+                        type="button"
+                        onClick={() => removeEntry(e.code)}
+                        className="flex size-6 items-center justify-center rounded text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover/e:opacity-100 focus-visible:opacity-100"
+                        aria-label={`Remove ${e.code}`}
+                        title="Remove"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
         </div>
 
-        <DialogFooter className="px-6 py-4 border-t border-border bg-muted/20 sm:justify-between sm:items-center">
-          <p className="text-[11px] text-muted-foreground hidden sm:block">Products already on the sheet are added again — delete duplicates afterwards.</p>
+        <DialogFooter className="px-6 py-3.5 border-t border-border bg-muted/20 sm:justify-between sm:items-center">
+          {/* Smart grouping — one line; the detail lives in the tooltip */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={smart}
+              onClick={() => setSmart((v) => !v)}
+              className="inline-flex items-center gap-2 text-[12px] font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50 rounded-full"
+            >
+              <span className={cn("relative h-[18px] w-8 shrink-0 rounded-full transition-colors", smart ? "bg-lime-500" : "bg-muted-foreground/25")}>
+                <span
+                  className={cn(
+                    "absolute top-[2px] left-[2px] h-[14px] w-[14px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.25)] transition-transform duration-200",
+                    smart ? "translate-x-[14px]" : "translate-x-0",
+                  )}
+                />
+              </span>
+              Smart grouping
+            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" className="text-muted-foreground hover:text-foreground" aria-label="What is smart grouping?">
+                  <Info className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-72 text-[12px] leading-relaxed">
+                Products that arrive one per SKU but differ only in size (QTS-Wave 71, QTS-Wave 76) go into one group with the size as the variant.
+                A group with that name already on the tab takes them in instead of a duplicate.
+              </TooltipContent>
+            </Tooltip>
+          </div>
           <div className="flex gap-2 justify-end">
-            <Button size="sm" variant="outline" onClick={onClose} className="h-8 text-[12px]">
-              {added ? "Done" : "Cancel"}
+            <Button size="sm" variant="outline" onClick={onClose} disabled={busy} className="h-8 text-[12px]">
+              {added && codes.length === 0 ? "Done" : "Cancel"}
             </Button>
-            <Button size="sm" onClick={run} disabled={busy || reading || codes.length === 0} className="h-8 text-[12px] min-w-28">
+            <Button size="sm" onClick={run} disabled={busy || reading || codes.length === 0} className="h-8 text-[12px] min-w-32">
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-              {busy ? "Looking up…" : codes.length === 0 ? "Add codes" : `Add ${codes.length} code${codes.length === 1 ? "" : "s"}`}
+              {busy ? "Looking up…" : codes.length === 0 ? "Add products" : `Add ${codes.length} product${codes.length === 1 ? "" : "s"}`}
             </Button>
           </div>
         </DialogFooter>

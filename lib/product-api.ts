@@ -82,3 +82,49 @@ export function getProduct(code: string) {
 export function listProducts() {
   return callProductApi<CatalogueProduct[]>(`/api/product`);
 }
+
+// EANs are compared as digits with leading zeros dropped: a spreadsheet cell holding
+// an EAN-13 that starts with 0 comes back as a number and loses it.
+export function normalizeEan(v: string | null | undefined): string | null {
+  const d = String(v ?? "").trim();
+  if (!/^\d{6,14}$/.test(d)) return null;
+  return d.replace(/^0+/, "") || null;
+}
+
+// An index of the whole catalogue: every code (parents + variants) — lets the preorder
+// search tell a Metakocka product that is ALSO in the catalogue from one that lives
+// only in MK — and EAN → code, because /api/product/:code resolves codes, not EANs.
+// Cached; null when the catalogue is unreachable (callers then skip MK-only hits
+// rather than duplicate catalogue products).
+const CODES_TTL_MS = 10 * 60 * 1000;
+type CatalogueIndex = { codes: Set<string>; byEan: Map<string, string> };
+let indexCache: { at: number; value: CatalogueIndex } | null = null;
+
+async function getCatalogueIndex(): Promise<CatalogueIndex | null> {
+  if (indexCache && Date.now() - indexCache.at < CODES_TTL_MS) return indexCache.value;
+  const res = await listProducts();
+  if (!res.ok) return indexCache?.value ?? null;
+  const value: CatalogueIndex = { codes: new Set(), byEan: new Map() };
+  const add = (n: CatalogueProduct) => {
+    value.codes.add(n.code);
+    const ean = normalizeEan(n.ean_code);
+    if (ean && !value.byEan.has(ean)) value.byEan.set(ean, n.code);
+  };
+  for (const p of res.data ?? []) {
+    add(p);
+    for (const c of p.child_products ?? []) add(c);
+  }
+  indexCache = { at: Date.now(), value };
+  return value;
+}
+
+export async function getCatalogueCodes(): Promise<Set<string> | null> {
+  return (await getCatalogueIndex())?.codes ?? null;
+}
+
+// The catalogue code (parent or variant) carrying this EAN, or null.
+export async function catalogueCodeForEan(ean: string): Promise<string | null> {
+  const key = normalizeEan(ean);
+  if (!key) return null;
+  return (await getCatalogueIndex())?.byEan.get(key) ?? null;
+}

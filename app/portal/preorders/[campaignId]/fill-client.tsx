@@ -28,7 +28,14 @@ import {
   ExternalLink,
   Info,
   ChevronRight,
+  Sparkles,
+  Layers,
+  Search,
+  ImageIcon,
+  Percent,
+  HelpCircle,
 } from "lucide-react";
+import { GuidedTour, type TourStep } from "@/components/guided-tour";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
 import { computeConfirmedTotals, flattenRows } from "@/types/preorder";
 import { vatIsMissing, vatLabel, toCents, fromCents, splitGross, addVat } from "@/lib/pricing";
@@ -82,6 +89,8 @@ type LoadData = {
   orderMkId?: string | null;
   partner?: { name: string };
 };
+
+const TOUR_KEY = "t4a.portal.preorder-guide.v1";
 
 export default function FillClient({ campaignId }: { campaignId: string }) {
   const [campaign, setCampaign] = useState<PortalCampaign | null>(null);
@@ -357,6 +366,130 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
     }
   }
 
+  // ── First-visit quick guide ──
+  // Opens once per browser on an editable preorder (a convenience flag in
+  // localStorage — blocked storage just means the guide shows again); "Quick guide"
+  // in the header replays it. Steps that need the other view switch to it.
+  const [tourOpen, setTourOpen] = useState(false);
+  const tourReady = !loading && !!campaign && !locked;
+  useEffect(() => {
+    if (!tourReady) return;
+    let seen = false;
+    try {
+      seen = window.localStorage.getItem(TOUR_KEY) === "done";
+    } catch {
+      /* storage blocked: show the guide */
+    }
+    if (seen) return;
+    const t = window.setTimeout(() => setTourOpen(true), 500);
+    return () => window.clearTimeout(t);
+  }, [tourReady]);
+
+  const tour = useMemo(() => {
+    const steps: (TourStep & { mode?: Mode })[] = [
+      {
+        title: "Welcome to your preorder",
+        icon: <Sparkles className="w-4 h-4" />,
+        body: (
+          <>
+            A one-minute tour of how ordering works here. You can skip it and reopen it any time from{" "}
+            <span className="font-medium text-foreground">Quick guide</span> at the top.
+          </>
+        ),
+      },
+    ];
+    if (tabsForBar.length > 1)
+      steps.push({
+        target: "sections",
+        title: "Product sections",
+        icon: <Layers className="w-4 h-4" />,
+        body: "The range is split into sections. Switch between them here — the number next to a section shows how many items you've picked in it.",
+      });
+    steps.push(
+      {
+        target: "view",
+        mode: "guided",
+        title: "Two ways to order",
+        icon: <LayoutGrid className="w-4 h-4" />,
+        body: (
+          <>
+            <span className="font-medium text-foreground">Catalogue</span> — browse products with pictures.{" "}
+            <span className="font-medium text-foreground">Order sheet</span> — one fast table of every variant, ideal when you know what you
+            want. Switch any time; your quantities are the same in both.
+          </>
+        ),
+      },
+      {
+        target: "search",
+        mode: "guided",
+        title: "Find a product",
+        icon: <Search className="w-4 h-4" />,
+        body: "Type part of a name to narrow the catalogue down.",
+      },
+      {
+        target: "product",
+        mode: "guided",
+        title: "Open a product",
+        icon: <ImageIcon className="w-4 h-4" />,
+        body: (
+          <>
+            Click a card to open it: browse its photos (click a photo to zoom, use ← → to flip through), see every size with its price, and set
+            quantities right there. Labels like <span className="font-medium text-foreground">NEW</span> or{" "}
+            <span className="font-medium text-foreground">PRE</span> mark special items.
+          </>
+        ),
+      },
+      {
+        target: "sheet",
+        mode: "grid",
+        title: "The order sheet",
+        icon: <Table2 className="w-4 h-4" />,
+        body: "Every variant in one table with its SKU, EAN and prices. Type a quantity straight into a row — search works by name or SKU too.",
+      },
+    );
+    if (sheet?.pricing || sheet?.tabs.some((t) => (t.tiers?.length ?? 0) > 0))
+      steps.push({
+        target: "pricing",
+        mode: "guided",
+        title: "Your prices & volume discount",
+        icon: <Percent className="w-4 h-4" />,
+        body: "How you are priced, and how close you are to the next volume discount. Discount levels count your whole order, across every section.",
+      });
+    steps.push(
+      {
+        target: "summary",
+        mode: "guided",
+        title: "Summary & submit",
+        icon: <Send className="w-4 h-4" />,
+        body: (
+          <>
+            Totals update as you go and your draft saves automatically — come back any time. Add a delivery date or a note, then{" "}
+            <span className="font-medium text-foreground">Preview &amp; submit</span>. Once submitted the preorder is locked; you can still request
+            changes.
+          </>
+        ),
+      },
+      {
+        target: "guide",
+        title: "That's it",
+        icon: <HelpCircle className="w-4 h-4" />,
+        body: "Reopen this guide whenever you need it. Happy ordering!",
+      },
+    );
+    return steps;
+  }, [tabsForBar.length, sheet]);
+
+  const closeTour = useCallback((completed: boolean) => {
+    void completed;
+    setTourOpen(false);
+    setMode("guided");
+    try {
+      window.localStorage.setItem(TOUR_KEY, "done");
+    } catch {
+      /* storage blocked */
+    }
+  }, []);
+
   if (loading) {
     return (
       <div className="flex flex-col h-full">
@@ -492,11 +625,30 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
             </div>
           </div>
           <div className="flex-1" />
+          {!locked && (
+            <Button
+              variant="ghost"
+              size="sm"
+              data-tour="guide"
+              onClick={() => setTourOpen(true)}
+              className="h-8 text-[12px] text-muted-foreground hover:text-foreground shrink-0"
+            >
+              <HelpCircle className="w-3.5 h-3.5" /> Quick guide
+            </Button>
+          )}
         </div>
         <div className="px-4 md:px-6 flex items-stretch gap-3">
-          {tabsForBar.length > 0 && <TabBar tabs={tabsForBar} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />}
+          {tabsForBar.length > 0 && (
+            <div data-tour="sections" className="min-w-0 flex">
+              <TabBar tabs={tabsForBar} activeId={activeTabId} onSelect={setActiveTabId} quantities={quantities} />
+            </div>
+          )}
           <div className="flex-1" />
-          {!locked && <FillModeNav mode={mode} onChange={setMode} />}
+          {!locked && (
+            <div data-tour="view" className="flex">
+              <FillModeNav mode={mode} onChange={setMode} />
+            </div>
+          )}
         </div>
       </header>
 
@@ -523,7 +675,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
             {/* The order document: status → how you are priced / discount progress →
                 the products. One frame, rows divided, nothing floating. */}
             {(!confirmedShown || showRequest) && (
-            <div className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
+            <div data-tour={mode === "grid" ? "sheet" : undefined} className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
               {locked && submitted && !confirmedShown && (
                 <RegistrationBanner registration={registration} published={published} busy={busy === "retry"} onRetry={retryRegistration} />
               )}
@@ -540,7 +692,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
                 </div>
               )}
               {(sheet.pricing || orphanLines.length > 0 || unpricedFilled.length > 0 || (activeTab && (activeTab.tiers?.length ?? 0) > 0)) && (
-              <div className="divide-y divide-border/60 bg-muted/10">
+              <div data-tour="pricing" className="divide-y divide-border/60 bg-muted/10">
                 <SheetContextBar pricing={sheet.pricing} tab={activeTab} tabs={sheet.tabs} quantities={quantities} currency={currency} />
                 {orphanLines.length > 0 && (
                   <div className="px-4 py-2.5 text-[12px] text-amber-800 dark:text-amber-300 flex items-start gap-2.5 bg-amber-50/70 dark:bg-amber-950/30">
@@ -604,7 +756,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
           </div>
 
           {/* Sidebar */}
-          <aside className="lg:sticky lg:top-4">
+          <aside data-tour="summary" className="lg:sticky lg:top-4">
             <div className="rounded-2xl border border-border bg-surface overflow-hidden divide-y divide-border/60">
             {confirmedShown && allocation && allocation.state === "ok" ? (
               <div className="p-4 space-y-2">
@@ -758,6 +910,16 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
         onSubmit={async () => {
           await save("submit");
           setReviewOpen(false);
+        }}
+      />
+
+      <GuidedTour
+        steps={tour}
+        open={tourOpen}
+        onClose={closeTour}
+        onStep={(i) => {
+          const m = tour[i]?.mode;
+          if (m) setMode(m);
         }}
       />
 

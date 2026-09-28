@@ -36,7 +36,18 @@ export type SubmissionStatus = "draft" | "submitted" | "confirmed" | "closed";
 export type LineStatus = "pending" | "confirmed" | "backorder" | "cancelled";
 
 export type RowSource = "catalogue" | "manual";
-export type RowTag = "NEW" | "pre-order only" | null;
+// A short free-text label shown as a pill on the row ("NEW", "SALE", "Limited", …).
+// The resolver stamps "pre-order only" on unpublished catalogue variants; admins set
+// anything else by hand. Display goes through tagLabel().
+export type RowTag = string | null;
+export const ROW_TAG_MAX = 24;
+
+// "pre-order only" predates free tags and has always been shown as "PRE".
+export function tagLabel(tag: RowTag | undefined): string | null {
+  const t = tag?.trim();
+  if (!t) return null;
+  return t === "pre-order only" ? "PRE" : t;
+}
 
 // One product line in the admin-authored sheet. Prices are snapshotted at build time
 // (from the catalogue pricelist or manual entry) and displayed as-is for now.
@@ -47,6 +58,7 @@ export type PreorderRow = {
   ean?: string | null;
   name: string;
   variantLabel?: string | null; // "fin / model / size" column
+  tagColor?: string | null; // #rrggbb for the tag pill; null = default lime
   size?: string | null;
   tag?: RowTag;
   rrp?: number | null; // RRP — the recommended retail price, GROSS. Reference only: shown, never charged
