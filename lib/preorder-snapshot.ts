@@ -65,6 +65,7 @@ export function buildCommercialSnapshot(
       partnerPrice: row.partnerPrice ?? null,
       taxCode: row.taxCode ?? null,
       priceSource: row.priceSource ?? "sheet",
+      ...(row.fixedPrice ? { fixedPrice: true } : {}),
       tierPct: lp?.tierPct ?? null,
       unitNet: lp?.unitNet ?? null,
       unitVat: lp?.unitVat ?? null,

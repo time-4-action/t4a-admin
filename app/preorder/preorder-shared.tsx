@@ -25,8 +25,10 @@ import {
   AlertTriangle,
   LayoutGrid,
   Table2,
+  Lock,
 } from "lucide-react";
 import Link from "next/link";
+import { Popover as PopoverPrimitive } from "radix-ui";
 import {
   Dialog,
   DialogContent,
@@ -71,6 +73,36 @@ export function fmtMoney(amount: number, currency = "EUR"): string {
 }
 
 type QtyMap = Record<string, number>;
+
+// ── Fixed price ──────────────────────────────────────────────────────────────
+// A fixed-price product (`row.fixedPrice`) is never volume-discounted; it still counts
+// towards the order total that unlocks the discount levels. One pill marks it
+// everywhere the customer meets it (sheet, catalogue, product, review) and in the
+// admin builder.
+export const FIXED_PRICE_HINT =
+  "Fixed price — volume discounts don't apply to this product. It still counts towards your order total for reaching a discount level.";
+
+export function FixedPricePill({ className, size = "sm" }: { className?: string; size?: "sm" | "md" }) {
+  return (
+    <span
+      title={FIXED_PRICE_HINT}
+      className={cn(
+        "inline-flex items-center gap-1 shrink-0 rounded-full whitespace-nowrap font-medium",
+        "bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-300/70 dark:bg-slate-800/70 dark:text-slate-200 dark:ring-slate-600/60",
+        size === "md" ? "px-2 py-0.5 text-[11px]" : "px-1.5 py-px text-[10px]",
+        className,
+      )}
+    >
+      <Lock className={size === "md" ? "w-3 h-3" : "w-2.5 h-2.5"} aria-hidden />
+      Fixed price
+    </span>
+  );
+}
+
+/** Fixed-price rows of a tab (for the "not discounted" notes). */
+export function tabFixedCount(tab: PreorderTab | null | undefined): number {
+  return tab ? tab.groups.reduce((n, g) => n + g.rows.filter((r) => r.fixedPrice).length, 0) : 0;
+}
 
 // Per-tab item counts for the tab bar.
 export function TabBar({
@@ -327,9 +359,13 @@ export function PreorderGridTab({
           </tr>
         </thead>
         <tbody>
-          {groups.map((g) => (
+          {groups.map((g, i) => (
             <GroupRows
               key={g.id}
+              solo={isSoloGroup(g)}
+              // A run of single products after a group with variants starts with a thin
+              // band, so the products don't read as more variants of that group.
+              separate={isSoloGroup(g) && i > 0 && groups[i - 1].rows.length > 0 && !isSoloGroup(groups[i - 1])}
               groupName={g.name}
               cover={g.images?.[0] ?? null}
               rows={g.rows}
@@ -356,7 +392,19 @@ export function PreorderGridTab({
   );
 }
 
+// A group holding ONE product whose name already says the group's ("Patrik Uphaul
+// Line" in "Patrik Uphaul Line"): its header would only repeat the row, so the sheet
+// lists it as a plain row and consecutive single products stack one under another.
+function isSoloGroup(g: { name: string; rows: PreorderRow[] }): boolean {
+  if (g.rows.length !== 1) return false;
+  const group = g.name.trim().toLowerCase();
+  const name = g.rows[0].name.trim().toLowerCase();
+  return !group || name.includes(group) || group.includes(name);
+}
+
 function GroupRows({
+  solo = false,
+  separate = false,
   groupName,
   cover,
   rows,
@@ -369,6 +417,8 @@ function GroupRows({
   hasExtra,
   basis,
 }: {
+  solo?: boolean;
+  separate?: boolean;
   groupName: string;
   cover?: string | null;
   rows: PreorderRow[];
@@ -385,11 +435,19 @@ function GroupRows({
   const span = 6 + (hasExtra ? 1 : 0);
   return (
     <>
-      <tr className="bg-muted/15">
-        <td colSpan={span} className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {groupName}
-        </td>
-      </tr>
+      {solo ? (
+        separate && (
+          <tr aria-hidden>
+            <td colSpan={span} className="h-2.5 p-0 border-t-2 border-foreground/15 bg-muted/20" />
+          </tr>
+        )
+      ) : (
+        <tr className="bg-muted/15">
+          <td colSpan={span} className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {groupName}
+          </td>
+        </tr>
+      )}
       {rows.map((r) => {
         const qty = quantities[r.id] || 0;
         const unit = rowUnitPrice(r, basis);
@@ -436,6 +494,7 @@ function GroupRows({
                 <RowThumb row={r} cover={cover} />
                 <span className="text-[12px] text-foreground truncate">{r.name}</span>
                 <TagPill tag={r.tag} color={r.tagColor} />
+                {r.fixedPrice && <FixedPricePill />}
               </div>
             </td>
             <td className="px-2 py-1.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap leading-tight">
@@ -609,6 +668,7 @@ function ProductCard({
   const fmtRange = (a: number, b: number) => (a === 0 ? "—" : a === b ? fmtMoney(a, currency) : `${fmtMoney(a, currency)}–${fmtMoney(b, currency)}`);
   const cart = groupCartCount(group, quantities);
   const cardTagRow = group.rows.find((r) => tagLabel(r.tag)) ?? null;
+  const fixedRows = group.rows.filter((r) => r.fixedPrice).length;
   return (
     <button
       type="button"
@@ -635,7 +695,15 @@ function ProductCard({
       </div>
       <div className="p-2.5 flex flex-col gap-0.5 flex-1">
         <div className="text-[12px] font-medium text-foreground leading-snug line-clamp-2">{group.name}</div>
-        <div className="text-[10px] text-muted-foreground">{group.rows.length} variant{group.rows.length === 1 ? "" : "s"}</div>
+        <div className="flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
+          {group.rows.length} variant{group.rows.length === 1 ? "" : "s"}
+          {fixedRows > 0 && fixedRows === group.rows.length && <FixedPricePill />}
+          {fixedRows > 0 && fixedRows < group.rows.length && (
+            <span className="inline-flex items-center gap-0.5" title={FIXED_PRICE_HINT}>
+              · <Lock className="w-2.5 h-2.5" /> {fixedRows} fixed price
+            </span>
+          )}
+        </div>
         <div className="flex items-end justify-between mt-auto pt-1 gap-1">
           <span className="flex flex-col leading-tight min-w-0">
             <span className="text-[12px] font-semibold tabular-nums text-foreground truncate">{fmtRange(lo, hi)}</span>
@@ -701,6 +769,7 @@ function ProductDetailModal({
   // prefix. Rows have no thumbnail of their own — pointing at a row shows its picture
   // in the gallery instead.
   const variants = useMemo(() => variantLabels(group), [group]);
+  const fixedRows = group.rows.filter((r) => r.fixedPrice).length;
   const showRow = (r: PreorderRow) => {
     const i = r.image ? gallery.indexOf(r.image) : -1;
     if (i >= 0) setIndex(i);
@@ -781,6 +850,18 @@ function ProductDetailModal({
                 {variants.prefix && <span className="text-foreground/80 font-medium">{variants.prefix} · </span>}
                 {group.rows.length} variant{group.rows.length === 1 ? "" : "s"}
               </div>
+              {fixedRows > 0 && (
+                <div className="mt-2 flex items-start gap-2 rounded-lg bg-slate-50 dark:bg-slate-900/40 ring-1 ring-inset ring-slate-200 dark:ring-slate-700/60 px-2.5 py-2 text-[11px] text-slate-700 dark:text-slate-300">
+                  <Lock className="w-3.5 h-3.5 shrink-0 mt-px" />
+                  <span>
+                    <span className="font-semibold">
+                      {fixedRows === group.rows.length ? "Fixed price" : `Fixed price on ${fixedRows} of ${group.rows.length} variants`}
+                    </span>{" "}
+                    — volume discounts don&apos;t apply{fixedRows === group.rows.length ? " to this product" : " to those"}, but they still count towards your
+                    order total for reaching a discount level.
+                  </span>
+                </div>
+              )}
             </div>
             <div className="relative flex-1 min-h-0">
               <div className="h-full overflow-y-auto px-4 pb-4 divide-y divide-border/60">
@@ -799,6 +880,7 @@ function ProductDetailModal({
                       <div className="flex items-start gap-1">
                         <span className="text-[12px] font-medium text-foreground leading-snug line-clamp-2">{variants.short[r.id]}</span>
                         <TagPill tag={r.tag} color={r.tagColor} />
+                        {r.fixedPrice && fixedRows < group.rows.length && <FixedPricePill />}
                       </div>
                       <div className="text-[10px] text-muted-foreground font-mono truncate">
                         {r.code}
@@ -912,6 +994,7 @@ export function TabTierBanner({
     () => computeTabTotals({ tabs, pricing: pricing ?? null }, quantities).find((t) => t.tabId === tab.id) ?? null,
     [tab.id, tabs, quantities, pricing],
   );
+  const fixedCount = tabFixedCount(tab);
   if (ladder.length === 0 || !totals) return null;
 
   const reached = totals.tier;
@@ -935,6 +1018,7 @@ export function TabTierBanner({
         {reached ? (
           <span className="text-[13px] font-medium text-lime-700 dark:text-lime-300">
             {reached.name || "Volume discount"} unlocked — −{reached.discountPct}% on everything in {tab.name || "this tab"}
+            {fixedCount > 0 && " except fixed-price products"}
           </span>
         ) : (
           <span className="text-[13px] font-medium text-foreground">Volume discount available in {tab.name || "this tab"}</span>
@@ -959,6 +1043,12 @@ export function TabTierBanner({
             {fmtMoney(totals.toNextTier, currency)} more on your order unlocks{" "}
             <span className="font-medium text-foreground">{next.name || "the next tier"}</span> · −{next.discountPct}%
           </div>
+        </div>
+      )}
+
+      {fixedCount > 0 && (
+        <div className="mt-2">
+          <FixedPriceChip tab={tab} quantities={quantities} currency={currency} basis={pricing?.basis ?? "partner"} nextTierName={next?.name || null} />
         </div>
       )}
 
@@ -998,16 +1088,117 @@ export function TabTierBanner({
 // sentence + discount banner on the customer's and the admin's order views.
 export type FillMode = "grid" | "guided";
 
-// How the customer browses the sheet — "Catalogue" (guided cards) or "Order sheet"
-// (the grid). Underline tabs, sat at the right end of the section TabBar row. Shared
+// A compact chip beside the discount progress when the section holds fixed-price
+// products: "1 fixed price". Hover (or tap / focus) opens the why and the which — the
+// products it covers, their price and how many are in the order — so the ladder row
+// stays one line instead of carrying a sentence.
+function FixedPriceChip({
+  tab,
+  quantities,
+  currency,
+  basis,
+  nextTierName,
+}: {
+  tab: PreorderTab;
+  quantities: QtyMap;
+  currency: string;
+  basis: PriceBasis;
+  nextTierName?: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<number | null>(null);
+  const rows = useMemo(
+    () => tab.groups.flatMap((g) => g.rows.filter((r) => r.fixedPrice).map((r) => ({ r, group: g.name }))),
+    [tab],
+  );
+  if (rows.length === 0) return null;
+  const one = rows.length === 1;
+  const inOrder = rows.reduce((n, { r }) => n + (quantities[r.id] || 0), 0);
+  const shown = rows.slice(0, 6);
+
+  const hoverOpen = () => {
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    setOpen(true);
+  };
+  const hoverClose = () => {
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => setOpen(false), 150);
+  };
+
+  return (
+    <PopoverPrimitive.Root open={open} onOpenChange={setOpen}>
+      <PopoverPrimitive.Trigger asChild>
+        <button
+          type="button"
+          onPointerEnter={(e) => e.pointerType === "mouse" && hoverOpen()}
+          onPointerLeave={(e) => e.pointerType === "mouse" && hoverClose()}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap transition-colors",
+            "bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-300/70 hover:bg-slate-200/80",
+            "dark:bg-slate-800/70 dark:text-slate-200 dark:ring-slate-600/60 dark:hover:bg-slate-700/70",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            open && "bg-slate-200/80 dark:bg-slate-700/70",
+          )}
+          aria-label={`${rows.length} fixed-price product${one ? "" : "s"} — not discounted. Show which`}
+        >
+          <Lock className="w-2.5 h-2.5" aria-hidden />
+          {rows.length} fixed price
+          {inOrder > 0 && <span className="tabular-nums font-normal text-slate-500 dark:text-slate-400">· {inOrder} in order</span>}
+        </button>
+      </PopoverPrimitive.Trigger>
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Content
+          side="bottom"
+          align="start"
+          sideOffset={6}
+          collisionPadding={12}
+          onPointerEnter={hoverOpen}
+          onPointerLeave={hoverClose}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          className="z-50 w-72 rounded-xl border border-border bg-popover text-popover-foreground shadow-lg outline-none overflow-hidden"
+        >
+          <div className="px-3.5 pt-3 pb-2.5">
+            <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-foreground">
+              <Lock className="w-3.5 h-3.5 text-slate-500" /> Fixed price
+            </div>
+            <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
+              Volume discounts don&apos;t apply to {one ? "this product" : "these products"}. {one ? "It still counts" : "They still count"} towards your
+              order total{nextTierName ? `, so ${one ? "it helps" : "they help"} you reach ${nextTierName}` : ""}.
+            </p>
+          </div>
+          <ul className="border-t border-border/70 max-h-56 overflow-y-auto">
+            {shown.map(({ r, group }) => {
+              const qty = quantities[r.id] || 0;
+              const unit = rowUnitPrice(r, basis);
+              const label = r.name.toLowerCase().startsWith(group.toLowerCase()) || !group ? r.name : `${group} · ${r.variantLabel || r.name}`;
+              return (
+                <li key={r.id} className="flex items-center gap-2 px-3.5 py-1.5 text-[11.5px] border-b border-border/40 last:border-b-0">
+                  <span className="min-w-0 flex-1 truncate text-foreground" title={label}>{label}</span>
+                  {qty > 0 && <span className="shrink-0 rounded-full bg-lime-600 px-1.5 text-[10px] font-semibold tabular-nums text-white">{qty}</span>}
+                  <span className="shrink-0 tabular-nums text-muted-foreground">{unit > 0 ? fmtMoney(unit, currency) : "—"}</span>
+                </li>
+              );
+            })}
+            {rows.length > shown.length && (
+              <li className="px-3.5 py-1.5 text-[11px] text-muted-foreground">and {rows.length - shown.length} more — marked with a Fixed price badge</li>
+            )}
+          </ul>
+        </PopoverPrimitive.Content>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
+  );
+}
+
+// How the customer browses the sheet — "Order sheet" (the grid, the default) or
+// "Catalogue" (guided cards). Underline tabs, sat at the right end of the section TabBar row. Shared
 // by the portal fill page and the admin preview so both read exactly the same.
 export function FillModeNav({ mode, onChange }: { mode: FillMode; onChange: (m: FillMode) => void }) {
   return (
     <nav className="flex items-stretch gap-0.5 -mb-px h-9" aria-label="View">
       {(
         [
-          ["guided", LayoutGrid, "Catalogue"],
           ["grid", Table2, "Order sheet"],
+          ["guided", LayoutGrid, "Catalogue"],
         ] as [FillMode, React.ElementType, string][]
       ).map(([m, Icon, label]) => {
         const on = mode === m;
@@ -1052,6 +1243,7 @@ export function SheetContextBar({
     () => (tab ? computeTabTotals({ tabs, pricing: pricing ?? null }, quantities).find((t) => t.tabId === tab.id) ?? null : null),
     [tab, tabs, quantities, pricing],
   );
+  const fixedCount = tabFixedCount(tab);
   if (!pricing && ladder.length === 0) return null;
   const missing = vatIsMissing(pricing);
   const company = pricing?.kind === "business";
@@ -1138,8 +1330,13 @@ export function SheetContextBar({
           </div>
 
           <div className="mt-2 flex items-center justify-between gap-3 text-[11px]">
-            <span className="text-muted-foreground tabular-nums">
-              <span className="font-medium text-foreground">{fmtMoney(amount, currency)}</span> on the whole order
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+              <span className="text-muted-foreground tabular-nums">
+                <span className="font-medium text-foreground">{fmtMoney(amount, currency)}</span> on the whole order
+              </span>
+              {tab && fixedCount > 0 && (
+                <FixedPriceChip tab={tab} quantities={quantities} currency={currency} basis={pricing?.basis ?? "partner"} nextTierName={next?.name || null} />
+              )}
             </span>
             <span className="text-muted-foreground tabular-nums truncate">
               {next
@@ -1160,7 +1357,9 @@ export function SheetContextBar({
           {reached ? (
             <>
               <div className="text-[15px] font-bold tabular-nums text-lime-700 dark:text-lime-400">−{fmtMoney(totals.discount, currency)}</div>
-              <div className="text-[11px] text-muted-foreground">{reached.name || "Volume discount"} −{reached.discountPct}% applied</div>
+              <div className="text-[11px] text-muted-foreground">
+                {reached.name || "Volume discount"} −{reached.discountPct}% applied{fixedCount > 0 ? " · fixed prices excluded" : ""}
+              </div>
             </>
           ) : (
             <>
@@ -1371,6 +1570,14 @@ export function OrderSummaryPanel({
                     {fmtMoney(t.toNextTier, currency)} more → {t.nextTier.name || "next tier"} −{t.nextTier.discountPct}%
                   </div>
                 )}
+                {t.fixedAmount > 0 && (t.tier || t.nextTier) && (
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground" title={FIXED_PRICE_HINT}>
+                    <span className="inline-flex items-center gap-1 truncate">
+                      <Lock className="w-2.5 h-2.5 shrink-0" /> Fixed price · {t.fixedQty} item{t.fixedQty === 1 ? "" : "s"}, not discounted
+                    </span>
+                    <span className="tabular-nums">{fmtMoney(t.fixedAmount, currency)}</span>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -1459,7 +1666,10 @@ export function PreorderReviewModal({
                           const line = qty * rowUnitPrice(r, basis);
                           return (
                             <li key={r.id} className="flex items-center gap-2 py-1 text-[12px]">
-                              <span className="flex-1 truncate text-foreground">{r.name}</span>
+                              <span className="flex-1 min-w-0 flex items-center gap-1.5">
+                                <span className="truncate text-foreground">{r.name}</span>
+                                {r.fixedPrice && tt?.tier && <FixedPricePill />}
+                              </span>
                               <span className="tabular-nums text-muted-foreground">{qty} ×</span>
                               <span className="tabular-nums text-muted-foreground w-20 text-right">{fmtMoney(rowUnitPrice(r, basis), currency)}</span>
                               <span className="tabular-nums font-medium w-24 text-right">{fmtMoney(line, currency)}</span>
@@ -1473,6 +1683,7 @@ export function PreorderReviewModal({
                     <div className="flex items-center justify-between text-[12px] border-t border-border/50 pt-1">
                       <span className="text-muted-foreground">
                         {tab.name} after {tt.tier?.name || "discount"}
+                        {tt.fixedQty > 0 && <span className="text-muted-foreground/70"> · fixed prices excluded</span>}
                       </span>
                       <span className="tabular-nums text-lime-700 dark:text-lime-400 font-medium">
                         −{fmtMoney(tt.discount, currency)} → {fmtMoney(tt.net, currency)}

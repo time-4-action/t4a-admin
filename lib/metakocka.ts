@@ -802,6 +802,15 @@ async function fetchMkSalesProducts(): Promise<MkSalesProduct[] | null> {
   return out;
 }
 
+// Drop the cached Metakocka product index (names, codes, barcodes, activation) and the
+// price-list names, so the next read comes straight from MK. The SKU import calls it
+// first: a product / barcode just fixed in MK must be what the import sees. (Prices
+// themselves are never cached — getMkProductPrices reads them live.)
+export function invalidateMkProductCaches(): void {
+  mkProductCache = null;
+  pricelistCache = null;
+}
+
 export async function listMkSalesProducts(): Promise<MkSalesProduct[]> {
   if (mkProductCache && Date.now() - mkProductCache.at < MK_PRODUCT_TTL_MS) {
     return mkProductCache.value;

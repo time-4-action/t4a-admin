@@ -23,6 +23,9 @@
 //                WHOLE-ORDER net subtotal (all tabs). Each tab keeps its own ladder /
 //                percentage. The tier comes off the net unit, so VAT is charged on the
 //                discounted price.
+//  • A FIXED-PRICE row (`row.fixedPrice`) is never tier-discounted: its line still
+//                counts towards the order subtotal that unlocks the tiers, but it is
+//                charged at its own price (tierPct 0) whatever tier the tab reaches.
 //
 // `PriceBasis` survives for SUBMISSIONS FROZEN BEFORE this change: those snapshots
 // carry `basis: "rrp"` (individuals were charged the VAT-inclusive RRP) and must keep
@@ -292,7 +295,8 @@ export function priceLine(input: { basis: PriceBasis; unit: number; qty: number;
 // ── volume discount tiers ────────────────────────────────────────────────────
 // A tab's tiers turn the ORDER subtotal into a discount on that tab: the thresholds
 // are compared with the whole order (every tab together), and once one is reached
-// every line in the tab drops by the tier's percentage. Each tab keeps its own
+// every line in the tab drops by the tier's percentage — except fixed-price rows,
+// which count towards the threshold but are never discounted. Each tab keeps its own
 // ladder (different percentages / thresholds per product family), but the amount
 // that unlocks them is always the full order. Tiers never stack — exactly one (the
 // highest threshold reached) applies per tab.
@@ -339,6 +343,8 @@ export type PreorderTabTotal = {
   discountPct: number; // 0 when no tier applies
   discount: number; // Σ per-line (unit − discounted unit) × qty
   net: number; // amount − discount (what is actually payable, in the basis)
+  fixedAmount: number; // the part of `amount` on fixed-price rows — counted, never discounted
+  fixedQty: number;
   nextTier: PreorderTier | null; // the tier just out of reach
   toNextTier: number; // how much more the ORDER needs to reach it
 };
@@ -389,6 +395,8 @@ export function priceOrder(
     const ordered: { row: PreorderRow; qty: number; unitC: Cents }[] = [];
     let qty = 0;
     let amountC = 0;
+    let fixedC = 0;
+    let fixedQty = 0;
     for (const group of tab.groups) {
       for (const row of group.rows) {
         const q = Math.max(0, Math.floor(qtyOf(row) || 0));
@@ -397,22 +405,26 @@ export function priceOrder(
         ordered.push({ row, qty: q, unitC });
         qty += q;
         amountC += mulCents(unitC, q);
+        if (row.fixedPrice) {
+          fixedC += mulCents(unitC, q);
+          fixedQty += q;
+        }
       }
     }
-    return { tab, ordered, qty, amountC };
+    return { tab, ordered, qty, amountC, fixedC, fixedQty };
   });
   const orderAmountC = collected.reduce((sum, t) => sum + t.amountC, 0);
   const orderAmount = fromCents(orderAmountC);
 
   // Pass 2 — each tab's own ladder, unlocked by the order subtotal.
-  const tabs: PricedTab[] = collected.map(({ tab, ordered, qty, amountC }) => {
+  const tabs: PricedTab[] = collected.map(({ tab, ordered, qty, amountC, fixedC, fixedQty }) => {
     const amount = fromCents(amountC);
     const tier = tierForAmount(tab.tiers, orderAmount);
     const discountPct = tier?.discountPct ?? 0;
     const lines: Record<string, LinePricing> = {};
     let discountC = 0;
     for (const o of ordered) {
-      const lp = priceLine({ basis, unit: fromCents(o.unitC), qty: o.qty, tierPct: discountPct, vatRate: rate });
+      const lp = priceLine({ basis, unit: fromCents(o.unitC), qty: o.qty, tierPct: o.row.fixedPrice ? 0 : discountPct, vatRate: rate });
       lines[o.row.id] = lp;
       discountC += mulCents(o.unitC - toCents(lp.unitFinal), o.qty);
       netC += toCents(lp.lineNet);
@@ -430,6 +442,8 @@ export function priceOrder(
       discountPct,
       discount: fromCents(discountC),
       net: fromCents(amountC - discountC),
+      fixedAmount: fromCents(fixedC),
+      fixedQty,
       nextTier: next,
       toNextTier: next ? fromCents(Math.max(0, toCents(next.minAmount) - orderAmountC)) : 0,
       lines,

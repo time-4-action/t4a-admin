@@ -99,9 +99,19 @@ export function normalizeEan(v: string | null | undefined): string | null {
 const CODES_TTL_MS = 10 * 60 * 1000;
 type CatalogueIndex = { codes: Set<string>; byEan: Map<string, string> };
 let indexCache: { at: number; value: CatalogueIndex } | null = null;
+// Parallel callers (a batch import resolves many codes at once) share one download
+// instead of each fetching the whole catalogue.
+let indexInflight: Promise<CatalogueIndex | null> | null = null;
 
-async function getCatalogueIndex(): Promise<CatalogueIndex | null> {
-  if (indexCache && Date.now() - indexCache.at < CODES_TTL_MS) return indexCache.value;
+function getCatalogueIndex(): Promise<CatalogueIndex | null> {
+  if (indexCache && Date.now() - indexCache.at < CODES_TTL_MS) return Promise.resolve(indexCache.value);
+  indexInflight ??= loadCatalogueIndex().finally(() => {
+    indexInflight = null;
+  });
+  return indexInflight;
+}
+
+async function loadCatalogueIndex(): Promise<CatalogueIndex | null> {
   const res = await listProducts();
   if (!res.ok) return indexCache?.value ?? null;
   const value: CatalogueIndex = { codes: new Set(), byEan: new Map() };

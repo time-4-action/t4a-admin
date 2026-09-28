@@ -120,6 +120,21 @@ describe("commercial snapshot — frozen VAT arithmetic", () => {
     expect(snapshotTotals(snap).net).toBe(snap.pricing?.totals.net);
   });
 
+  it("freezes the fixed-price flag: no tier on that line, and the frozen view re-prices identically", () => {
+    const c = baseCampaign();
+    c.tabs[1].groups[0].rows[0].fixedPrice = true; // m1
+    c.tabs[1].tiers = [{ id: "mt", name: "Mast deal", minAmount: 100, discountPct: 20 }];
+    const snap = buildCommercialSnapshot(resolveEffectiveCampaign(c, person, vat), qty);
+    const m1 = snap.lines.find((l) => l.code === "SKU-m1")!;
+    expect(m1).toMatchObject({ fixedPrice: true, tierPct: 0, unitNet: 50, lineNet: 1000 });
+    expect(snap.lines.find((l) => l.code === "SKU-s1")!.fixedPrice).toBeUndefined();
+    // The flag later removed from the sheet does not change the frozen order.
+    c.tabs[1].groups[0].rows[0].fixedPrice = false;
+    const frozen = campaignFromSnapshot(baseCampaign(), snap);
+    expect(computeTotals(frozen, snapshotQuantities(snap))).toEqual(snapshotTotals(snap));
+    expect(computePricedOrder(frozen, snapshotQuantities(snap)).vat).toEqual({ rate: 22, ...snap.pricing!.totals });
+  });
+
   it("company: net lines, zero VAT, gross = net", () => {
     const company = { ...person, partnerMkId: "p1", kind: "business" as const };
     const snap = buildCommercialSnapshot(resolveEffectiveCampaign(baseCampaign(), company, vat), qty);

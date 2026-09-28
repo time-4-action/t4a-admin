@@ -105,7 +105,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [terms, setTerms] = useState<PreorderTerms>({});
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>("guided");
+  const [mode, setMode] = useState<Mode>("grid");
   const [busy, setBusy] = useState<null | "save" | "submit" | "retry">(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [status, setStatus] = useState<PortalSubmission["status"]>("draft");
@@ -403,7 +403,27 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
         target: "sections",
         title: "Product sections",
         icon: <Layers className="w-4 h-4" />,
-        body: "The range is split into sections. Switch between them here — the number next to a section shows how many items you've picked in it.",
+        body: (
+          <>
+            The range is split into sections — each has its own products (and can have its own volume discount). Click a section to switch; the
+            number next to it shows how many items you&apos;ve picked there.
+            <span className="mt-3 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">Watch — switching for you</span>
+            <span className="mt-1.5 flex flex-wrap gap-1" aria-hidden>
+              {tabsForBar.map((t) => (
+                <span
+                  key={t.id}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] transition-colors duration-300",
+                    t.id === activeTabId ? "bg-lime-600 text-white font-semibold" : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  <Layers className="w-2.5 h-2.5" />
+                  {t.name || "Section"}
+                </span>
+              ))}
+            </span>
+          </>
+        ),
       });
     steps.push(
       {
@@ -453,7 +473,15 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
         mode: "guided",
         title: "Your prices & volume discount",
         icon: <Percent className="w-4 h-4" />,
-        body: "How you are priced, and how close you are to the next volume discount. Discount levels count your whole order, across every section.",
+        body: sheet?.tabs.some((t) => t.groups.some((g) => g.rows.some((r) => r.fixedPrice))) ? (
+          <>
+            How you are priced, and how close you are to the next volume discount. Discount levels count your whole order, across every section.
+            Products marked <span className="font-medium text-foreground">Fixed price</span> are never discounted — but they still count towards
+            reaching a discount level.
+          </>
+        ) : (
+          "How you are priced, and how close you are to the next volume discount. Discount levels count your whole order, across every section."
+        ),
       });
     steps.push(
       {
@@ -477,12 +505,42 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
       },
     );
     return steps;
-  }, [tabsForBar.length, sheet]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabsForBar.map((t) => t.id).join("|"), sheet, activeTabId]);
+
+  // "Product sections" step: flip through the sections live so the customer sees what
+  // a switch does (tab underline, products, counts), then return to where they were.
+  // Skipped for reduced motion — the step still points at the tab bar.
+  const [tourIndex, setTourIndex] = useState(0);
+  const activeTabRef = useRef(activeTabId);
+  activeTabRef.current = activeTabId;
+  const sectionIds = tabsForBar.map((t) => t.id).join("|");
+  const demoSections = tourOpen && tour[tourIndex]?.target === "sections";
+  useEffect(() => {
+    if (!demoSections) return;
+    const ids = sectionIds.split("|").filter(Boolean);
+    if (ids.length < 2) return;
+    try {
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    } catch {
+      /* no matchMedia: animate */
+    }
+    const original = activeTabRef.current;
+    let i = Math.max(0, ids.indexOf(original ?? ""));
+    const timer = window.setInterval(() => {
+      i = (i + 1) % ids.length;
+      setActiveTabId(ids[i]);
+    }, 1400);
+    return () => {
+      window.clearInterval(timer);
+      setActiveTabId(original);
+    };
+  }, [demoSections, sectionIds]);
 
   const closeTour = useCallback((completed: boolean) => {
     void completed;
     setTourOpen(false);
-    setMode("guided");
+    setMode("grid"); // the order sheet is the default view
     try {
       window.localStorage.setItem(TOUR_KEY, "done");
     } catch {
@@ -918,6 +976,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
         open={tourOpen}
         onClose={closeTour}
         onStep={(i) => {
+          setTourIndex(i);
           const m = tour[i]?.mode;
           if (m) setMode(m);
         }}

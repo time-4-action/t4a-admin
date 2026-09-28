@@ -684,7 +684,7 @@ from client input.
 | Markets & Customers | `/preorder/[id]/markets` | List-based: summary strip + **Customers** view (directory table, company/individual split) and **Markets** view (a full-width priority list — drag to reorder) and **Countries** view (table for assignment) **Markets, customers and countries all open in the large editor modal** (`market-modal.tsx`, `customer-modal.tsx`, `country-modal.tsx` on `components/ui/editor-modal.tsx`; a country shows its market select + a searchable, kind-filtered, paged customer list): header + tab strip — a customer gets Overview · Placement · Pricing & terms · Volume discounts · Assortment, a market gets Market · Pricing & terms · Volume discounts · Assortment — the config tabs are slices of `commercial-config-form.tsx` (`section` prop). See below. |
 | Preorders | `/preorder/[id]/submissions` | Full table with stage / Metakocka / visibility columns, filters incl. integration failures. |
 | Preorder detail | `/preorder/[id]/submissions/[sid]` | Three panels: **Requested preorder** (frozen snapshot), **Current Metakocka order** (live, compared line by line), **Customer visibility** (Show/Hide order to customer). Unlock detaches the MK order (optionally deletes it). |
-| Preview | `/preorder/[id]/preview` | Pure preview — nothing is saved. Renders the **customer's fill page piece for piece** (`app/portal/preorders/[campaignId]/fill-client.tsx`, unlocked draft state): the header hides the campaign tab strip (`hideNav`), then the same section `TabBar` + `FillModeNav` (Catalogue / Order sheet — shared in `preorder-shared.tsx`), the same framed sheet document (`SheetContextBar` → grid `bare searchable` / guided) and the same sidebar card (summary `bare`, minimum order, Delivery & note, "Your terms") — only the submit slot is the admin's. Pick a partner (`?partner=<mkId>` deep link, `?pick=1` opens the picker) → the sheet renders their **effective** campaign with an admin-only "Effective configuration" card (market, pricing, assortment, discounts, sources, warnings). **There is no admin-side fill.** Placing a preorder for a customer = **View as customer**: the page unlocks the campaign for them (`POST …/customers/[partnerMkId]/access`, the invite-link grant, idempotent — the portal shows a campaign only with a grant) and starts the customer impersonation, landing on `/portal/preorders/<id>`; the admin fills and submits there **as the customer** (one fill flow, the customer's own — min-order and every other customer rule apply). |
+| Preview | `/preorder/[id]/preview` | Pure preview — nothing is saved. Renders the **customer's fill page piece for piece** (`app/portal/preorders/[campaignId]/fill-client.tsx`, unlocked draft state): the header hides the campaign tab strip (`hideNav`), then the same section `TabBar` + `FillModeNav` (Order sheet — the default view — / Catalogue — shared in `preorder-shared.tsx`), the same framed sheet document (`SheetContextBar` → grid `bare searchable` / guided) and the same sidebar card (summary `bare`, minimum order, Delivery & note, "Your terms") — only the submit slot is the admin's. Pick a partner (`?partner=<mkId>` deep link, `?pick=1` opens the picker) → the sheet renders their **effective** campaign with an admin-only "Effective configuration" card (market, pricing, assortment, discounts, sources, warnings). **There is no admin-side fill.** Placing a preorder for a customer = **View as customer**: the page unlocks the campaign for them (`POST …/customers/[partnerMkId]/access`, the invite-link grant, idempotent — the portal shows a campaign only with a grant) and starts the customer impersonation, landing on `/portal/preorders/<id>`; the admin fills and submits there **as the customer** (one fill flow, the customer's own — min-order and every other customer rule apply). |
 | Portal | `/portal/preorders`, `/portal/preorders/[id]` | Customer list + fill page. **Quick guide**: on the first visit to an editable preorder a spotlight tour (`components/guided-tour.tsx`, steps in `fill-client.tsx`) walks through sections, Catalogue vs Order sheet (it switches the view per step), search, opening a product (photos / zoom / sizes), pricing & volume discount, summary & submit; targets are `data-tour="…"` attributes. Seen-flag in localStorage (`t4a.portal.preorder-guide.v1`); the header's "Quick guide" button replays it. After submit the page shows registration state (registering / saved-but-not-registered with Retry / processing) and, once published, **"Your confirmed order"** (requested vs confirmed per line, link to `/portal/orders/<mkId>`). |
 
 #### Effective campaign resolver (`lib/preorder-effective.ts`, pure)
@@ -763,6 +763,18 @@ else `person`) decides the VAT only:
   unlocks every tab's ladder (`priceOrder` collects all tabs first, then
   evaluates each ladder against the order amount). Tier widgets
   (`TabTierBanner`, `SheetContextBar`) therefore take the full `tabs`.
+- **Fixed-price rows** (`row.fixedPrice`) are never tier-discounted: `priceOrder`
+  prices them with `tierPct 0`, but their amount still counts towards the order
+  subtotal that unlocks the ladders (`PreorderTabTotal.fixedAmount` / `fixedQty`
+  report the share). The flag is frozen on the snapshot line (`SnapshotLine.fixedPrice`,
+  restored by `campaignFromSnapshot`), so the MK line goes without `discount` and the
+  order note says "n fixed-price items not discounted". Admins set it per variant
+  (lock / % toggle in the builder row) or per group ("Make fixed price" in the group
+  header), or via SKU import (`Fixed price` xlsx column, `FIXED` on a pasted line).
+  Customers see `FixedPricePill` (`preorder-shared.tsx`) on the sheet row, catalogue
+  card, product modal and review, plus a note under the ladder and in the summary
+  (`FIXED_PRICE_HINT` is the one wording). It is a campaign row property — markets
+  and customer rules do not override it.
 - The VAT rate of a country resolves **campaign override → global table →
   configured fallback → `missing`** (`resolveVatRate`). Global rates live in the
   `VatSettings` singleton (`models/vat-settings.ts`, `lib/vat-settings.ts`; edited
@@ -980,17 +992,24 @@ old MK-only products carry no price list), and re-price keeps it 0.
 **SKU import** (`/api/admin/preorder/products/resolve`) takes SKUs **or EANs**: a
 code the catalogue's `/api/product/:code` misses is retried through the catalogue's
 EAN index (`catalogueCodeForEan`, built with `getCatalogueCodes`), then Metakocka by
-code or barcode (`getMkSalesProduct`; deactivated MK products resolve on an exact
+code or barcode (`getMkSalesProduct`; an EAN MK knows is first mapped to its product code and loaded from the catalogue, so it gets the catalogue images — only a product the catalogue lacks becomes a bare MK-only row; deactivated MK products resolve on an exact
 SKU / EAN, only the name search skips them). EANs compare with leading zeros
 dropped. A row's missing EAN is filled from the **Metakocka barcode**
 (`getMkBarcodes`) on resolve and on re-price; customers see the EAN under the SKU.
 Import input may carry a **tag** per code: xlsx columns `SKU / EAN` + `Tag`
 (found by header name, any order; `parseSkuWorkbookEntries`), paste / CSV one
 code per line with the tag after a comma / tab / semicolon (`lib/sku-entries.ts`);
-a variant code / EAN tags that row, a parent code every row it imports. The Import dialog's **Smart grouping** toggle (`lib/preorder-smart-group.ts`)
+a variant code / EAN tags that row, a parent code every row it imports.
+Import may also carry **prices**: xlsx columns `Partner price` (net) + `RRP`
+(gross), found by header name; in pasted text the first amount is the partner
+price, the second the RRP, or labelled (`RRP 129.90`) — decimal commas need tab /
+semicolon separators (`parsePrice` in `lib/sku-entries.ts`; up to 5 integer digits,
+so an EAN never reads as a price). An imported price overrides the resolved one
+client-side (`applyImportEntries` in the builder; a partner price also clears
+`discountedPrice`); a later Re-price overwrites it. **Re-importing a code already on the tab updates that row** instead of adding it again (`importIntoTab`): tag + fixed price become exactly what the import gives (no tag clears the old one), prices change only where the import carries one. The Import dialog's **Smart grouping** toggle (`lib/preorder-smart-group.ts`)
 merges single-SKU groups whose names differ only in a trailing size token
 ("T4A QTS-Wave 71/76") into one group, the token becoming the variant label, and
-appends to a same-named group already on the tab. **Smart variant labels** (`withSmartLabels`,
+appends to a same-named group already on the tab. A lone product also **joins the group of its family** — a multi-variant group of the same import or one already on the tab whose name or variant names share its base (`familyKey`: case, spacing and "80 %" vs "80%" ignored), so a Metakocka-only size lands with its catalogue siblings. **Import keeps the file's order**: `sortByImport` puts groups and variants in the order of the imported lines, and new rows / groups are inserted among existing ones by that position (`insertRowsInOrder` / `insertGroupsInOrder`). Every batch import first drops the cached MK product index + price-list names (`invalidateMkProductCaches`), so a change just made in Metakocka is what the import sees. **Smart variant labels** (`withSmartLabels`,
 same file): a variant's "Size / label" is the part of its name its siblings don't
 share ("Patrik Fin PPW Slot 80" → "80"), applied in `resolve` and, once, by the
 builder on load to rows whose label still equals the full name (typed labels are

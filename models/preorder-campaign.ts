@@ -37,6 +37,7 @@ export interface IPreorderRow {
   image?: string | null;
   order: number;
   restricted?: boolean;
+  fixedPrice?: boolean;
   taxCode?: string | null;
 }
 
@@ -153,6 +154,8 @@ const RowSchema = new Schema<IPreorderRow>(
     image: { type: String, default: null },
     order: { type: Number, default: 0 },
     restricted: { type: Boolean, default: false },
+    // No volume (tier) discount on this row — see PreorderRow.fixedPrice.
+    fixedPrice: { type: Boolean, default: false },
     taxCode: { type: String, default: null },
   },
   { _id: false },

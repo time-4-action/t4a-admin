@@ -197,6 +197,21 @@ describe("priceOrder", () => {
     expect(alone.tabs[0]).toMatchObject({ amount: 500, orderAmount: 500, discountPct: 0, toNextTier: 500 });
   });
 
+  it("a fixed-price row counts towards the threshold but is never discounted", () => {
+    const c = baseCampaign();
+    c.tabs[0].groups[0].rows[1].fixedPrice = true; // s2: 150 (discounted price), fixed
+    const o = priceOrder({ ...c, pricing: person }, (r) => qty[r.id as keyof typeof qty] ?? 0);
+    // Still 1300 on the tab (and 1350 on the order) ⇒ Silver 5 % — but only on the 1000 of s1.
+    expect(o.tabs[0]).toMatchObject({ amount: 1300, discountPct: 5, discount: 50, net: 1250, fixedAmount: 300, fixedQty: 2 });
+    expect(o.tabs[0].lines.s2).toMatchObject({ unit: 150, tierPct: 0, unitFinal: 150, unitVat: 33, lineGross: 366 });
+    expect(o.tabs[0].lines.s1).toMatchObject({ tierPct: 5, unitFinal: 95 });
+    expect(o.totals).toEqual({ qty: 13, amount: 1350, discount: 50, net: 1300 });
+    expect(o.vat).toEqual({ rate: 22, net: 1300, vat: 286, gross: 1586 });
+    // Only fixed-price items on the order still unlock the ladder for the rest.
+    const onlyFixed = priceOrder({ ...c, pricing: company }, (r) => ({ s2: 7, s1: 1 })[r.id] ?? 0);
+    expect(onlyFixed.tabs[0]).toMatchObject({ amount: 1150, discountPct: 5, discount: 5, fixedAmount: 1050 });
+  });
+
   it("no pricing context (admin builder) prices on the partner basis without VAT totals", () => {
     const o = priceOrder(baseCampaign(), (r) => qty[r.id as keyof typeof qty] ?? 0);
     expect(o.ctx).toBeNull();

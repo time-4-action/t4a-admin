@@ -37,8 +37,8 @@ export type LineStatus = "pending" | "confirmed" | "backorder" | "cancelled";
 
 export type RowSource = "catalogue" | "manual";
 // A short free-text label shown as a pill on the row ("NEW", "SALE", "Limited", …).
-// The resolver stamps "pre-order only" on unpublished catalogue variants; admins set
-// anything else by hand. Display goes through tagLabel().
+// Only admins set tags (builder or SKU import); nothing is stamped automatically. Rows
+// from older imports may still carry "pre-order only". Display goes through tagLabel().
 export type RowTag = string | null;
 export const ROW_TAG_MAX = 24;
 
@@ -69,6 +69,9 @@ export type PreorderRow = {
   // Not in the DEFAULT assortment: visible only where a market / customer rule
   // exposes it (see CommercialConfig.exposedIds). Undefined = normal row.
   restricted?: boolean;
+  // Fixed price: never gets a volume (tier) discount. The line still counts towards
+  // the order subtotal that unlocks the tiers. Undefined = normal row.
+  fixedPrice?: boolean;
   // MK tax code captured at resolve/reprice time so a submission can be pushed to
   // Metakocka without re-reading product prices.
   taxCode?: string | null;
@@ -390,6 +393,7 @@ export type SnapshotLine = {
   partnerPrice?: number | null; // net partner price as shown
   taxCode?: string | null; // legacy MK tax code; lines now carry tax_factor
   priceSource: NonNullable<PreorderRow["priceSource"]>;
+  fixedPrice?: boolean; // the row was fixed-price at submit (no tier discount)
   // Frozen VAT arithmetic of the line (lib/pricing.ts priceLine). Absent on snapshots
   // taken before VAT support.
   tierPct?: number | null;
@@ -779,6 +783,7 @@ export function campaignFromSnapshot(
       discountedPrice: null,
       taxCode: line.taxCode ?? null,
       priceSource: line.priceSource,
+      ...(line.fixedPrice ? { fixedPrice: true } : {}),
       order: group.rows.length,
     });
   }

@@ -61,6 +61,20 @@ beforeEach(async () => {
 });
 
 describe("submission → Metakocka order", () => {
+  it("a fixed-price line goes to Metakocka without the tier discount; the note says so", async () => {
+    const c = baseCampaign();
+    c.tabs[0].groups[0].rows.push({ ...c.tabs[0].groups[0].rows[0], id: "s4", code: "SKU-s4", name: "Fixed sail", fixedPrice: true });
+    const campaign = await makeCampaign({ tabs: c.tabs });
+    const mk = new MkFake();
+    const r = await submit(campaign, mk, { s1: 100, s4: 2 });
+    expect(r.ok).toBe(true);
+    const [l1, l4] = mk.creates[0].lines;
+    expect(l1).toMatchObject({ code: "SKU-s1", price: 100, discount: 10 });
+    expect(l4).toMatchObject({ code: "SKU-s4", price: 100 });
+    expect(l4.discount).toBeUndefined();
+    expect(mk.creates[0].notes).toContain("fixed-price items not discounted");
+  });
+
   it("submit creates exactly one MK order containing exactly the submitted lines, priced from the snapshot", async () => {
     const campaign = await makeCampaign();
     const mk = new MkFake();

@@ -87,6 +87,7 @@ export interface ISnapshotLine {
   partnerPrice?: number | null;
   taxCode?: string | null;
   priceSource: "sheet" | "manual" | "book" | "fallback";
+  fixedPrice?: boolean;
   tierPct?: number | null;
   unitNet?: number | null;
   unitVat?: number | null;
@@ -269,6 +270,7 @@ const SnapshotLineSchema = new Schema<ISnapshotLine>(
     partnerPrice: { type: Number, default: null },
     taxCode: { type: String, default: null },
     priceSource: { type: String, enum: ["sheet", "manual", "book", "fallback"], default: "sheet" },
+    fixedPrice: { type: Boolean, default: false },
     tierPct: { type: Number, default: null },
     unitNet: { type: Number, default: null },
     unitVat: { type: Number, default: null },

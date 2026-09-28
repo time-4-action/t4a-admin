@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { getProduct, catalogueCodeForEan } from "@/lib/product-api";
+import { getProduct, catalogueCodeForEan, normalizeEan, searchProducts } from "@/lib/product-api";
 import {
   getMkBarcodes,
   getMkProductPrices,
   getMkSalesProduct,
+  invalidateMkProductCaches,
   pickMkListGrossPrice,
   pickMkListNetPrice,
   productTaxCode,
@@ -70,7 +71,7 @@ function nodeToRow(
     name: node.product_name || parent.product_name,
     variantLabel: node.code !== parent.code ? node.product_name || null : null,
     size: null,
-    tag: node.published === false ? "pre-order only" : null,
+    tag: null, // tags come only from the admin (builder or import) — never stamped automatically
     rrp: pickPrice(list, sel.rrpPricelist, /rrp|retail|msrp/i),
     partnerPrice: pickPrice(list, sel.partnerPricelist, /partner/i),
     discountedPrice: null,
@@ -192,16 +193,54 @@ async function applyMkPrices(groups: ProductGroupDraft[], sel: PriceListSelectio
     }
 }
 
-// Look a SKU or EAN up in the catalogue. /api/product/:code knows codes only, so a miss
-// retries through the catalogue's EAN index. `code` is the matched parent / variant code
-// (the EAN's own code, never the EAN), so a variant EAN keeps just that variant.
-async function lookupCatalogue(input: string) {
+// Look a SKU or EAN up in the catalogue. /api/product/:code knows codes only, so an EAN
+// is first turned into its product code, trying in order: the catalogue's EAN index,
+// the catalogue search (which matches EANs the index may not hold), and the Metakocka
+// barcode — the catalogue misses the EAN of many variants, and without this last step
+// such an EAN fell through to a bare Metakocka-only row with no images, although the
+// product is in the catalogue under its code. `code` is the matched parent / variant
+// code (never the EAN), so a variant EAN keeps just that variant.
+async function lookupCatalogue(input: string, opts: { skipSearch?: boolean } = {}) {
   const res = await getProduct(input);
   if (res.ok && res.data) return { res, code: input };
-  const code = await catalogueCodeForEan(input);
-  if (!code) return { res, code: input };
-  const byEan = await getProduct(code);
-  return { res: byEan.ok && byEan.data ? byEan : res, code };
+  const tried = new Set([input]);
+  const attempt = async (code: string | null | undefined) => {
+    if (!code || tried.has(code)) return null;
+    tried.add(code);
+    const r = await getProduct(code);
+    return r.ok && r.data ? { res: r, code } : null;
+  };
+
+  const hit = await attempt(await catalogueCodeForEan(input));
+  if (hit) return hit;
+
+  // Metakocka's barcode index is cached in memory — cheap, so it goes before the
+  // catalogue search (one HTTP call per EAN, the last resort).
+  const mk = await getMkSalesProduct(input).catch(() => null);
+  const byMk = await attempt(mk?.code);
+  if (byMk) return byMk;
+
+  const ean = normalizeEan(input);
+  if (ean && !opts.skipSearch) {
+    const search = await searchProducts(input);
+    const match = search.ok ? (search.data ?? []).find((h) => normalizeEan(h.ean_code) === ean) : undefined;
+    const bySearch = await attempt(match?.code);
+    if (bySearch) return bySearch;
+  }
+
+  return { res, code: input };
+}
+
+const BATCH_CONCURRENCY = 16;
+const BATCH_SEARCH_BUDGET_MS = 25_000;
+
+// Run `fn` over `items` with at most `limit` in flight.
+async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await fn(items[next++]);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
 
 // POST body: { code } → single group, OR { codes: string[] } → one group per parent,
@@ -245,15 +284,22 @@ export async function POST(request: Request) {
     .filter(Boolean)
     .slice(0, 500);
   if (codes.length === 0) return NextResponse.json({ groups: [], notFound: [] });
+  // An import always works on Metakocka's current data: a product or barcode just
+  // changed in MK must not be hidden behind the 10-minute product index cache.
+  invalidateMkProductCaches();
 
   // Group requested codes by the parent they resolve to, tracking which specific child
   // SKUs were asked for so we can keep only those.
   const byParent = new Map<string, { parent: CatalogueProduct; wanted: Set<string> }>();
   const notFound: string[] = [];
 
-  await Promise.all(
-    codes.map(async (input) => {
-      const { res, code } = await lookupCatalogue(input);
+  // Bounded concurrency (the catalogue API is not built for hundreds of parallel
+  // calls) and a time budget: past it the slow catalogue search is skipped, so a big
+  // import answers well inside the gateway timeout instead of hitting a 504.
+  const deadline = Date.now() + BATCH_SEARCH_BUDGET_MS;
+  await mapLimit(codes, BATCH_CONCURRENCY, async (input) => {
+    {
+      const { res, code } = await lookupCatalogue(input, { skipSearch: Date.now() > deadline });
       if (!res.ok || !res.data) {
         notFound.push(input);
         return;
@@ -263,8 +309,8 @@ export async function POST(request: Request) {
       // If the searched code is a child SKU (not the parent), remember it.
       if (code !== parent.code) entry.wanted.add(code);
       byParent.set(parent.code, entry);
-    }),
-  );
+    }
+  });
 
   const groups = Array.from(byParent.values()).map(({ parent, wanted }) =>
     expand(parent, sel, wanted),

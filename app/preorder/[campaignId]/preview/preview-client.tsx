@@ -92,7 +92,7 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
   // The customer's two free-text fields, kept only so the sidebar reads as theirs.
   const [terms, setTerms] = useState<PreorderTerms>({});
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>("guided");
+  const [mode, setMode] = useState<Mode>("grid");
 
   const [partner, setPartner] = useState<PickedPartner | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -219,7 +219,7 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
         <div className="px-4 md:px-6 flex items-stretch gap-3 border-b border-border shrink-0">
           <TabBarSkeleton />
           <div className="flex-1" />
-          <FillModeNav mode="guided" onChange={() => {}} />
+          <FillModeNav mode="grid" onChange={() => {}} />
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">

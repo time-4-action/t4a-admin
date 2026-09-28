@@ -51,6 +51,7 @@ import {
   Copy,
   Lock,
   LockOpen,
+  BadgePercent,
   Tag,
   ImagePlus,
   X,
@@ -87,7 +88,7 @@ import {
   type PreorderGroup,
   type CampaignStatus,
 } from "@/types/preorder";
-import { fmtMoney } from "@/app/preorder/preorder-shared";
+import { fmtMoney, FixedPricePill, FIXED_PRICE_HINT, tabFixedCount } from "@/app/preorder/preorder-shared";
 import { VatModal } from "./vat-modal";
 import type { VatOverride } from "@/lib/pricing";
 import type { MkPricelist } from "@/types/documents";
@@ -128,6 +129,42 @@ function materializeGroup(draft: GroupDraft): PreorderGroup {
     images: draft.images ?? [],
     rows: draft.rows.map((r, i) => ({ ...r, id: uid(), order: i })),
   };
+}
+
+// Spreadsheet order of an import: row code → the position of the line that brought it
+// in. New rows / groups are placed by it among what the tab already holds, so the sheet
+// reads as close to the imported file as possible.
+type ImportOrder = Map<string, number>;
+const posIn = (order: ImportOrder | undefined, code: string | null | undefined) =>
+  (order && code != null ? order.get(code) : undefined) ?? Infinity;
+const groupPos = (order: ImportOrder | undefined, g: { rows: { code: string }[] }) =>
+  g.rows.reduce((m, r) => Math.min(m, posIn(order, r.code)), Infinity);
+
+// Where an item at spreadsheet position `p` goes in `list`: right after the last item
+// that comes before it in the file, else right before the first that comes after it,
+// else at the end (items not in this import keep their place).
+function insertAt<T>(list: T[], p: number, pos: (x: T) => number): number {
+  if (p === Infinity) return list.length;
+  let lastBefore = -1;
+  let firstAfter = -1;
+  list.forEach((x, i) => {
+    const q = pos(x);
+    if (q < p) lastBefore = i;
+    else if (q !== Infinity && firstAfter === -1) firstAfter = i;
+  });
+  return lastBefore >= 0 ? lastBefore + 1 : firstAfter >= 0 ? firstAfter : list.length;
+}
+
+function insertRowsInOrder(rows: PreorderRow[], fresh: PreorderRow[], order?: ImportOrder): PreorderRow[] {
+  const out = [...rows];
+  for (const r of fresh) out.splice(insertAt(out, posIn(order, r.code), (x) => posIn(order, x.code)), 0, r);
+  return out.map((r, i) => (r.order === i ? r : { ...r, order: i }));
+}
+
+function insertGroupsInOrder(groups: PreorderGroup[], fresh: PreorderGroup[], order?: ImportOrder): PreorderGroup[] {
+  const out = [...groups];
+  for (const g of fresh) out.splice(insertAt(out, groupPos(order, g), (x) => groupPos(order, x)), 0, g);
+  return out.map((g, i) => (g.order === i ? g : { ...g, order: i }));
 }
 
 export default function BuilderClient({ campaignId }: { campaignId: string }) {
@@ -301,30 +338,64 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   }
 
   // ── Groups ──
-  function addGroups(tabId: string, drafts: GroupDraft[]) {
+  function addGroups(tabId: string, drafts: GroupDraft[], order?: ImportOrder) {
     if (drafts.length === 0) return;
-    mutateTab(tabId, (t) => ({ ...t, groups: [...t.groups, ...drafts.map(materializeGroup)] }));
+    mutateTab(tabId, (t) => ({ ...t, groups: insertGroupsInOrder(t.groups, drafts.map(materializeGroup), order) }));
   }
   // Import with smart grouping: single-SKU products sharing a base name become one group,
   // and a group whose name is already on the tab takes the rows instead of a duplicate.
-  function addGroupsSmart(tabId: string, drafts: GroupDraft[]) {
+  function addGroupsSmart(tabId: string, drafts: GroupDraft[], order?: ImportOrder) {
     if (drafts.length === 0) return;
     mutateTab(tabId, (t) => {
-      const merged = smartGroup(drafts, t.groups.map((g) => g.name));
-      const groups = [...t.groups];
+      // Existing groups answer by name AND by their variants' family, so a lone
+      // Metakocka-only size ("… 80 % 490") lands in "… 80%" already on the tab.
+      const merged = smartGroup(drafts, t.groups);
+      let groups = [...t.groups];
+      const fresh: PreorderGroup[] = [];
       for (const d of merged) {
         const i = groups.findIndex((g) => g.name.trim().toLowerCase() === d.name.trim().toLowerCase());
         if (i === -1) {
-          groups.push(materializeGroup(d));
+          // A merge appends joined sizes at the end — put the group back in file order.
+          const rows = d.rows.map((r, j) => ({ r, j })).sort((x, y) => posIn(order, x.r.code) - posIn(order, y.r.code) || x.j - y.j);
+          fresh.push(materializeGroup({ ...d, rows: rows.map((x) => x.r) }));
           continue;
         }
         const g = groups[i];
         const have = new Set(g.rows.map((r) => r.code));
-        const fresh = d.rows.filter((r) => !r.code || !have.has(r.code));
-        groups[i] = { ...g, rows: [...g.rows, ...fresh.map((r, j) => ({ ...r, id: uid(), order: g.rows.length + j }))] };
+        const rows = d.rows.filter((r) => !r.code || !have.has(r.code)).map((r) => ({ ...r, id: uid(), order: 0 }));
+        groups[i] = { ...g, rows: insertRowsInOrder(g.rows, rows, order) };
       }
+      groups = insertGroupsInOrder(groups, fresh, order);
       return { ...t, groups };
     });
+  }
+  // SKU import into a tab. A code already on the tab is not added again: its existing
+  // row takes what the import says (tag + fixed price as imported — no tag clears it —
+  // and any price the file carries); everything else is added as new rows.
+  function importIntoTab(
+    tabId: string,
+    drafts: GroupDraft[],
+    smart: boolean,
+    patches: Map<string, Partial<PreorderRow>>,
+    order: ImportOrder,
+  ) {
+    const tab = campaign?.tabs.find((t) => t.id === tabId);
+    const existing = new Set(tab?.groups.flatMap((g) => g.rows.map((r) => r.code)).filter(Boolean) ?? []);
+    const fresh = drafts
+      .map((g) => ({ ...g, rows: g.rows.filter((r) => !r.code || !existing.has(r.code)) }))
+      .filter((g) => g.rows.length > 0);
+    if (patches.size > 0 && existing.size > 0) {
+      mutateTab(tabId, (t) => ({
+        ...t,
+        groups: t.groups.map((g) =>
+          g.rows.some((r) => patches.has(r.code))
+            ? { ...g, rows: g.rows.map((r) => (patches.has(r.code) ? { ...r, ...patches.get(r.code) } : r)) }
+            : g,
+        ),
+      }));
+    }
+    if (smart) addGroupsSmart(tabId, fresh, order);
+    else addGroups(tabId, fresh, order);
   }
   function addBlankGroup(tabId: string) {
     addGroups(tabId, [{ name: "New group", rows: [] }]);
@@ -755,6 +826,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                   }))
                 }
                 onToggleLock={() => mutateTab(activeTab.id, (t) => ({ ...t, tiersLocked: !t.tiersLocked }))}
+                fixedCount={tabFixedCount(activeTab)}
                 otherTabs={campaign.tabs.filter((t) => t.id !== activeTab.id).map((t) => ({ name: t.name, locked: !!t.tiersLocked, tiers: (t.tiers ?? []).length }))}
               />
 
@@ -916,10 +988,12 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
       {csvTab && (
         <CsvImportDialog
           tabName={campaign.tabs.find((t) => t.id === csvTab)?.name ?? null}
+          currency={campaign.currency}
           rrpPricelist={campaign.rrpPricelist ?? null}
           partnerPricelist={campaign.partnerPricelist ?? null}
           onClose={() => setCsvTab(null)}
-          onAddGroups={(gs, smart) => (smart ? addGroupsSmart(csvTab, gs) : addGroups(csvTab, gs))}
+          existingCodes={new Set(campaign.tabs.find((t) => t.id === csvTab)?.groups.flatMap((g) => g.rows.map((r) => r.code)) ?? [])}
+          onAddGroups={(gs, smart, patches, order) => importIntoTab(csvTab, gs, smart, patches, order)}
         />
       )}
     </div>
@@ -1267,6 +1341,11 @@ const RowEditor = memo(function RowEditor({
           />
           <input className={cn(inp, "font-medium")} value={row.name} placeholder="Variant name" onChange={(e) => onChange({ name: e.target.value })} />
           <TagEditor tag={row.tag ?? null} color={row.tagColor ?? null} onChange={(patch) => onChange(patch)} />
+          {row.fixedPrice && (
+            <button type="button" onClick={() => onChange({ fixedPrice: false })} title="Fixed price: no volume discount on this variant — click to allow discounts again" className="shrink-0">
+              <FixedPricePill />
+            </button>
+          )}
         </div>
       </td>
       <td className={cell}><input className={cn(inp, "font-mono text-[11.5px] text-muted-foreground focus:text-foreground")} value={row.code} placeholder="SKU" onChange={(e) => onChange({ code: e.target.value })} /></td>
@@ -1278,6 +1357,25 @@ const RowEditor = memo(function RowEditor({
       {/* actions */}
       <td className={cn(cell, "pr-2 whitespace-nowrap")}>
         <div className="flex items-center justify-end gap-0.5">
+          <button
+            type="button"
+            onClick={() => onChange({ fixedPrice: !row.fixedPrice })}
+            className={cn(
+              "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+              row.fixedPrice
+                ? "text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800/70"
+                : "text-muted-foreground/40 hover:text-foreground hover:bg-muted opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100",
+            )}
+            aria-pressed={!!row.fixedPrice}
+            aria-label={row.fixedPrice ? "Fixed price — excluded from volume discounts" : "Gets volume discounts"}
+            title={
+              row.fixedPrice
+                ? "Fixed price: volume discounts never apply to this variant (it still counts towards the thresholds). Click to allow discounts."
+                : "Gets volume discounts — click to make it a fixed price (never discounted)"
+            }
+          >
+            {row.fixedPrice ? <Lock className="w-3.5 h-3.5" /> : <BadgePercent className="w-3.5 h-3.5" />}
+          </button>
           <button
             type="button"
             onClick={() => onChange({ restricted: !row.restricted })}
@@ -1436,6 +1534,30 @@ function GroupSection({
         <span className="text-[12px] text-muted-foreground tabular-nums shrink-0">
           {group.rows.length} variant{group.rows.length === 1 ? "" : "s"}
         </span>
+        {group.rows.length > 0 && (() => {
+          const fixed = group.rows.filter((r) => r.fixedPrice).length;
+          const all = fixed === group.rows.length;
+          return (
+            <button
+              type="button"
+              onClick={() => group.rows.forEach((r) => onUpdateRow(r.id, { fixedPrice: !all }))}
+              className={cn(
+                "inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11.5px] shrink-0 transition-colors",
+                fixed > 0
+                  ? "text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800/70 hover:bg-slate-200/70 dark:hover:bg-slate-700/70"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted opacity-0 group-hover/g:opacity-100 focus-visible:opacity-100",
+              )}
+              title={
+                all
+                  ? "Every variant is a fixed price (no volume discount) — click to allow discounts on all of them"
+                  : `${FIXED_PRICE_HINT.replace("this product", "these variants")} Click to make every variant of this group a fixed price.`
+              }
+            >
+              {fixed > 0 ? <Lock className="w-3 h-3" /> : <BadgePercent className="w-3 h-3" />}
+              {all ? "Fixed price" : fixed > 0 ? `Fixed price · ${fixed}/${group.rows.length}` : "Make fixed price"}
+            </button>
+          );
+        })()}
         <div className="flex-1" />
         <button
           type="button"
@@ -1520,7 +1642,7 @@ const VariantTable = memo(function VariantTable({
             <col className="w-[110px]" />
             <col className="w-[110px]" />
             <col className="w-[110px]" />
-            <col className="w-[76px]" />
+            <col className="w-[104px]" />
           </colgroup>
           <thead>
             <tr className="text-[11px] text-muted-foreground border-b border-border/60 bg-muted/20">
@@ -1569,6 +1691,7 @@ const VariantTable = memo(function VariantTable({
 // every line in this tab drops by the tier's percentage. Tiers never stack — only
 // the highest one reached applies.
 function TierEditor({
+  fixedCount,
   tab,
   currency,
   onChange,
@@ -1584,6 +1707,7 @@ function TierEditor({
   onToggleLock: () => void;
   otherTabs: { name: string; locked: boolean; tiers: number }[];
   otherTabCount: number;
+  fixedCount: number;
 }) {
   const tiers = useMemo(() => tab.tiers ?? [], [tab.tiers]);
   const [copied, setCopied] = useState(false);
@@ -1652,7 +1776,7 @@ function TierEditor({
           </TooltipTrigger>
           <TooltipContent side="bottom" align="start">
             Once the whole order (every tab together) reaches a threshold, every line in <span className="font-medium">{tab.name || "this tab"}</span> drops by that tier&rsquo;s
-            percentage. Only the highest tier reached applies; each tab has its own ladder, but the same order total unlocks them all. Thresholds are compared with the customer's order subtotal in their own price basis — companies on partner prices excl. VAT, individuals on RRP incl. VAT.
+            percentage — except fixed-price variants, which are never discounted but still count towards the thresholds. Only the highest tier reached applies; each tab has its own ladder, but the same order total unlocks them all. Thresholds are compared with the order subtotal on partner prices excl. VAT.
           </TooltipContent>
         </Tooltip>
         <span className="text-[12px] text-muted-foreground tabular-nums">
@@ -1834,6 +1958,15 @@ function TierEditor({
             </div>
           );
         })}
+        {fixedCount > 0 && ladder.length > 0 && (
+          <div className="flex items-start gap-1.5 px-4 py-2 text-[11px] text-muted-foreground bg-muted/20">
+            <Lock className="w-3 h-3 mt-0.5 shrink-0" />
+            <span>
+              {fixedCount} fixed-price variant{fixedCount === 1 ? "" : "s"} on this tab {fixedCount === 1 ? "is" : "are"} never discounted — {fixedCount === 1 ? "it counts" : "they count"} towards
+              the thresholds, and customers see a &ldquo;Fixed price&rdquo; badge on {fixedCount === 1 ? "it" : "them"}.
+            </span>
+          </div>
+        )}
         {warnings.length > 0 && (
           <ul className="px-4 py-2 space-y-0.5 bg-amber-50/60 dark:bg-amber-950/20">
             {warnings.map((w) => (
@@ -2200,43 +2333,99 @@ function ProductPickerDialog({
 // Two ways in, one text box: a dropped / chosen file (.xlsx parsed server-side by
 // lib/sku-xlsx.ts, CSV / text read in the browser) lands its codes in the box next
 // to anything pasted, so what is about to be imported is always visible. Each line
-// is a code with an optional tag (lib/sku-entries.ts). After a run the codes that
-// resolved leave the box and the ones that did not stay, ready to be corrected and
-// sent again.
+// is a code with an optional tag and prices (lib/sku-entries.ts). After a run the
+// codes that resolved leave the box and the ones that did not stay, ready to be
+// corrected and sent again.
 
-// Put each requested tag on the rows it produced: a variant code or EAN tags that
-// variant; a parent code tags every variant it brought in. The tag's campaign colour
-// (if it already has one) comes along.
-function applyImportTags(groups: GroupDraft[], entries: SkuEntry[], colors: Map<string, string>): GroupDraft[] {
-  const tags = new Map<string, string>();
+// Put each requested tag and price on the rows it produced: a variant code or EAN sets
+// that variant; a parent code sets every variant it brought in. The tag's campaign
+// colour (if it already has one) comes along. An imported price replaces the resolved
+// one (partner price = net, RRP = gross); a new partner price drops any discounted price.
+//
+// Also returns, per imported code, the patch for a row that is ALREADY on the tab
+// (re-import): the tag and fixed-price flag exactly as the import gives them — no tag
+// in the import clears the old one, so what the dialog listed is what the row shows —
+// and a price only when the import carries one.
+function applyImportEntries(
+  groups: GroupDraft[],
+  entries: SkuEntry[],
+  colors: Map<string, string>,
+): { groups: GroupDraft[]; patches: Map<string, Partial<PreorderRow>> } {
+  const byKey = new Map<string, SkuEntry>();
   for (const e of entries) {
     const k = skuKey(e.code);
-    if (k && e.tag) tags.set(k, e.tag);
+    if (k) byKey.set(k, e);
   }
-  if (tags.size === 0) return groups;
-  return groups.map((g) => {
-    const groupTag = tags.get(skuKey(g.parentCode) ?? "") ?? null;
+  const patches = new Map<string, Partial<PreorderRow>>();
+  const out = groups.map((g) => {
+    const parent = byKey.get(skuKey(g.parentCode) ?? "");
     return {
       ...g,
       rows: g.rows.map((r) => {
-        const tag = tags.get(skuKey(r.code) ?? "") ?? tags.get(skuKey(r.ean) ?? "") ?? groupTag;
-        if (!tag) return r;
-        return { ...r, tag, tagColor: colors.get(tagLabel(tag)?.toUpperCase() ?? "") ?? null };
+        const own = byKey.get(skuKey(r.code) ?? "") ?? byKey.get(skuKey(r.ean) ?? "");
+        const tag = own?.tag ?? parent?.tag ?? null;
+        const partnerPrice = own?.partnerPrice ?? parent?.partnerPrice ?? null;
+        const rrp = own?.rrp ?? parent?.rrp ?? null;
+        const fixedPrice = !!(own?.fixedPrice || parent?.fixedPrice);
+        let next = r;
+        if (tag) next = { ...next, tag, tagColor: colors.get(tagLabel(tag)?.toUpperCase() ?? "") ?? null };
+        if (partnerPrice != null) next = { ...next, partnerPrice, discountedPrice: null };
+        if (rrp != null) next = { ...next, rrp };
+        if (fixedPrice) next = { ...next, fixedPrice: true };
+        if (next.code) {
+          const patch: Partial<PreorderRow> = { tag: next.tag ?? null, tagColor: next.tag ? (next.tagColor ?? null) : null, fixedPrice };
+          if (partnerPrice != null) Object.assign(patch, { partnerPrice, discountedPrice: null });
+          if (rrp != null) patch.rrp = rrp;
+          patches.set(next.code, patch);
+        }
+        return next;
       }),
     };
   });
+  return { groups: out, patches };
+}
+
+// The resolve API answers in no particular order. Put the groups and their variants
+// back in the order of the imported lines: a row sits at the line of its own code /
+// EAN, else of its parent code (a parent line brings all its variants); a group at its
+// first row. Returns the per-code positions for placing rows among existing ones.
+function sortByImport(groups: GroupDraft[], entries: SkuEntry[]): { groups: GroupDraft[]; order: ImportOrder } {
+  const line = new Map<string, number>();
+  entries.forEach((e, i) => {
+    const k = skuKey(e.code);
+    if (k && !line.has(k)) line.set(k, i);
+  });
+  const at = (v: string | null | undefined) => line.get(skuKey(v) ?? "") ?? Infinity;
+  const order: ImportOrder = new Map();
+  const sorted = groups
+    .map((g) => {
+      const parent = at(g.parentCode);
+      const rows = g.rows
+        .map((r, j) => ({ r, p: Math.min(at(r.code), at(r.ean)), j }))
+        .map((x) => ({ ...x, p: x.p === Infinity ? parent : x.p }))
+        .sort((a, b) => a.p - b.p || a.j - b.j);
+      // Fractions keep a parent line's variants in their catalogue order.
+      rows.forEach((x) => x.r.code && order.set(x.r.code, x.p + x.j / 1000));
+      return { g: { ...g, rows: rows.map((x) => x.r) }, p: rows.length ? rows[0].p : Infinity };
+    })
+    .map((x, i) => ({ ...x, i }))
+    .sort((a, b) => a.p - b.p || a.i - b.i)
+    .map((x) => x.g);
+  return { groups: sorted, order };
 }
 
 const SKU_FILE_ACCEPT = ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.csv,text/csv,text/plain";
 
 function CsvImportDialog({
-  tabName, rrpPricelist, partnerPricelist, onClose, onAddGroups,
+  tabName, currency, rrpPricelist, partnerPricelist, existingCodes, onClose, onAddGroups,
 }: {
+  existingCodes: Set<string>;
   tabName: string | null;
+  currency: string;
   rrpPricelist: string | null;
   partnerPricelist: string | null;
   onClose: () => void;
-  onAddGroups: (gs: GroupDraft[], smart: boolean) => void;
+  onAddGroups: (gs: GroupDraft[], smart: boolean, patches: Map<string, Partial<PreorderRow>>, order: ImportOrder) => void;
 }) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"file" | "paste">("file");
@@ -2247,13 +2436,15 @@ function CsvImportDialog({
   const [dragging, setDragging] = useState(false);
   const [file, setFile] = useState<{ name: string; codes: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ variants: number; products: number; notFound: string[] } | null>(null);
+  const [result, setResult] = useState<{ variants: number; products: number; updated: number; notFound: string[] } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { colors } = useContext(TagColorsContext);
   const entries = useMemo(() => parseSkuEntries(text), [text]);
   const codes = useMemo(() => entries.map((e) => e.code), [entries]);
   const tagged = entries.filter((e) => e.tag).length;
+  const priced = entries.filter((e) => e.partnerPrice != null || e.rrp != null).length;
+  const fixedEntries = entries.filter((e) => e.fixedPrice).length;
   const notFound = useMemo(() => new Set(result?.notFound ?? []), [result]);
 
   async function loadFile(f: File) {
@@ -2316,11 +2507,17 @@ function CsvImportDialog({
       });
       const data = (await r.json().catch(() => null)) as { groups?: GroupDraft[]; notFound?: string[]; error?: string } | null;
       if (!r.ok || !data) throw new Error(data?.error ?? `The catalogue lookup failed (${r.status}). Try again.`);
-      const groups = applyImportTags(data.groups ?? [], entries, colors);
+      const applied = applyImportEntries(data.groups ?? [], entries, colors);
+      const { groups, order } = sortByImport(applied.groups, entries);
+      const patches = applied.patches;
       const missingCodes = data.notFound ?? [];
-      if (groups.length > 0) onAddGroups(groups, smart);
-      const products = smart ? smartGroup(groups).length : groups.length;
-      setResult({ variants: groups.reduce((n, g) => n + g.rows.length, 0), products, notFound: missingCodes });
+      if (groups.length > 0) onAddGroups(groups, smart, patches, order);
+      // Codes already on the tab update their row instead of being added again.
+      const isExisting = (code: string) => !!code && existingCodes.has(code);
+      const fresh = groups.map((g) => ({ ...g, rows: g.rows.filter((r) => !isExisting(r.code)) })).filter((g) => g.rows.length > 0);
+      const updated = new Set(groups.flatMap((g) => g.rows.map((r) => r.code)).filter(isExisting)).size;
+      const products = smart ? smartGroup(fresh).length : fresh.length;
+      setResult({ variants: fresh.reduce((n, g) => n + g.rows.length, 0), products, updated, notFound: missingCodes });
       // What resolved is in the sheet now; what did not stays in the list to be fixed.
       const missing = new Set(missingCodes);
       setText(formatSkuEntries(entries.filter((e) => missing.has(e.code))));
@@ -2332,7 +2529,7 @@ function CsvImportDialog({
     }
   }
 
-  const added = result !== null && result.variants > 0;
+  const added = result !== null && (result.variants > 0 || result.updated > 0);
   const isEan = (c: string) => /^\d{8,14}$/.test(c);
 
   return (
@@ -2342,7 +2539,7 @@ function CsvImportDialog({
           <DialogTitle className="text-[15px]">Import products</DialogTitle>
           <DialogDescription className="text-[12px] leading-relaxed">
             Add to {tabName ? <span className="font-medium text-foreground">{tabName}</span> : "this tab"} by SKU or EAN — each code lands under its
-            parent product, optionally with a tag.
+            parent product, optionally with a tag and prices.
           </DialogDescription>
         </DialogHeader>
 
@@ -2359,8 +2556,18 @@ function CsvImportDialog({
               <span>
                 {added ? (
                   <>
-                    Added <span className="font-semibold">{result.variants} variant{result.variants === 1 ? "" : "s"}</span> in {result.products} product
-                    {result.products === 1 ? "" : "s"}.
+                    {result.variants > 0 && (
+                      <>
+                        Added <span className="font-semibold">{result.variants} variant{result.variants === 1 ? "" : "s"}</span> in {result.products} product
+                        {result.products === 1 ? "" : "s"}.{" "}
+                      </>
+                    )}
+                    {result.updated > 0 && (
+                      <>
+                        Updated <span className="font-semibold">{result.updated}</span> already on this tab (tag, fixed price
+                        {" "}and any imported prices).
+                      </>
+                    )}
                   </>
                 ) : (
                   "Nothing was added."
@@ -2426,7 +2633,7 @@ function CsvImportDialog({
                         : "Drop a spreadsheet, or click to choose"}
                 </p>
                 <p className="text-[12px] text-muted-foreground mt-0.5">
-                  {file ? "Drop another file to add more." : ".xlsx or .csv with a SKU / EAN column and an optional Tag column"}
+                  {file ? "Drop another file to add more." : ".xlsx or .csv with a SKU / EAN column and optional Tag, Partner price, RRP and Fixed price columns"}
                 </p>
               </div>
               <input
@@ -2447,7 +2654,7 @@ function CsvImportDialog({
               }}
               rows={6}
               spellCheck={false}
-              placeholder={"P07260003140, NEW\n4262434064904\tSALE\nP07260003145"}
+              placeholder={"P07260003140, NEW, 82.50, RRP 129.90\n4262434064904\tSALE\t82,50\nP07260003145"}
               className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-[12px] font-mono leading-relaxed resize-y focus:outline-none focus:ring-[3px] focus:ring-lime-500/25 focus:border-lime-500/60"
             />
           )}
@@ -2470,31 +2677,44 @@ function CsvImportDialog({
           {showFormat && (
             <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2.5 text-[12px]">
               <div className="rounded-md border border-border bg-background overflow-hidden text-[11.5px]">
-                <div className="grid grid-cols-[1.4fr_1fr] bg-muted/50 border-b border-border font-semibold text-foreground">
+                <div className="grid grid-cols-[1.5fr_0.9fr_1fr_0.8fr] bg-muted/50 border-b border-border font-semibold text-foreground">
                   <span className="px-3 py-1.5 border-r border-border">SKU / EAN</span>
-                  <span className="px-3 py-1.5">
-                    Tag <span className="font-normal text-muted-foreground">(optional)</span>
-                  </span>
+                  <span className="px-3 py-1.5 border-r border-border">Tag</span>
+                  <span className="px-3 py-1.5 border-r border-border">Partner price</span>
+                  <span className="px-3 py-1.5">RRP</span>
                 </div>
                 {[
-                  ["P07260003140", "NEW"],
-                  ["4262434064904", "SALE"],
-                  ["P07260003145", ""],
-                ].map(([c, t]) => (
-                  <div key={c} className="grid grid-cols-[1.4fr_1fr] border-b last:border-b-0 border-border/60 font-mono text-muted-foreground">
-                    <span className="px-3 py-1 border-r border-border/60">{c}</span>
-                    <span className="px-3 py-1">{t ? <TagPill tag={t} color={colors.get(t) ?? null} /> : <span className="opacity-50">—</span>}</span>
+                  ["P07260003140", "NEW", "82.50", "129.90"],
+                  ["4262434064904", "SALE", "82.50", ""],
+                  ["P07260003145", "", "", ""],
+                ].map(([c, t, pp, rrp]) => (
+                  <div key={c} className="grid grid-cols-[1.5fr_0.9fr_1fr_0.8fr] border-b last:border-b-0 border-border/60 font-mono text-muted-foreground">
+                    <span className="px-3 py-1 border-r border-border/60 truncate">{c}</span>
+                    <span className="px-3 py-1 border-r border-border/60">{t ? <TagPill tag={t} color={colors.get(t) ?? null} /> : <span className="opacity-50">—</span>}</span>
+                    <span className="px-3 py-1 border-r border-border/60 tabular-nums">{pp || <span className="opacity-50">—</span>}</span>
+                    <span className="px-3 py-1 tabular-nums">{rrp || <span className="opacity-50">—</span>}</span>
                   </div>
                 ))}
               </div>
               <ul className="space-y-1 text-muted-foreground leading-relaxed list-disc pl-4">
                 <li>
-                  <span className="text-foreground font-medium">Spreadsheet:</span> keep the header row — columns are found by name (SKU / EAN, Tag), in any order.
+                  <span className="text-foreground font-medium">Spreadsheet:</span> keep the header row — columns are found by name (SKU / EAN, Tag, Partner price, RRP), in any order. Tag and prices are optional.
                 </li>
                 <li>
-                  <span className="text-foreground font-medium">Paste:</span> one code per line; the tag goes after a comma, tab or semicolon.
+                  <span className="text-foreground font-medium">Paste:</span> one code per line; tag and prices go after a tab, semicolon or comma. The first amount is the partner price, the second the RRP — or label it: <span className="font-mono">RRP 129.90</span>. Separate with tabs or semicolons to use decimal commas.
                 </li>
-                <li>A parent product&rsquo;s code imports all its variants and tags each one.</li>
+                <li>
+                  <span className="text-foreground font-medium">Fixed price:</span> an <span className="font-mono">x</span> in the Fixed price column (or{" "}
+                  <span className="font-mono">FIXED</span> on a pasted line) means volume discounts never apply to that variant.
+                </li>
+                <li>
+                  <span className="text-foreground font-medium">Prices:</span> partner price is net (excl. VAT), RRP gross (incl. VAT). They replace the price-list prices; leave empty to keep those. Re-price overwrites them later.
+                </li>
+                <li>A parent product&rsquo;s code imports all its variants and applies its tag and prices to each one.</li>
+                <li>
+                  <span className="text-foreground font-medium">Already on this tab?</span> The code isn&rsquo;t added twice — its row is updated: the tag
+                  and fixed price become what you import (no tag removes the old one); prices change only where you give one.
+                </li>
               </ul>
             </div>
           )}
@@ -2513,6 +2733,8 @@ function CsvImportDialog({
                 <span className="font-medium text-foreground tabular-nums">
                   {entries.length} code{entries.length === 1 ? "" : "s"}
                   {tagged > 0 && <span className="font-normal text-muted-foreground"> · {tagged} tagged</span>}
+                  {priced > 0 && <span className="font-normal text-muted-foreground"> · {priced} priced</span>}
+                  {fixedEntries > 0 && <span className="font-normal text-muted-foreground"> · {fixedEntries} fixed price</span>}
                   {notFound.size > 0 && <span className="font-normal text-amber-700 dark:text-amber-300"> · {notFound.size} not found</span>}
                 </span>
                 <div className="flex items-center gap-3">
@@ -2543,6 +2765,14 @@ function CsvImportDialog({
                       {missing && <span className="text-[11px] text-amber-700 dark:text-amber-300 shrink-0">not found</span>}
                       <span className="flex-1" />
                       {e.tag && <TagPill tag={e.tag} color={colors.get(tagLabel(e.tag)?.toUpperCase() ?? "") ?? null} />}
+                      {e.fixedPrice && <FixedPricePill />}
+                      {(e.partnerPrice != null || e.rrp != null) && (
+                        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                          {e.partnerPrice != null && <span className="text-foreground font-medium">{fmtMoney(e.partnerPrice, currency)}</span>}
+                          {e.partnerPrice != null && e.rrp != null && " · "}
+                          {e.rrp != null && <>RRP {fmtMoney(e.rrp, currency)}</>}
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={() => removeEntry(e.code)}

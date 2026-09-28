@@ -31,43 +31,100 @@ export function splitVariantName(name: string): { base: string; suffix: string }
   return base ? { base, suffix } : null;
 }
 
-const key = (s: string) => s.trim().toLowerCase();
-const bySuffix = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+// Family key: case, spacing and the space before a "%" don't matter — the catalogue
+// names a group "Patrik Mast SDM 80%" while Metakocka writes "Patrik Mast SDM 80 % 490".
+export function familyKey(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/\s+%/g, "%")
+    .replace(/\s+/g, " ")
+    .replace(/[\s\-–—,/]+$/, "");
+}
 
-// `existingNames` = group names already on the tab: a lone product whose base matches
-// one is renamed to that group's name so the caller can append it there.
-export function smartGroup(drafts: SmartGroupDraft[], existingNames: string[] = []): SmartGroupDraft[] {
-  const existing = new Map(existingNames.map((n) => [key(n), n]));
+// The family keys a group answers to: its own name, and the base of every variant
+// name in it ("Patrik Mast SDM 80 % 380" → "patrik mast sdm 80%").
+function groupFamilyKeys(g: { name: string; rows: { name: string }[] }): string[] {
+  const keys = new Set<string>([familyKey(g.name)]);
+  for (const r of g.rows) {
+    const split = splitVariantName(r.name);
+    if (split) keys.add(familyKey(split.base));
+  }
+  keys.delete("");
+  return Array.from(keys);
+}
+
+type ExistingGroup = string | { name: string; rows: { name: string }[] };
+
+// `existing` = the groups already on the tab (names, or name + rows): a lone product
+// whose family matches one is renamed to that group's exact name so the caller can
+// append it there. A lone product whose family matches a multi-variant group of THIS
+// import joins that group (a Metakocka-only size of a catalogue product lands with its
+// siblings). Otherwise lone products sharing a base merge into one group. Order is the
+// input order throughout — the caller passes drafts in spreadsheet order.
+export function smartGroup(drafts: SmartGroupDraft[], existing: ExistingGroup[] = []): SmartGroupDraft[] {
+  const existingByKey = new Map<string, string>();
+  for (const e of existing) {
+    const g = typeof e === "string" ? { name: e, rows: [] } : e;
+    for (const k of groupFamilyKeys(g)) if (!existingByKey.has(k)) existingByKey.set(k, g.name);
+  }
+  // Multi-variant groups of this import, by family.
+  const multiByKey = new Map<string, SmartGroupDraft>();
+  for (const d of drafts) {
+    if (d.rows.length < 2) continue;
+    for (const k of groupFamilyKeys(d)) if (!multiByKey.has(k)) multiByKey.set(k, d);
+  }
+
+  const lone = (d: SmartGroupDraft) => {
+    if (d.rows.length !== 1) return null;
+    const split = splitVariantName(d.name);
+    return split ? { ...split, k: familyKey(split.base) } : null;
+  };
+  const withLabel = (d: SmartGroupDraft, suffix: string) => ({ ...d.rows[0], variantLabel: d.rows[0].variantLabel || suffix });
+
+  // Lone products that join a multi-variant group of this import.
+  const joins = new Map<SmartGroupDraft, SmartGroupDraft["rows"]>();
+  const joined = new Set<SmartGroupDraft>();
+  for (const d of drafts) {
+    const l = lone(d);
+    const target = l ? multiByKey.get(l.k) : undefined;
+    if (!l || !target || target === d) continue;
+    joins.set(target, [...(joins.get(target) ?? []), withLabel(d, l.suffix)]);
+    joined.add(d);
+  }
+
   const buckets = new Map<string, { draft: SmartGroupDraft; base: string; suffix: string }[]>();
   for (const d of drafts) {
-    if (d.rows.length !== 1) continue;
-    const split = splitVariantName(d.name);
-    if (!split) continue;
-    const list = buckets.get(key(split.base)) ?? [];
-    list.push({ draft: d, ...split });
-    buckets.set(key(split.base), list);
+    if (joined.has(d)) continue;
+    const l = lone(d);
+    if (!l) continue;
+    buckets.set(l.k, [...(buckets.get(l.k) ?? []), { draft: d, base: l.base, suffix: l.suffix }]);
   }
 
   const out: SmartGroupDraft[] = [];
   const emitted = new Set<string>();
   for (const d of drafts) {
-    const split = d.rows.length === 1 ? splitVariantName(d.name) : null;
-    const k = split ? key(split.base) : null;
-    const bucket = k ? buckets.get(k) : undefined;
-    const joinsExisting = k != null && existing.has(k);
-    if (!split || !bucket || (bucket.length < 2 && !joinsExisting)) {
+    if (joined.has(d)) continue;
+    const extra = joins.get(d);
+    if (extra) {
+      out.push({ ...d, rows: [...d.rows, ...extra] });
+      continue;
+    }
+    const l = lone(d);
+    const bucket = l ? buckets.get(l.k) : undefined;
+    const joinsExisting = l != null && existingByKey.has(l.k);
+    if (!l || !bucket || (bucket.length < 2 && !joinsExisting)) {
       out.push(d);
       continue;
     }
-    if (emitted.has(k!)) continue;
-    emitted.add(k!);
-    const members = [...bucket].sort((a, b) => bySuffix(a.suffix, b.suffix));
+    if (emitted.has(l.k)) continue;
+    emitted.add(l.k);
     out.push({
-      name: existing.get(k!) ?? members[0].base,
+      name: existingByKey.get(l.k) ?? bucket[0].base,
       parentCode: null,
-      description: members.map((m) => m.draft.description).find(Boolean) ?? null,
-      images: Array.from(new Set(members.flatMap((m) => m.draft.images ?? []))).slice(0, 8),
-      rows: members.map((m) => ({ ...m.draft.rows[0], variantLabel: m.draft.rows[0].variantLabel || m.suffix })),
+      description: bucket.map((m) => m.draft.description).find(Boolean) ?? null,
+      images: Array.from(new Set(bucket.flatMap((m) => m.draft.images ?? []))).slice(0, 8),
+      rows: bucket.map((m) => withLabel(m.draft, m.suffix)),
     });
   }
   return out;

@@ -211,7 +211,10 @@ async function buildOrderInput(
 
   const tierNotes = tabTotals
     .filter((t) => t.discount > 0)
-    .map((t) => `${t.tabName}: ${t.tier?.name || "volume discount"} -${t.discountPct}%`);
+    .map(
+      (t) =>
+        `${t.tabName}: ${t.tier?.name || "volume discount"} -${t.discountPct}%${t.fixedQty > 0 ? ` (${t.fixedQty} fixed-price items not discounted)` : ""}`,
+    );
   const vatNote =
     pricing.basis === "rrp"
       ? `VAT: ${CUSTOMER_KIND_LABELS[pricing.kind]}, RRP incl. ${fmtVatRate(pricing.vatRate)} VAT (${pricing.countryIso ?? "?"}, ${VAT_SOURCE_LABELS[pricing.vatSource].toLowerCase()})`
