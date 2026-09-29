@@ -56,6 +56,7 @@ import {
   ImagePlus,
   X,
   ClipboardPaste,
+  DatabaseZap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
@@ -93,6 +94,7 @@ import { VatModal } from "./vat-modal";
 import type { VatOverride } from "@/lib/pricing";
 import type { MkPricelist } from "@/types/documents";
 import { smartGroup, withSmartLabels } from "@/lib/preorder-smart-group";
+import { refreshTabs, type ProductRefreshInfo, type RefreshSummary } from "@/lib/preorder-refresh";
 import { formatSkuEntries, parseSkuEntries, skuKey, type SkuEntry } from "@/lib/sku-entries";
 import { ImageManagerDialog } from "./image-modal";
 import { TagPill, TAG_COLORS, isHexColor } from "@/app/preorder/tag-pill";
@@ -190,6 +192,10 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
   const [pricelists, setPricelists] = useState<MkPricelist[]>([]);
   const [repricing, setRepricing] = useState(false);
   const [repricedAt, setRepricedAt] = useState<number | null>(null);
+  // Codes on the sheet that Metakocka doesn't have (found by the last re-price).
+  const [notInMk, setNotInMk] = useState<string[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshSummary, setRefreshSummary] = useState<RefreshSummary | null>(null);
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
 
   // Rows with a price gap: no partner price (everyone orders at it — the sheet falls
@@ -540,8 +546,11 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
         }),
       });
       const data = await res.json();
-      const prices: Record<string, { rrp: number | null; partnerPrice: number | null; taxCode?: string | null; ean?: string | null }> =
-        data.prices ?? {};
+      const prices: Record<
+        string,
+        { rrp: number | null; partnerPrice: number | null; taxCode?: string | null; ean?: string | null; name?: string; inMk?: boolean }
+      > = data.prices ?? {};
+      setNotInMk(Object.entries(prices).filter(([, p]) => p.inMk === false).map(([code]) => code));
       mutate((c) => ({
         ...c,
         tabs: c.tabs.map((t) => ({
@@ -551,7 +560,16 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
             rows: g.rows.map((row) => {
               if (row.source !== "catalogue") return row;
               const p = prices[row.code];
-              return p ? { ...row, rrp: p.rrp, partnerPrice: p.partnerPrice, taxCode: p.taxCode ?? row.taxCode ?? null, ean: row.ean || p.ean || null } : row;
+              if (!p) return row;
+              // Metakocka is the source of truth for name + EAN (absent = MK unreadable).
+              return {
+                ...row,
+                rrp: p.rrp,
+                partnerPrice: p.partnerPrice,
+                taxCode: p.taxCode ?? row.taxCode ?? null,
+                ...(p.name ? { name: p.name } : {}),
+                ...(p.ean !== undefined ? { ean: p.ean } : {}),
+              };
             }),
           })),
         })),
@@ -565,6 +583,37 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
       setRepricing(false);
     }
   }, [campaign, mutate, campaignId]);
+
+  // "Refresh products": a migration of the rows already on the sheet — SKU, name, EAN
+  // from Metakocka, images from the catalogue, automatic labels and smart grouping.
+  // Prices, tags and every other row setting stay as they are (lib/preorder-refresh.ts).
+  const refreshProducts = useCallback(async () => {
+    if (!campaign) return;
+    const rows: { code: string; ean: string | null }[] = [];
+    for (const t of campaign.tabs)
+      for (const g of t.groups)
+        for (const r of g.rows) if (r.source === "catalogue" && r.code) rows.push({ code: r.code, ean: r.ean ?? null });
+    if (rows.length === 0) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/preorder/products/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows }),
+      });
+      const data = (await res.json().catch(() => null)) as { info?: Record<string, ProductRefreshInfo>; notInMk?: string[]; error?: string } | null;
+      if (!res.ok || !data?.info) throw new Error(data?.error ?? `Refresh failed (${res.status}).`);
+      const { tabs, summary } = refreshTabs(campaign.tabs, data.info, data.notInMk ?? []);
+      mutate((c) => ({ ...c, tabs }));
+      setNotInMk(summary.notInMk);
+      setRefreshSummary(summary);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Refresh failed");
+    } finally {
+      setRefreshing(false);
+    }
+  }, [campaign, mutate]);
 
   const activeTab = useMemo(
     () => campaign?.tabs.find((t) => t.id === activeTabId) ?? null,
@@ -681,6 +730,17 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
           >
             {repricing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
             {repricedAt && !repricing ? "Repriced ✓" : "Re-price all tabs"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 bg-background"
+            onClick={refreshProducts}
+            disabled={refreshing}
+            title="Bring every catalogue row back to Metakocka (SKU, name, EAN) and the catalogue (images), re-derive labels and merge product families. Prices, tags and row settings are not touched."
+          >
+            {refreshing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <DatabaseZap className="w-3.5 h-3.5" />}
+            Refresh products
           </Button>
           <Button
             variant="outline"
@@ -895,6 +955,30 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
           )}
         </main>
       </div>
+
+      {refreshSummary && (
+        <div className="fixed bottom-4 right-4 z-30 max-w-sm rounded-lg border border-lime-500/30 bg-lime-50 dark:bg-lime-950/60 px-3 py-2 text-[12px] text-lime-900 dark:text-lime-100 shadow">
+          <div className="flex items-start justify-between gap-3">
+            <span className="font-medium">Products refreshed from Metakocka</span>
+            <button type="button" onClick={() => setRefreshSummary(null)} className="opacity-60 hover:opacity-100">×</button>
+          </div>
+          <div className="mt-1 tabular-nums">
+            {refreshSummary.skus} SKUs · {refreshSummary.names} names · {refreshSummary.eans} EANs · {refreshSummary.images} images ·{" "}
+            {refreshSummary.labels} labels · {refreshSummary.merged} groups merged
+          </div>
+        </div>
+      )}
+      {notInMk.length > 0 && (
+        <div className="fixed bottom-4 left-4 z-30 max-w-md rounded-lg border border-amber-500/30 bg-amber-50 dark:bg-amber-950/60 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-200 shadow">
+          <div className="flex items-start justify-between gap-3">
+            <span className="font-medium">
+              {notInMk.length} SKU{notInMk.length === 1 ? " is" : "s are"} not in Metakocka — remove {notInMk.length === 1 ? "it" : "them"} from the sheet:
+            </span>
+            <button type="button" onClick={() => setNotInMk([])} className="text-amber-700/70 hover:text-amber-900 dark:hover:text-amber-100">×</button>
+          </div>
+          <div className="mt-1 font-mono break-words">{notInMk.join(", ")}</div>
+        </div>
+      )}
 
       {error && campaign && (
         <div className="fixed bottom-4 right-4 z-30 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive shadow">{error}</div>

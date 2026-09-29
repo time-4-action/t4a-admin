@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { searchProducts, getProduct, getCatalogueCodes } from "@/lib/product-api";
-import { searchMkSalesProducts } from "@/lib/metakocka";
+import { getMkProductIndex, searchMkSalesProducts } from "@/lib/metakocka";
 import type { CatalogueProduct, ProductSearchHit } from "@/types/product";
 
 export const runtime = "nodejs";
@@ -23,15 +23,18 @@ const MAX_MK_CANDIDATES = 10;
 // GET /api/admin/preorder/products/search?q=... — search the catalogue and return only
 // PARENT products. Child/variant matches are collapsed to their parent, so each parent
 // appears once (add it to expand into a group of variants via /products/resolve).
-// Metakocka-only products are appended after the catalogue hits.
+// Metakocka-only products are appended after the catalogue hits. Metakocka is the source
+// of truth: a catalogue product MK doesn't have (neither it nor any of its variants) is
+// not offered at all.
 export async function GET(request: Request) {
   const q = new URL(request.url).searchParams.get("q")?.trim() ?? "";
   if (q.length < 2) return NextResponse.json({ candidates: [] });
 
-  const [res, mkHits, catalogueCodes] = await Promise.all([
+  const [res, mkHits, catalogueCodes, mkIndex] = await Promise.all([
     searchProducts(q),
     searchMkSalesProducts(q, 50),
     getCatalogueCodes(),
+    getMkProductIndex(),
   ]);
   const hits = res.ok ? ((res.data ?? []) as ProductSearchHit[]) : [];
 
@@ -54,6 +57,8 @@ export async function GET(request: Request) {
       if (!pr.ok || !pr.data) return;
       const p = pr.data as CatalogueProduct;
       if (byParent.has(p.code)) return;
+      const inMk = !mkIndex || [p, ...(p.child_products ?? [])].some((n) => mkIndex.has(n.code));
+      if (!inMk) return;
       byParent.set(p.code, {
         code: p.code,
         name: p.product_name,

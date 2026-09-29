@@ -45,6 +45,7 @@ import {
   TabBar,
   SheetContextBar,
   FillModeNav,
+  DiscountStatus,
   type FillMode,
   PreorderGridTab,
   PreorderGuidedTab,
@@ -683,6 +684,9 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
             </div>
           </div>
           <div className="flex-1" />
+          {!locked && (
+            <DiscountStatus tab={activeTab} tabs={sheet.tabs} quantities={quantities} currency={currency} pricing={sheet.pricing} className="shrink-0" />
+          )}
           {!locked && (
             <Button
               variant="ghost"

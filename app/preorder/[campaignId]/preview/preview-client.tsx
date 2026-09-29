@@ -40,6 +40,7 @@ import {
   TabBar,
   SheetContextBar,
   FillModeNav,
+  DiscountStatus,
   PreorderGridTab,
   PreorderGuidedTab,
   OrderSummaryPanel,
@@ -288,6 +289,7 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
         }
         actions={
           <>
+            <DiscountStatus tab={activeTab} tabs={campaign.tabs} quantities={quantities} currency={currency} pricing={campaign.pricing} className="shrink-0" />
             {Object.keys(quantities).length > 0 && (
               <Button variant="ghost" size="sm" className="h-8" onClick={() => setQuantities({})}>
                 <RotateCcw className="w-3.5 h-3.5" /> Reset

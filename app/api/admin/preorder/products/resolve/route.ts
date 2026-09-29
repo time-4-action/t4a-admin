@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { getProduct, catalogueCodeForEan, normalizeEan, searchProducts } from "@/lib/product-api";
 import {
   getMkBarcodes,
+  getMkProductIndex,
   getMkProductPrices,
   getMkSalesProduct,
   invalidateMkProductCaches,
+  type MkSalesProduct,
   pickMkListGrossPrice,
   pickMkListNetPrice,
   productTaxCode,
@@ -193,13 +195,45 @@ async function applyMkPrices(groups: ProductGroupDraft[], sel: PriceListSelectio
     }
 }
 
+type MkIndex = Map<string, MkSalesProduct>;
+
+// Metakocka is the source of truth for which products exist and for their SKU, name
+// and EAN. The catalogue (built from PNV) contributes only images, the description and
+// the family grouping — it also carries stale products MK doesn't have (old "P1626…"
+// LISA codes), which must never reach a sheet.
+
+// A catalogue hit counts only when MK has it — for a parent, when MK has it or one of
+// its variants. `index` null = MK unavailable: nothing can be verified, keep it.
+function catalogueHitInMk(code: string, parent: CatalogueProduct, index: MkIndex | null): boolean {
+  if (!index || index.has(code)) return true;
+  return code === parent.code && (parent.child_products ?? []).some((c) => index.has(c.code));
+}
+
+// Rewrite a catalogue group with MK's data: rows MK doesn't have are dropped, as are
+// deactivated ones nobody asked for by code; name and EAN are MK's. Labels are
+// re-derived from MK's names. null = nothing left.
+function applyMkMaster(g: ProductGroupDraft, index: MkIndex, requested: Set<string>): ProductGroupDraft | null {
+  const kept = g.rows.flatMap((r) => {
+    const p = index.get(r.code);
+    if (!p || (!p.activated && !requested.has(r.code))) return [];
+    return [{ row: r, p }];
+  });
+  if (kept.length === 0) return null;
+  const multi = kept.length > 1;
+  const rows = withSmartLabels(
+    kept.map(({ row, p }) => ({ ...row, name: p.name, ean: p.barcode ?? null, variantLabel: multi ? p.name : null })),
+  );
+  // A lone product is named as in MK; a family keeps the catalogue's family name.
+  return { ...g, name: g.rows.length === 1 ? rows[0].name : g.name, rows };
+}
+
 // Look a SKU or EAN up in the catalogue. /api/product/:code knows codes only, so an EAN
-// is first turned into its product code, trying in order: the catalogue's EAN index,
-// the catalogue search (which matches EANs the index may not hold), and the Metakocka
-// barcode — the catalogue misses the EAN of many variants, and without this last step
-// such an EAN fell through to a bare Metakocka-only row with no images, although the
-// product is in the catalogue under its code. `code` is the matched parent / variant
-// code (never the EAN), so a variant EAN keeps just that variant.
+// is first turned into its product code, trying in order: the Metakocka barcode, the
+// catalogue's EAN index, and the catalogue search (which matches EANs the index may not
+// hold). The catalogue misses the EAN of many variants; without the MK step such an EAN
+// fell through to a bare Metakocka-only row with no images, although the product is in
+// the catalogue under its code. `code` is the matched parent / variant code (never the
+// EAN), so a variant EAN keeps just that variant.
 async function lookupCatalogue(input: string, opts: { skipSearch?: boolean } = {}) {
   const res = await getProduct(input);
   if (res.ok && res.data) return { res, code: input };
@@ -211,14 +245,16 @@ async function lookupCatalogue(input: string, opts: { skipSearch?: boolean } = {
     return r.ok && r.data ? { res: r, code } : null;
   };
 
+  // Metakocka owns the barcodes, so an EAN it knows resolves to ITS code only. The
+  // catalogue keeps stale duplicates under the same EANs (old "P1626…" LISA codes next
+  // to the real "L1226…" ones, some with a sibling's EAN) — asking its EAN index first
+  // imported the wrong SKU. When MK's code isn't in the catalogue the caller falls back
+  // to the Metakocka-only row, which is the right product.
+  const mk = await getMkSalesProduct(input).catch(() => null);
+  if (mk) return (await attempt(mk.code)) ?? { res, code: input };
+
   const hit = await attempt(await catalogueCodeForEan(input));
   if (hit) return hit;
-
-  // Metakocka's barcode index is cached in memory — cheap, so it goes before the
-  // catalogue search (one HTTP call per EAN, the last resort).
-  const mk = await getMkSalesProduct(input).catch(() => null);
-  const byMk = await attempt(mk?.code);
-  if (byMk) return byMk;
 
   const ean = normalizeEan(input);
   if (ean && !opts.skipSearch) {
@@ -260,9 +296,11 @@ export async function POST(request: Request) {
   // ── Single parent ──
   if (body.code) {
     const code = body.code.trim();
-    const { res } = await lookupCatalogue(code);
-    if (res.ok && res.data) {
-      const group = expand(res.data as CatalogueProduct, sel);
+    const [{ res, code: hitCode }, index] = await Promise.all([lookupCatalogue(code), getMkProductIndex()]);
+    if (res.ok && res.data && catalogueHitInMk(hitCode, res.data as CatalogueProduct, index)) {
+      const expanded = expand(res.data as CatalogueProduct, sel);
+      const group = index ? applyMkMaster(expanded, index, new Set([code, hitCode])) : expanded;
+      if (!group) return NextResponse.json({ error: "Not in Metakocka." }, { status: 404 });
       await applyMkPrices([group], sel);
       return NextResponse.json({ group });
     }
@@ -270,7 +308,7 @@ export async function POST(request: Request) {
     const group = await mkOnlyGroup(code);
     if (!group) {
       return res.ok
-        ? NextResponse.json({ error: "Product not found." }, { status: 404 })
+        ? NextResponse.json({ error: "Product not found in Metakocka." }, { status: 404 })
         : NextResponse.json({ error: res.error }, { status: res.status });
     }
     await applyMkPrices([group], sel);
@@ -287,10 +325,12 @@ export async function POST(request: Request) {
   // An import always works on Metakocka's current data: a product or barcode just
   // changed in MK must not be hidden behind the 10-minute product index cache.
   invalidateMkProductCaches();
+  const index = await getMkProductIndex();
+  const requested = new Set<string>(codes);
 
   // Group requested codes by the parent they resolve to, tracking which specific child
   // SKUs were asked for so we can keep only those.
-  const byParent = new Map<string, { parent: CatalogueProduct; wanted: Set<string> }>();
+  const byParent = new Map<string, { parent: CatalogueProduct; wanted: Set<string>; inputs: string[] }>();
   const notFound: string[] = [];
 
   // Bounded concurrency (the catalogue API is not built for hundreds of parallel
@@ -300,21 +340,28 @@ export async function POST(request: Request) {
   await mapLimit(codes, BATCH_CONCURRENCY, async (input) => {
     {
       const { res, code } = await lookupCatalogue(input, { skipSearch: Date.now() > deadline });
-      if (!res.ok || !res.data) {
+      // A catalogue product MK doesn't have is treated as unknown (MK-only lookup next).
+      if (!res.ok || !res.data || !catalogueHitInMk(code, res.data as CatalogueProduct, index)) {
         notFound.push(input);
         return;
       }
       const parent = res.data as CatalogueProduct;
-      const entry = byParent.get(parent.code) ?? { parent, wanted: new Set<string>() };
+      requested.add(code);
+      const entry = byParent.get(parent.code) ?? { parent, wanted: new Set<string>(), inputs: [] };
+      entry.inputs.push(input);
       // If the searched code is a child SKU (not the parent), remember it.
       if (code !== parent.code) entry.wanted.add(code);
       byParent.set(parent.code, entry);
     }
   });
 
-  const groups = Array.from(byParent.values()).map(({ parent, wanted }) =>
-    expand(parent, sel, wanted),
-  );
+  const groups: ProductGroupDraft[] = [];
+  for (const { parent, wanted, inputs } of byParent.values()) {
+    const expanded = expand(parent, sel, wanted);
+    const group = index ? applyMkMaster(expanded, index, requested) : expanded;
+    if (group) groups.push(group);
+    else notFound.push(...inputs);
+  }
   // Codes the catalogue doesn't know may be Metakocka-only products (by code or barcode) —
   // one group each.
   const mkGroups: ProductGroupDraft[] = [];

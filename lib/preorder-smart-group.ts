@@ -5,7 +5,9 @@
 // SKU: "T4A QTS-Wave 71", "T4A QTS-Wave 76", … each on its own. Smart grouping merges
 // such single-row groups whose names differ only in a trailing size token into one
 // group named after the shared base ("T4A QTS-Wave"), the token becoming the row's
-// variant label. Multi-row groups are left exactly as resolved.
+// variant label. A " - colour" suffix counts as a variant too ("LISA Harness Lines
+// Windsurf Freeride - red" / "- black" → one group, labels "red" / "black").
+// Multi-row groups are left exactly as resolved.
 
 import type { PreorderRow } from "@/types/preorder";
 
@@ -22,8 +24,23 @@ export type SmartGroupDraft = {
 // ("71", "4.7", "490", "10'6"), or a clothing size.
 const SIZE_TOKEN = /\d|^(?:XXS|XS|S|M|L|XL|XXL|XXXL|\dXL)$/i;
 
+// A spaced dash before a short variant name: "LISA Harness Lines Windsurf Freeride -
+// transparent", "… MONO- red". The dash must be followed by a space, so a hyphenated
+// word ("QTS-Wave") never splits. Greedy base = the LAST such dash.
+const DASH_SUFFIX = /^(.*\S)\s*[-–—]\s+(\S.*)$/;
+const DASH_SUFFIX_MAX_WORDS = 3;
+
+// Split a variant name into the product it belongs to and what distinguishes it:
+// a " - colour" style suffix first, else a trailing size token.
 export function splitVariantName(name: string): { base: string; suffix: string } | null {
-  const tokens = name.trim().split(/\s+/);
+  const trimmed = name.trim();
+  const dash = DASH_SUFFIX.exec(trimmed);
+  if (dash) {
+    const base = dash[1].replace(/[\s\-–—,/]+$/, "");
+    const suffix = dash[2].trim();
+    if (base && suffix.split(/\s+/).length <= DASH_SUFFIX_MAX_WORDS) return { base, suffix };
+  }
+  const tokens = trimmed.split(/\s+/);
   if (tokens.length < 2) return null;
   const suffix = tokens[tokens.length - 1];
   if (!SIZE_TOKEN.test(suffix)) return null;
@@ -141,7 +158,8 @@ export function smartGroup(drafts: SmartGroupDraft[], existing: ExistingGroup[] 
 
 type LabelRow = { name: string; variantLabel?: string | null };
 
-const words = (s: string) => s.trim().split(/\s+/).filter(Boolean);
+// A spaced dash is its own word, also when it sticks to the one before ("MONO- red").
+const words = (s: string) => s.replace(/\s*([-–—])\s+/g, " $1 ").trim().split(/\s+/).filter(Boolean);
 const same = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" }) === 0;
 
 function isUnshortened(r: LabelRow): boolean {
@@ -158,7 +176,8 @@ export function smartVariantLabels(rows: LabelRow[]): (string | null)[] {
     while (split.every((w) => n < w.length - 1 && same(w[n], split[0][n]))) n++;
     return rows.map((r) => {
       if (!isUnshortened(r) || n === 0) return null;
-      const rest = words(r.name).slice(n).join(" ");
+      // "… MONO - red" vs "… MONO - blue": the shared prefix ends before the dash.
+      const rest = words(r.name).slice(n).join(" ").replace(/^[-–—]\s*/, "");
       return rest && rest !== r.variantLabel ? rest : null;
     });
   }

@@ -1189,6 +1189,83 @@ function FixedPriceChip({
   );
 }
 
+// ── Discount status (sticky header) ─────────────────────────────────────────
+// The always-visible answer to "which discount do I have": a compact card on the
+// right of the fill page's sticky title row (beside Quick guide), so it stays on
+// screen while the customer scrolls — the full ladder (SheetContextBar) scrolls away
+// with the sheet. Applied tier + what the whole order saves, then how much more
+// unlocks the next tier over a thin progress bar. On phones only the tier shows.
+// Renders nothing when the active section has no ladder.
+export function DiscountStatus({
+  tab,
+  tabs,
+  quantities,
+  currency,
+  pricing,
+  className,
+}: {
+  tab: PreorderTab | null;
+  tabs: PreorderTab[]; // the whole sheet — the order subtotal unlocks the tiers
+  quantities: QtyMap;
+  currency: string;
+  pricing?: PricingContext | null;
+  className?: string;
+}) {
+  const all = useMemo(() => computeTabTotals({ tabs, pricing: pricing ?? null }, quantities), [tabs, quantities, pricing]);
+  const totals = tab ? all.find((t) => t.tabId === tab.id) ?? null : null;
+  if (!tab || !totals || activeTiers(tab.tiers).length === 0) return null;
+  const reached = totals.tier;
+  const next = totals.nextTier;
+  const saved = all.reduce((n, t) => n + t.discount, 0);
+  const from = reached?.minAmount ?? 0;
+  const pct = next ? Math.min(100, Math.max(0, ((totals.orderAmount - from) / Math.max(1e-9, next.minAmount - from)) * 100)) : 100;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={cn("flex items-center gap-3 h-10 rounded-xl border border-border bg-surface pl-1.5 pr-3 min-w-0", className)}
+    >
+      <span
+        className={cn(
+          "flex size-7 shrink-0 items-center justify-center rounded-lg transition-colors",
+          reached ? "bg-lime-100 text-lime-700 dark:bg-lime-900/40 dark:text-lime-300" : "bg-muted text-muted-foreground",
+        )}
+      >
+        <Percent className="w-3.5 h-3.5" />
+      </span>
+      <div key={reached?.id ?? "none"} className="min-w-0 leading-tight animate-in fade-in duration-300">
+        <div className="text-[12.5px] font-semibold text-foreground whitespace-nowrap">
+          {reached ? `${reached.name || "Volume discount"} −${reached.discountPct}%` : "No discount yet"}
+          {saved > 0 && (
+            <span className="hidden sm:inline font-medium tabular-nums text-lime-700 dark:text-lime-400"> · −{fmtMoney(saved, currency)}</span>
+          )}
+        </div>
+        <div className="hidden sm:block text-[10.5px] text-muted-foreground whitespace-nowrap">
+          {reached ? "Volume discount applied" : "Volume discount"}
+        </div>
+      </div>
+      {(next || reached) && <span className="hidden md:block h-6 w-px bg-border shrink-0" aria-hidden />}
+      {next ? (
+        <div className="hidden md:block w-40 leading-tight">
+          <div className="text-[10.5px] text-muted-foreground whitespace-nowrap truncate tabular-nums">
+            <span className="font-medium text-foreground">{fmtMoney(totals.toNextTier, currency)}</span> to {next.name || "next tier"} −{next.discountPct}%
+          </div>
+          <div className="mt-1.5 h-1 rounded-full bg-muted overflow-hidden">
+            <div className="h-full rounded-full bg-lime-500 transition-[width] duration-500 ease-out" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      ) : (
+        reached && (
+          <div className="hidden md:flex items-center gap-1 text-[10.5px] text-muted-foreground whitespace-nowrap">
+            <Check className="w-3 h-3 text-lime-600" /> Top tier
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 // How the customer browses the sheet — "Order sheet" (the grid, the default) or
 // "Catalogue" (guided cards). Underline tabs, sat at the right end of the section TabBar row. Shared
 // by the portal fill page and the admin preview so both read exactly the same.

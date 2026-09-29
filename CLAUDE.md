@@ -762,7 +762,12 @@ else `person`) decides the VAT only:
   tab keeps its own ladder (thresholds + percentages), but the same order total
   unlocks every tab's ladder (`priceOrder` collects all tabs first, then
   evaluates each ladder against the order amount). Tier widgets
-  (`TabTierBanner`, `SheetContextBar`) therefore take the full `tabs`.
+  (`TabTierBanner`, `SheetContextBar`, `DiscountStatus`) therefore take the full `tabs`.
+  `DiscountStatus` (`preorder-shared.tsx`) is the always-visible version: it sits in
+  the **sticky title row** of the portal fill page (beside Quick guide) and the
+  admin Preview (header actions) — the active section's applied tier (or "No discount yet"), the
+  whole order's saving, and how much more unlocks the next tier — while the full
+  ladder in `SheetContextBar` scrolls away with the sheet.
 - **Fixed-price rows** (`row.fixedPrice`) are never tier-discounted: `priceOrder`
   prices them with `tierPct 0`, but their amount still counts towards the order
   subtotal that unlocks the ladders (`PreorderTabTotal.fixedAmount` / `fixedQty`
@@ -978,6 +983,29 @@ configured tax code is mandatory per rate; default: `tax_factor`, codes optional
 the key must equal the partner portal's `WEBHOOK_API_KEY`, else the API silently
 returns published products only).
 
+**Metakocka is the source of truth for products.** Which products exist and their
+SKU, name and EAN come from Metakocka (`getMkProductIndex` in `lib/metakocka.ts`, the
+cached sales-product index; `null` = MK unreadable ⇒ nothing is dropped or
+overwritten). The index keeps items MK flags `service` (real products are
+mis-flagged that way, e.g. `P14240003999`); like deactivated ones they resolve by
+exact SKU / EAN and are only left out of the builder's free-text search. The catalogue (PNV) only contributes images, the description and the
+family grouping — it carries stale products MK doesn't have (old `P1626…` LISA
+codes sharing the real `L…` codes' EANs), so: resolve drops catalogue rows MK lacks
+(`catalogueHitInMk` / `applyMkMaster` in the resolve route — MK name + barcode,
+labels re-derived, deactivated variants only when asked for by code; the input is
+reported `notFound`), the builder search hides catalogue hits with no MK product,
+and **Re-price** also rewrites every catalogue row's name + EAN from MK and lists
+the sheet's SKUs MK doesn't have (amber notice, `inMk: false`).
+**Refresh products** (Sheet toolbar, next to Re-price) is the migration for rows
+already on a sheet: `POST /api/admin/preorder/products/refresh { rows: [{code, ean}] }`
+looks each row up in MK by code, else by its EAN (a stale SKU is replaced by MK's),
+and answers MK code + name + barcode plus the catalogue images;
+`refreshTabs` (`lib/preorder-refresh.ts`, pure) applies it: SKU / name / EAN, row
+images (uploaded ones — `/uploads/media/preorder/` — are kept), group images, the
+automatic labels (typed labels are kept) and smart grouping over the tab's existing
+groups (row ids and the first group's id survive; merged-away group ids disappear).
+Prices, tags, fixed-price, restrictions are never touched; MK unreadable ⇒ 503.
+
 **Sheet builder product sources.** The catalogue is built from PNV, so a product
 that lives only in Metakocka is not in it. The builder's search
 (`/api/admin/preorder/products/search`) therefore appends **Metakocka-only** hits
@@ -992,7 +1020,7 @@ old MK-only products carry no price list), and re-price keeps it 0.
 **SKU import** (`/api/admin/preorder/products/resolve`) takes SKUs **or EANs**: a
 code the catalogue's `/api/product/:code` misses is retried through the catalogue's
 EAN index (`catalogueCodeForEan`, built with `getCatalogueCodes`), then Metakocka by
-code or barcode (`getMkSalesProduct`; an EAN MK knows is first mapped to its product code and loaded from the catalogue, so it gets the catalogue images — only a product the catalogue lacks becomes a bare MK-only row; deactivated MK products resolve on an exact
+code or barcode (`getMkSalesProduct`; **an EAN Metakocka knows is resolved by MK's code only, before the catalogue EAN index** — the catalogue carries stale duplicates under the same EANs, e.g. old `P1626…` LISA codes; an EAN MK knows is first mapped to its product code and loaded from the catalogue, so it gets the catalogue images — only a product the catalogue lacks becomes a bare MK-only row; deactivated MK products resolve on an exact
 SKU / EAN, only the name search skips them). EANs compare with leading zeros
 dropped. A row's missing EAN is filled from the **Metakocka barcode**
 (`getMkBarcodes`) on resolve and on re-price; customers see the EAN under the SKU.
@@ -1008,7 +1036,7 @@ so an EAN never reads as a price). An imported price overrides the resolved one
 client-side (`applyImportEntries` in the builder; a partner price also clears
 `discountedPrice`); a later Re-price overwrites it. **Re-importing a code already on the tab updates that row** instead of adding it again (`importIntoTab`): tag + fixed price become exactly what the import gives (no tag clears the old one), prices change only where the import carries one. The Import dialog's **Smart grouping** toggle (`lib/preorder-smart-group.ts`)
 merges single-SKU groups whose names differ only in a trailing size token
-("T4A QTS-Wave 71/76") into one group, the token becoming the variant label, and
+("T4A QTS-Wave 71/76") — or only in a spaced `" - <variant>"` suffix ("LISA Harness Lines Windsurf Freeride - red / - black", up to 3 words) — into one group, the token becoming the variant label, and
 appends to a same-named group already on the tab. A lone product also **joins the group of its family** — a multi-variant group of the same import or one already on the tab whose name or variant names share its base (`familyKey`: case, spacing and "80 %" vs "80%" ignored), so a Metakocka-only size lands with its catalogue siblings. **Import keeps the file's order**: `sortByImport` puts groups and variants in the order of the imported lines, and new rows / groups are inserted among existing ones by that position (`insertRowsInOrder` / `insertGroupsInOrder`). Every batch import first drops the cached MK product index + price-list names (`invalidateMkProductCaches`), so a change just made in Metakocka is what the import sees. **Smart variant labels** (`withSmartLabels`,
 same file): a variant's "Size / label" is the part of its name its siblings don't
 share ("Patrik Fin PPW Slot 80" → "80"), applied in `resolve` and, once, by the

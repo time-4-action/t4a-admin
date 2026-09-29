@@ -763,14 +763,17 @@ export async function listSalesPricelists(): Promise<MkPricelist[]> {
 // searches an in-memory index of every sales product instead: ~1.7k
 // rows, two pages of 1000, ~2 s. Cached; concurrent callers share one fetch.
 // `activated: false` products stay in the index: an exact SKU / EAN (the import) still
-// resolves them, only the name / prefix search leaves them out.
-export type MkSalesProduct = { code: string; name: string; barcode: string | null; activated: boolean };
+// resolves them, only the name / prefix search leaves them out. The same goes for items
+// flagged `service` in MK: real products are mis-flagged that way (P14240003999, a sail
+// batten, is a "service"), and with MK as the source of truth an item missing from the
+// index counts as not existing — so they stay, out of the free-text search only.
+export type MkSalesProduct = { code: string; name: string; barcode: string | null; activated: boolean; service: boolean };
 
 const MK_PRODUCT_PAGE = 1000;
 const MK_PRODUCT_MAX_PAGES = 20;
 const MK_PRODUCT_TTL_MS = 10 * 60 * 1000;
 let mkProductCache: { at: number; value: MkSalesProduct[] } | null = null;
-let mkProductInflight: Promise<MkSalesProduct[]> | null = null;
+let mkProductInflight: Promise<MkSalesProduct[] | null> | null = null;
 
 async function fetchMkSalesProducts(): Promise<MkSalesProduct[] | null> {
   const out: MkSalesProduct[] = [];
@@ -789,12 +792,13 @@ async function fetchMkSalesProducts(): Promise<MkSalesProduct[] | null> {
         : [];
     for (const p of rows) {
       const code = str(p.code);
-      if (!code || str(p.service) === "true") continue;
+      if (!code) continue;
       out.push({
         code,
         name: str(p.name) ?? code,
         barcode: str(p.barcode) ?? null,
         activated: str(p.activated) !== "false",
+        service: str(p.service) === "true",
       });
     }
     if (rows.length < MK_PRODUCT_PAGE) break;
@@ -811,19 +815,33 @@ export function invalidateMkProductCaches(): void {
   pricelistCache = null;
 }
 
-export async function listMkSalesProducts(): Promise<MkSalesProduct[]> {
+// The index, or null when MK can't be read and nothing is cached — callers that treat
+// MK as the source of truth must then leave data alone instead of dropping it.
+async function loadMkSalesProducts(): Promise<MkSalesProduct[] | null> {
   if (mkProductCache && Date.now() - mkProductCache.at < MK_PRODUCT_TTL_MS) {
     return mkProductCache.value;
   }
   mkProductInflight ??= fetchMkSalesProducts()
     .then((value) => {
       if (value) mkProductCache = { at: Date.now(), value };
-      return value ?? mkProductCache?.value ?? [];
+      return value ?? mkProductCache?.value ?? null;
     })
     .finally(() => {
       mkProductInflight = null;
     });
   return mkProductInflight;
+}
+
+export async function listMkSalesProducts(): Promise<MkSalesProduct[]> {
+  return (await loadMkSalesProducts()) ?? [];
+}
+
+// Every MK sales product by code — Metakocka is the source of truth for which products
+// exist and for their code, name and barcode (the catalogue only adds images and
+// descriptions). null = MK unavailable: don't treat an absent code as "not in MK".
+export async function getMkProductIndex(): Promise<Map<string, MkSalesProduct> | null> {
+  const list = await loadMkSalesProducts();
+  return list ? new Map(list.map((p) => [p.code, p])) : null;
 }
 
 // Same matching as the catalogue search: exact code / barcode first (deactivated
@@ -838,7 +856,7 @@ export async function searchMkSalesProducts(q: string, limit = 15): Promise<MkSa
   for (const p of await listMkSalesProducts()) {
     const code = p.code.toLowerCase();
     if (code === query || p.barcode === query) exact.push(p);
-    else if (!p.activated) continue;
+    else if (!p.activated || p.service) continue;
     else if (code.startsWith(query)) prefix.push(p);
     else if (words.every((w) => p.name.toLowerCase().includes(w))) byName.push(p);
   }

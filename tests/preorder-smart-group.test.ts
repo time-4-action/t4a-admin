@@ -29,6 +29,18 @@ describe("splitVariantName", () => {
     expect(splitVariantName("Patrik Mast SDM 80 % 490")).toEqual({ base: "Patrik Mast SDM 80 %", suffix: "490" });
     expect(splitVariantName("Harness Pro XL")).toEqual({ base: "Harness Pro", suffix: "XL" });
   });
+  it("splits a spaced ' - colour' suffix, never a hyphenated word", () => {
+    expect(splitVariantName("LISA Harness Lines Windsurf Freeride - transparent")).toEqual({
+      base: "LISA Harness Lines Windsurf Freeride",
+      suffix: "transparent",
+    });
+    expect(splitVariantName("LISA Harness Lines Wing Freeride/Parawing MONO- transparent")).toEqual({
+      base: "LISA Harness Lines Wing Freeride/Parawing MONO",
+      suffix: "transparent",
+    });
+    expect(splitVariantName("LISA harness lines windsurf 2.0 - light blue")?.suffix).toBe("light blue");
+    expect(splitVariantName("T4A QTS-Wave 71")).toEqual({ base: "T4A QTS-Wave", suffix: "71" });
+  });
   it("leaves names without a size token alone", () => {
     expect(splitVariantName("Boardbag")).toBeNull();
     expect(splitVariantName("Fin Screws")).toBeNull();
@@ -42,6 +54,22 @@ describe("smartGroup", () => {
     expect(out[0].rows.map((r) => r.variantLabel)).toEqual(["82", "71", "76"]);
     expect(out[0].rows.map((r) => r.code)).toEqual(["T4A QTS-Wave 82", "T4A QTS-Wave 71", "T4A QTS-Wave 76"]);
     expect(out[0].parentCode).toBeNull();
+  });
+  it("groups ' - colour' variants, labelled by colour", () => {
+    const out = smartGroup([
+      one("LISA Harness Lines Windsurf Freeride - transparent", "L1"),
+      one("LISA Harness Lines Windsurf Freeride - red", "L2"),
+      one("LISA Harness Lines Wing Freeride/Parawing MONO- transparent", "L3"),
+      one("LISA Harness Lines Wing Freeride/Parawing MONO - red", "L4"),
+    ]);
+    expect(out.map((g) => g.name)).toEqual([
+      "LISA Harness Lines Windsurf Freeride",
+      "LISA Harness Lines Wing Freeride/Parawing MONO",
+    ]);
+    expect(out.map((g) => g.rows.map((r) => r.variantLabel))).toEqual([
+      ["transparent", "red"],
+      ["transparent", "red"],
+    ]);
   });
   it("keeps a lone product as is unless its base group exists on the tab", () => {
     expect(smartGroup([one("T4A QTS-Wave 99")])[0].name).toBe("T4A QTS-Wave 99");
@@ -82,6 +110,10 @@ describe("smartVariantLabels", () => {
   it("keeps multi-word differences", () => {
     const rows = [r("Wing 4.0 Red"), r("Wing 4.0 Blue"), r("Wing 5.0 Red")];
     expect(withSmartLabels(rows).map((x) => x.variantLabel)).toEqual(["4.0 Red", "4.0 Blue", "5.0 Red"]);
+  });
+  it("drops the dash from ' - colour' labels", () => {
+    const rows = [r("LISA lines MONO - red"), r("LISA lines MONO - blue")];
+    expect(withSmartLabels(rows).map((x) => x.variantLabel)).toEqual(["red", "blue"]);
   });
   it("never rewrites a label an admin typed, and fills empty ones", () => {
     const rows = [r("Kite 9", "nine"), r("Kite 10", null)];
