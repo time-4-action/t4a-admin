@@ -49,7 +49,7 @@ export async function POST(request: Request) {
   const codes = (body.codes ?? [])
     .map((c) => String(c).trim())
     .filter(Boolean)
-    .slice(0, 1000);
+    .slice(0, 20_000); // the builder sends big sheets in chunks; only a sanity bound
   const rrpTitle = body.rrpPricelist ?? null;
   const partnerTitle = body.partnerPricelist ?? null;
   if (codes.length === 0) return NextResponse.json({ prices: {} });

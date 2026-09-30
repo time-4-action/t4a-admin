@@ -99,6 +99,33 @@ describe("smartGroup", () => {
     const onTab = smartGroup([mk], [{ name: "Patrik Mast SDM 80%", rows: [{ name: "Patrik Mast SDM 80 % 480" }] }]);
     expect(onTab[0].name).toBe("Patrik Mast SDM 80%");
   });
+
+  it("groups products whose size sits in the middle of the name", () => {
+    const out = smartGroup([
+      one("AEON Front Wing RS 350 DNA.X SC1", "A350"),
+      one("AEON Front Wing RS 365 DNA.X SC1", "A365"),
+      one("AEON Front Wing RS 375 DNA.H SC1", "A375"),
+      one("AEON Front Wing RS 400 DNA.X SC1", "A400"),
+      one("AEON Front Wing RS 425 DNA.X", "A425"),
+      one("Boardbag"),
+    ]);
+    expect(out.map((g) => g.name)).toEqual(["AEON Front Wing RS", "Boardbag"]);
+    expect(out[0].rows.map((r) => r.variantLabel)).toEqual([
+      "350 DNA.X SC1",
+      "365 DNA.X SC1",
+      "375 DNA.H SC1",
+      "400 DNA.X SC1",
+      "425 DNA.X",
+    ]);
+    // …and a later one joins the group already on the tab.
+    const onTab = smartGroup([one("AEON Front Wing RS 450 DNA.X", "A450")], [
+      { name: "AEON Front Wing RS", rows: [{ name: "AEON Front Wing RS 350 DNA.X SC1" }] },
+    ]);
+    expect(onTab[0].name).toBe("AEON Front Wing RS");
+  });
+  it("a lone mid-size product without siblings stays as is", () => {
+    expect(smartGroup([one("AEON Front Wing RS 350 DNA.X SC1")])[0].name).toBe("AEON Front Wing RS 350 DNA.X SC1");
+  });
 });
 
 describe("smartVariantLabels", () => {

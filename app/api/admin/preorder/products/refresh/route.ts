@@ -8,6 +8,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const CONCURRENCY = 16;
+// The builder sends big sheets in chunks; this is only a sanity bound.
+const MAX_ROWS = 20_000;
 
 async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
   let next = 0;
@@ -23,14 +25,15 @@ async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<v
 // doesn't have it (a stale catalogue SKU) by the row's EAN. MK gives code, name and
 // EAN; the catalogue only the images. No prices are read.
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => ({}))) as { rows?: { code?: string; ean?: string | null }[] };
+  const body = (await request.json().catch(() => ({}))) as { rows?: { code?: string; ean?: string | null }[]; freshMk?: boolean };
   const rows = (body.rows ?? [])
     .map((r) => ({ code: String(r.code ?? "").trim(), ean: r.ean ? String(r.ean).trim() : null }))
     .filter((r) => r.code)
-    .slice(0, 2000);
+    .slice(0, MAX_ROWS);
   if (rows.length === 0) return NextResponse.json({ info: {}, notInMk: [] });
 
-  invalidateMkProductCaches();
+  // The builder sends a big sheet in chunks; only the first drops the MK index cache.
+  if (body.freshMk !== false) invalidateMkProductCaches();
   const index = await getMkProductIndex();
   // Without MK nothing can be verified — refuse rather than guess.
   if (!index) return NextResponse.json({ error: "Metakocka is unavailable — try again." }, { status: 503 });

@@ -108,6 +108,47 @@ type GroupDraft = {
   rows: RowDraft[];
 };
 
+// Big imports / sheets go to the product routes in chunks, so every request stays well
+// inside the gateway timeout (each code is a catalogue / Metakocka lookup). Only the
+// first chunk asks the server to reload Metakocka's product index (`freshMk`).
+const IMPORT_CHUNK = 400;
+const SHEET_CHUNK = 500;
+async function inChunks<T, R>(
+  items: T[],
+  size: number,
+  fn: (chunk: T[], first: boolean) => Promise<R>,
+  onProgress?: (done: number) => void,
+): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(await fn(items.slice(i, i + size), i === 0));
+    onProgress?.(Math.min(items.length, i + size));
+  }
+  return out;
+}
+
+// Chunks may resolve the same parent product twice (a SKU in each): one group, rows united.
+function mergeResolvedGroups(groups: GroupDraft[]): GroupDraft[] {
+  const out: GroupDraft[] = [];
+  const byParent = new Map<string, GroupDraft>();
+  for (const g of groups) {
+    const prev = g.parentCode ? byParent.get(g.parentCode) : undefined;
+    if (!prev) {
+      const copy = { ...g, rows: [...g.rows] };
+      if (g.parentCode) byParent.set(g.parentCode, copy);
+      out.push(copy);
+      continue;
+    }
+    const have = new Set(prev.rows.map((r) => r.code));
+    for (const r of g.rows) {
+      if (have.has(r.code)) continue;
+      have.add(r.code);
+      prev.rows.push(r);
+    }
+  }
+  return out;
+}
+
 const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
@@ -536,20 +577,25 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
     setRepricing(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/preorder/products/reprice`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          codes: Array.from(codes),
-          rrpPricelist: campaign.rrpPricelist ?? null,
-          partnerPricelist: campaign.partnerPricelist ?? null,
-        }),
-      });
-      const data = await res.json();
-      const prices: Record<
+      type Prices = Record<
         string,
         { rrp: number | null; partnerPrice: number | null; taxCode?: string | null; ean?: string | null; name?: string; inMk?: boolean }
-      > = data.prices ?? {};
+      >;
+      const parts = await inChunks(Array.from(codes), SHEET_CHUNK, async (chunk) => {
+        const res = await fetch(`/api/admin/preorder/products/reprice`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            codes: chunk,
+            rrpPricelist: campaign.rrpPricelist ?? null,
+            partnerPricelist: campaign.partnerPricelist ?? null,
+          }),
+        });
+        const data = (await res.json().catch(() => null)) as { prices?: Prices; error?: string } | null;
+        if (!res.ok || !data) throw new Error(data?.error ?? `Re-pricing failed (${res.status}).`);
+        return data.prices ?? {};
+      });
+      const prices: Prices = Object.assign({}, ...parts);
       setNotInMk(Object.entries(prices).filter(([, p]) => p.inMk === false).map(([code]) => code));
       mutate((c) => ({
         ...c,
@@ -597,14 +643,18 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
     setRefreshing(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/preorder/products/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows }),
+      const parts = await inChunks(rows, SHEET_CHUNK, async (chunk, first) => {
+        const res = await fetch(`/api/admin/preorder/products/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: chunk, freshMk: first }),
+        });
+        const data = (await res.json().catch(() => null)) as { info?: Record<string, ProductRefreshInfo>; notInMk?: string[]; error?: string } | null;
+        if (!res.ok || !data?.info) throw new Error(data?.error ?? `Refresh failed (${res.status}).`);
+        return { info: data.info, notInMk: data.notInMk ?? [] };
       });
-      const data = (await res.json().catch(() => null)) as { info?: Record<string, ProductRefreshInfo>; notInMk?: string[]; error?: string } | null;
-      if (!res.ok || !data?.info) throw new Error(data?.error ?? `Refresh failed (${res.status}).`);
-      const { tabs, summary } = refreshTabs(campaign.tabs, data.info, data.notInMk ?? []);
+      const info: Record<string, ProductRefreshInfo> = Object.assign({}, ...parts.map((p) => p.info));
+      const { tabs, summary } = refreshTabs(campaign.tabs, info, parts.flatMap((p) => p.notInMk));
       mutate((c) => ({ ...c, tabs }));
       setNotInMk(summary.notInMk);
       setRefreshSummary(summary);
@@ -2516,6 +2566,7 @@ function CsvImportDialog({
   const [showFormat, setShowFormat] = useState(false);
   const [smart, setSmart] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [reading, setReading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [file, setFile] = useState<{ name: string; codes: number } | null>(null);
@@ -2581,17 +2632,27 @@ function CsvImportDialog({
   async function run() {
     if (codes.length === 0) return;
     setBusy(true);
+    setProgress(0);
     setError(null);
     setResult(null);
     try {
-      const r = await fetch(`/api/admin/preorder/products/resolve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ codes, rrpPricelist, partnerPricelist }),
-      });
-      const data = (await r.json().catch(() => null)) as { groups?: GroupDraft[]; notFound?: string[]; error?: string } | null;
-      if (!r.ok || !data) throw new Error(data?.error ?? `The catalogue lookup failed (${r.status}). Try again.`);
-      const applied = applyImportEntries(data.groups ?? [], entries, colors);
+      const parts = await inChunks(
+        codes,
+        IMPORT_CHUNK,
+        async (chunk, first) => {
+          const r = await fetch(`/api/admin/preorder/products/resolve`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ codes: chunk, rrpPricelist, partnerPricelist, freshMk: first }),
+          });
+          const data = (await r.json().catch(() => null)) as { groups?: GroupDraft[]; notFound?: string[]; error?: string } | null;
+          if (!r.ok || !data) throw new Error(data?.error ?? `The catalogue lookup failed (${r.status}). Try again.`);
+          return data;
+        },
+        setProgress,
+      );
+      const data = { groups: mergeResolvedGroups(parts.flatMap((p) => p.groups ?? [])), notFound: parts.flatMap((p) => p.notFound ?? []) };
+      const applied = applyImportEntries(data.groups, entries, colors);
       const { groups, order } = sortByImport(applied.groups, entries);
       const patches = applied.patches;
       const missingCodes = data.notFound ?? [];
@@ -2912,7 +2973,7 @@ function CsvImportDialog({
             </Button>
             <Button size="sm" onClick={run} disabled={busy || reading || codes.length === 0} className="h-8 text-[12px] min-w-32">
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-              {busy ? "Looking up…" : codes.length === 0 ? "Add products" : `Add ${codes.length} product${codes.length === 1 ? "" : "s"}`}
+              {busy ? (codes.length > IMPORT_CHUNK ? `Looking up… ${progress}/${codes.length}` : "Looking up…") : codes.length === 0 ? "Add products" : `Add ${codes.length} product${codes.length === 1 ? "" : "s"}`}
             </Button>
           </div>
         </DialogFooter>

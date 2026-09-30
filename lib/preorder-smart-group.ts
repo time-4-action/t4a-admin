@@ -48,6 +48,22 @@ export function splitVariantName(name: string): { base: string; suffix: string }
   return base ? { base, suffix } : null;
 }
 
+// A size in the MIDDLE of the name: "AEON Front Wing RS 350 DNA.X SC1" → base "AEON
+// Front Wing RS", suffix "350 DNA.X SC1". The first plain number after at least two
+// words splits the name (not a percentage). Only a fallback — used when the trailing split finds no
+// siblings, so "Patrik Mast SDM 80 % 490" still groups by its trailing size.
+const MID_SIZE = /^\d+(?:[.,]\d+)?$/;
+export function splitMidSize(name: string): { base: string; suffix: string } | null {
+  const tokens = name.trim().split(/\s+/);
+  for (let i = 2; i < tokens.length - 1; i++) {
+    // "80 % 490": a percentage is part of the model, not its size.
+    if (!MID_SIZE.test(tokens[i]) || tokens[i + 1].startsWith("%")) continue;
+    const base = tokens.slice(0, i).join(" ").replace(/[\s\-–—,/]+$/, "");
+    return base ? { base, suffix: tokens.slice(i).join(" ") } : null;
+  }
+  return null;
+}
+
 // Family key: case, spacing and the space before a "%" don't matter — the catalogue
 // names a group "Patrik Mast SDM 80%" while Metakocka writes "Patrik Mast SDM 80 % 490".
 export function familyKey(s: string): string {
@@ -92,11 +108,27 @@ export function smartGroup(drafts: SmartGroupDraft[], existing: ExistingGroup[] 
     for (const k of groupFamilyKeys(d)) if (!multiByKey.has(k)) multiByKey.set(k, d);
   }
 
-  const lone = (d: SmartGroupDraft) => {
-    if (d.rows.length !== 1) return null;
-    const split = splitVariantName(d.name);
-    return split ? { ...split, k: familyKey(split.base) } : null;
-  };
+  // How each lone product splits: the trailing split when it finds a sibling (another
+  // lone product, a multi-variant group or an existing group), else the mid-size split.
+  const trailingCount = new Map<string, number>();
+  for (const d of drafts) {
+    const s = d.rows.length === 1 ? splitVariantName(d.name) : null;
+    if (s) trailingCount.set(familyKey(s.base), (trailingCount.get(familyKey(s.base)) ?? 0) + 1);
+  }
+  const hasFamily = (k: string, n: number) => n >= 2 || multiByKey.has(k) || existingByKey.has(k);
+  const splits = new Map<SmartGroupDraft, { base: string; suffix: string; k: string } | null>();
+  for (const d of drafts) {
+    if (d.rows.length !== 1) continue;
+    const t = splitVariantName(d.name);
+    const tk = t ? familyKey(t.base) : "";
+    if (t && hasFamily(tk, trailingCount.get(tk) ?? 0)) {
+      splits.set(d, { ...t, k: tk });
+      continue;
+    }
+    const m = splitMidSize(d.name);
+    splits.set(d, m ? { ...m, k: familyKey(m.base) } : t ? { ...t, k: tk } : null);
+  }
+  const lone = (d: SmartGroupDraft) => splits.get(d) ?? null;
   const withLabel = (d: SmartGroupDraft, suffix: string) => ({ ...d.rows[0], variantLabel: d.rows[0].variantLabel || suffix });
 
   // Lone products that join a multi-variant group of this import.

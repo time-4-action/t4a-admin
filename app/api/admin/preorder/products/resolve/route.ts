@@ -267,6 +267,8 @@ async function lookupCatalogue(input: string, opts: { skipSearch?: boolean } = {
   return { res, code: input };
 }
 
+// The builder sends big imports in chunks; this is only a sanity bound.
+const MAX_BATCH_CODES = 20_000;
 const BATCH_CONCURRENCY = 16;
 const BATCH_SEARCH_BUDGET_MS = 25_000;
 
@@ -287,6 +289,7 @@ export async function POST(request: Request) {
     codes?: string[];
     rrpPricelist?: string | null;
     partnerPricelist?: string | null;
+    freshMk?: boolean;
   };
   const sel: PriceListSelection = {
     rrpPricelist: body.rrpPricelist ?? null,
@@ -320,11 +323,13 @@ export async function POST(request: Request) {
   const codes = (body.codes ?? [])
     .map((c) => String(c).trim())
     .filter(Boolean)
-    .slice(0, 500);
+    .slice(0, MAX_BATCH_CODES);
   if (codes.length === 0) return NextResponse.json({ groups: [], notFound: [] });
   // An import always works on Metakocka's current data: a product or barcode just
-  // changed in MK must not be hidden behind the 10-minute product index cache.
-  invalidateMkProductCaches();
+  // changed in MK must not be hidden behind the 10-minute product index cache. A big
+  // import arrives in chunks — only the first one (`freshMk` unset) drops the cache,
+  // the rest reuse the index it just loaded.
+  if (body.freshMk !== false) invalidateMkProductCaches();
   const index = await getMkProductIndex();
   const requested = new Set<string>(codes);
 
