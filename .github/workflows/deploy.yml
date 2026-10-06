@@ -1,0 +1,174 @@
+# check -> deploy -> verify.
+#
+# Checks every pull request and every push to main. On main, a green check
+# builds the image, pushes it to Docker Hub tagged with the commit SHA and
+# `latest`, and rolls the production container onto that exact SHA over SSH,
+# rolling back to the previous image if it does not come up healthy on that
+# commit. `verify` then checks the public URL through nginx. The VM only pulls;
+# see docs/deployment.md.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same pull request supersedes the running check. On main
+# runs are never cancelled, only queued, so an older commit can never be
+# deployed over a newer one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: time4action/t4a-admin
+  # Overridable with the PRODUCTION_URL repository variable.
+  PRODUCTION_URL: ${{ vars.PRODUCTION_URL || 'https://admin.time-4-action.com' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      # Integration tests start their own MongoDB via mongodb-memory-server.
+      - run: npm test
+      # The same build the Dockerfile runs, so a broken build fails the pull
+      # request rather than the deploy.
+      - run: npm run build
+
+  deploy:
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    # The Docker Hub and SSH secrets are environment secrets on "production".
+    environment: production
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          push: true
+          platforms: linux/amd64
+          # NEXT_PUBLIC_* are baked into the client bundle at build time, so
+          # they come from repository variables here instead of .env.local.
+          # GIT_SHA is baked in as APP_VERSION, which the server checks.
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            NEXT_PUBLIC_APP_NAME=${{ vars.NEXT_PUBLIC_APP_NAME }}
+            NEXT_PUBLIC_COMPANY_COLOR=${{ vars.NEXT_PUBLIC_COMPANY_COLOR }}
+            NEXT_PUBLIC_AI_ROLE_NAME=${{ vars.NEXT_PUBLIC_AI_ROLE_NAME }}
+            NEXT_PUBLIC_DEV_ROLE_NAME=${{ vars.NEXT_PUBLIC_DEV_ROLE_NAME }}
+            NEXT_PUBLIC_EUR_USD_RATE=${{ vars.NEXT_PUBLIC_EUR_USD_RATE }}
+            NEXT_PUBLIC_DEEPGRAM_API_KEY=${{ secrets.NEXT_PUBLIC_DEEPGRAM_API_KEY }}
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: deploy
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          fingerprint: ${{ secrets.DEPLOY_FINGERPRINT }}
+          timeout: 30s
+          command_timeout: 15m
+          script: |
+            set -u
+            cd /data/stack/apps/time-4-action/admin || exit 1
+            SHA=${{ github.sha }}
+            NEW=time4action/t4a-admin:$SHA
+            SVC=t4a-admin
+
+            # The image the service runs now is what a failed deploy goes back to.
+            PREV=""
+            CID=$(docker compose ps -q $SVC 2>/dev/null || true)
+            if [ -n "$CID" ]; then
+              PREV=$(docker inspect --format '{{.Config.Image}}' "$CID")
+            fi
+            echo "running: ${PREV:-nothing}  deploying: $NEW"
+
+            healthy() {
+              for i in $(seq 1 30); do
+                curl -fsS http://127.0.0.1:3005/healthz >/dev/null && return 0
+                sleep 2
+              done
+              return 1
+            }
+
+            # Healthy is not enough: the container must be running the image
+            # built from this commit, not one left over.
+            on_commit() {
+              RUNNING=$(docker compose exec -T $SVC printenv APP_VERSION 2>/dev/null || true)
+              echo "$SVC reports APP_VERSION=${RUNNING:-none}"
+              [ "$RUNNING" = "$SHA" ]
+            }
+
+            export APP_IMAGE=$NEW
+            # A failed pull changes nothing on the server. Retried, because
+            # Docker Hub has transient failures.
+            for i in 1 2 3; do
+              docker compose pull $SVC && break
+              [ "$i" = 3 ] && exit 1
+              echo "pull failed, retrying"; sleep 10
+            done
+
+            if docker compose up -d --remove-orphans $SVC && healthy && on_commit; then
+              echo "healthy on $NEW"
+              docker image prune -f >/dev/null 2>&1 || true
+              exit 0
+            fi
+
+            echo "deploy of $NEW failed"
+            docker compose logs --tail=50 $SVC
+
+            if [ -z "$PREV" ] || [ "$PREV" = "$NEW" ]; then
+              echo "no previous image to roll back to"
+              exit 1
+            fi
+
+            echo "rolling back to $PREV"
+            export APP_IMAGE=$PREV
+            if docker compose up -d $SVC && healthy; then
+              echo "rolled back to $PREV"
+            else
+              echo "rollback is not healthy either"
+              docker compose logs --tail=50 $SVC
+            fi
+            exit 1
+
+  # From outside: DNS, TLS and the host nginx in front of the container the
+  # deploy job already checked on loopback.
+  verify:
+    needs: deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Public health check
+        run: |
+          curl -fsS --retry 10 --retry-delay 6 --retry-all-errors --max-time 10 \
+            "$PRODUCTION_URL/healthz"
