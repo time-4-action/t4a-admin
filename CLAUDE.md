@@ -180,7 +180,7 @@ filter, the per-row inline picker, and the claim detail "Assigned to" select all
 load it through the `useWarrantyAssignees()` hook (`app/warranty/use-assignees.ts`).
 The stored `assignee` is the user's **display name** (a plain string), so the
 warranty service is unchanged and legacy / removed assignees still render — the
-`assigneeOptions()` helper injects the claim's current value if it is no longer in
+assignee picker (`app/warranty/assignee-picker.tsx`) injects the claim's current value if it is no longer in
 the role. This route lives under `/api/warranty/*` (not `/api/admin/roles/*`) so
 `warranty-admin` users — who are not access-admins — are not 403'd by the section
 gate in `lib/access.ts`. Role name is configurable via
@@ -556,7 +556,7 @@ known mismatch),
 `types/documents.ts` group invoices + credit notes as the bill-shaped families
 that carry a due date and payment state; `DOC_KIND_SLUGS` maps a kind to its URL
 segment). Server-side
-partner resolution for the portal lives in `lib/portal.ts` (`getSessionPartner`).
+partner resolution for the portal lives in `lib/portal.ts` (`getPortalViewer` / `getPortalAccess`).
 
 | Page | Path | Notes |
 |---|---|---|
@@ -572,7 +572,7 @@ documents-admins, `canImpersonate`) sets a signed httpOnly cookie
 (`t4a_portal_as`, HMAC with `AUTH0_SECRET`, 4 h) holding the partner id + name +
 the admin page to return to. `getPortalViewer()` in `lib/portal.ts` honours it
 **only when the session holds an eligible admin role** — the cookie alone grants
-nothing — and `getSessionPartner()` then returns that partner for every portal
+nothing — and then resolves that partner for every portal
 page/route, so the admin sees exactly the customer's preorders and documents.
 Writes made meanwhile are made **as the customer** (a preorder submitted this way
 reads exactly as if the customer had submitted it). The root layout passes `viewingAs` to `AppShell`,
@@ -821,7 +821,7 @@ else `person`) decides the VAT only:
   tab keeps its own ladder (thresholds + percentages), but the same order total
   unlocks every tab's ladder (`priceOrder` collects all tabs first, then
   evaluates each ladder against the order amount). Tier widgets
-  (`TabTierBanner`, `SheetContextBar`, `DiscountStatus`) therefore take the full `tabs`.
+  (`SheetContextBar`, `DiscountStatus`) therefore take the full `tabs`.
   `DiscountStatus` (`preorder-shared.tsx`) is the always-visible version: it sits in
   the **sticky title row** of the portal fill page (beside Quick guide) and the
   admin Preview (header actions) — the active section's applied tier (or "No discount yet"), the
@@ -870,7 +870,7 @@ else `person`) decides the VAT only:
   the effective campaign root (`campaign.pricing`, also
   `effective.pricing.ctx`); `campaignFromSnapshot` restores it from the
   snapshot, so every fill component prices the same way with no prop threading
-  (`rowUnitPrice(row, basis)`, `computePricedOrder`, `PricingBanner`,
+  (`rowUnitPrice(row, basis)`, `computePricedOrder`,
   `TotalsLadder`). The admin builder has no context and prices without VAT.
 - Money is **integer cents** (`toCents`/`splitGross`/`priceLine`/`priceOrder`);
   VAT is split per line and totals are the Σ of the lines (invoice-style — a

@@ -80,7 +80,7 @@ MONGODB_URI=mongodb+srv://...
 # Optional
 NEXT_PUBLIC_AI_ROLE_NAME=AI User
 NEXT_PUBLIC_DEV_ROLE_NAME=dev
-NEXT_PUBLIC_EUR_USD_RATE=0.92
+NEXT_PUBLIC_EUR_USD_RATE=1.14
 ```
 
 ## 4. Run in Development
@@ -106,7 +106,7 @@ This builds a standalone Next.js container and exposes it on port **3005**.
 ```bash
 docker build \
   --build-arg NEXT_PUBLIC_AI_ROLE_NAME="AI User" \
-  --build-arg NEXT_PUBLIC_EUR_USD_RATE=0.92 \
+  --build-arg NEXT_PUBLIC_EUR_USD_RATE=1.14 \
   -t ghcr.io/time-4-action/t4a-admin:latest .
 
 # needs: docker login ghcr.io (token with write:packages)

@@ -50,11 +50,10 @@ Organization secrets (shared with the other time-4-action repos on this VM):
 | `PROD_DEPLOY_HOST`                  | The VM's hostname or IP |
 | `PROD_DEPLOY_SSH_KEY`               | Private key whose public half is in `deploy`'s `authorized_keys` |
 | `PROD_DEPLOY_FINGERPRINT`           | `SHA256:…` from `ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub` (the action prefers ECDSA; the ED25519 one fails with "host key fingerprint mismatch") |
-| `NEXT_PUBLIC_DEEPGRAM_API_KEY` | Optional; baked into the client bundle |
 
 Repository variables (baked into the client bundle at build time, replacing the
 values `scripts/build.bat` reads from `.env.local`):
-`NEXT_PUBLIC_COMPANY_COLOR`, `NEXT_PUBLIC_AI_ROLE_NAME`,
+`NEXT_PUBLIC_AI_ROLE_NAME`,
 `NEXT_PUBLIC_DEV_ROLE_NAME`, `NEXT_PUBLIC_EUR_USD_RATE`. Unset ones build empty,
 as they do locally.
 

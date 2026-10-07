@@ -627,19 +627,6 @@ export const LINE_STATUS_LABELS: Record<LineStatus, string> = {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-export function parseCampaignStatus(v?: string | null): CampaignStatus | null {
-  switch ((v ?? "").toLowerCase()) {
-    case "draft":
-      return "draft";
-    case "open":
-      return "open";
-    case "closed":
-      return "closed";
-    default:
-      return null;
-  }
-}
-
 // The unit price a customer orders a row at, in their price basis (lib/pricing.ts).
 export function rowUnitPrice(row: Pick<PreorderRow, "discountedPrice" | "partnerPrice" | "rrp">, basis: PriceBasis = "partner"): number {
   return unitPriceFor(row, basis);
@@ -667,10 +654,6 @@ export function flattenRows(
 // ── Volume discount tiers & totals ───────────────────────────────────────────
 // The tier helpers (activeTiers / tierForAmount / nextTierAfter) and PreorderTabTotal
 // are re-exported from lib/pricing.ts above; the engine below wraps priceOrder().
-
-export function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
 
 type PricedCampaign = Pick<PreorderCampaign, "tabs" | "pricing">;
 
@@ -730,11 +713,6 @@ export function totalsNet(t?: PreorderSubmissionTotals | null): number {
 
 export function totalsDiscount(t?: PreorderSubmissionTotals | null): number {
   return t?.discount ?? 0;
-}
-
-// Does this campaign use volume discounts at all? Gates the tier UI everywhere.
-export function campaignHasTiers(campaign: Pick<PreorderCampaign, "tabs">): boolean {
-  return campaign.tabs.some((t) => (t.tiers ?? []).some((x) => Number.isFinite(x?.discountPct) && x.discountPct > 0 && Number.isFinite(x?.minAmount) && x.minAmount >= 0));
 }
 
 // ── Frozen submissions ────────────────────────────────────────────────────────

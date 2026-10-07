@@ -58,19 +58,6 @@ export function findMarketFor(
   return campaign.markets.find((m) => marketMatches(m, iso ?? null, kind ?? null)) ?? null;
 }
 
-// Every market the partner would match, in priority order (for "also matches…").
-export function findMarketsFor(
-  campaign: Pick<PreorderCampaignAdmin, "markets">,
-  iso: string | null | undefined,
-  kind: MarketKind | null | undefined,
-): PreorderMarket[] {
-  return campaign.markets.filter((m) => marketMatches(m, iso ?? null, kind ?? null));
-}
-
-export function findMarketForCountry(campaign: Pick<PreorderCampaignAdmin, "markets">, iso: string | null | undefined): PreorderMarket | null {
-  return findMarketFor(campaign, iso, null);
-}
-
 export function findCustomerRule(
   campaign: Pick<PreorderCampaignAdmin, "customerRules">,
   partnerMkId: string,

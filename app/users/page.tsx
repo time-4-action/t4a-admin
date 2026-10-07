@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import LimitDialog from "@/components/limit-dialog";
@@ -11,7 +10,7 @@ import EditUserDialog from "@/components/edit-user-dialog";
 import DeleteUserDialog from "@/components/delete-user-dialog";
 import Link from "next/link";
 import { useCurrency } from "@/lib/currency-context";
-import { AI_ROLE_NAME, isAiRole } from "@/lib/ai-role";
+import { isAiRole } from "@/lib/ai-role";
 import { Search, Bot, Gauge, ShieldCheck, ShieldAlert, Pencil, Trash2, UserPlus, Loader2 } from "lucide-react";
 
 const isAdminRole = (name: string) => name.toLowerCase().includes("admin");

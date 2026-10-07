@@ -43,7 +43,6 @@ export {
   canImpersonateUser,
   effectiveRoles,
   type Impersonation,
-  type ImpersonationKind,
 } from "@/lib/portal-impersonation-codec";
 
 const TTL_MS = 4 * 60 * 60 * 1000; // 4 h

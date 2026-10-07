@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Search, ChevronsUpDown, Building2, Check } from "lucide-react";
 import type { MkPartner } from "@/types/documents";
-import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
+import { SkeletonLine, stagger } from "@/components/ui/skeleton";
 
 // Top-right customer switcher on the admin document pages. Shows the current
 // customer and lets an admin search and switch to any other. Controlled: the

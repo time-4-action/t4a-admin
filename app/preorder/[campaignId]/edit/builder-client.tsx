@@ -2133,7 +2133,6 @@ function InlineField({ label, hint, children }: { label: string; hint?: string; 
     </div>
   );
 }
-const inlineInput = "h-full min-w-0 bg-transparent px-2.5 text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/60";
 const inlineSelect = "h-full w-[230px] rounded-none border-0 bg-transparent px-2.5 text-[12.5px] shadow-none focus-visible:ring-0 hover:bg-muted/40 dark:bg-transparent dark:hover:bg-muted/40";
 
 function PricelistSelect({

@@ -206,66 +206,6 @@ function RowThumb({ row, cover }: { row: PreorderRow; cover?: string | null }) {
 }
 
 
-// ── Pricing banner ───────────────────────────────────────────────────────────
-// Tells the customer how THEY are priced: everyone orders at partner prices — a
-// company zero-rated (unless the layer charges VAT), an individual with their
-// country's VAT added on top. A legacy RRP-basis snapshot still reads "incl. VAT".
-// When the VAT rate is not configured the banner turns amber — the order cannot be
-// submitted.
-export function PricingBanner({ pricing, className, bare }: { pricing: PricingContext | null | undefined; className?: string; bare?: boolean }) {
-  if (!pricing) return null;
-  const missing = vatIsMissing(pricing);
-  const company = pricing.kind === "business";
-  const Icon = missing ? AlertTriangle : company ? Building2 : User;
-  return (
-    <div
-      className={cn(
-        "px-4 py-2.5 flex items-start gap-2.5 text-[12px]",
-        !bare && "rounded-xl border",
-        missing
-          ? cn("text-amber-800 dark:text-amber-300", !bare && "border-amber-300/70 bg-amber-50/70 dark:border-amber-800/60 dark:bg-amber-950/30")
-          : cn("text-muted-foreground", !bare && "border-border bg-surface"),
-        className,
-      )}
-    >
-      <Icon className={cn("w-4 h-4 shrink-0 mt-px", missing ? "text-amber-600" : "text-muted-foreground")} />
-      <div className="min-w-0">
-        {missing ? (
-          <>
-            <span className="font-semibold">VAT rate not configured{pricing.countryIso ? ` for ${pricing.countryIso}` : ""}.</span>{" "}
-            Your prices cannot be finalised yet, so the preorder cannot be submitted. Please contact us — you can still save a draft.
-          </>
-        ) : company ? (
-          <>
-            <span className="font-semibold text-foreground">You order as a company</span> — partner prices, excl. VAT
-            {(pricing.vat.rate ?? 0) > 0
-              ? ` — ${fmtVatRate(pricing.vat.rate)} VAT is added to your total.`
-              : ` (${fmtVatRate(pricing.vat.rate)}, ${pricing.vat.source === "exempt" ? "VAT exempt" : "zero-rated"}).`}{" "}
-            The RRP column is shown for reference.
-          </>
-        ) : pricing.basis === "rrp" ? (
-          <>
-            <span className="font-semibold text-foreground">You order as an individual</span> — retail prices (RRP) incl.{" "}
-            {fmtVatRate(pricing.vat.rate)} VAT{pricing.countryIso ? ` (${pricing.countryIso})` : ""}. VAT is included in every price shown. The partner
-            column is shown for reference.
-          </>
-        ) : (pricing.vat.rate ?? 0) > 0 ? (
-          <>
-            <span className="font-semibold text-foreground">You order as an individual</span> — partner prices, excl. VAT.{" "}
-            {fmtVatRate(pricing.vat.rate)} VAT{pricing.countryIso ? ` (${pricing.countryIso})` : ""} is added on top of every price at checkout. The RRP
-            column is shown for reference.
-          </>
-        ) : (
-          <>
-            <span className="font-semibold text-foreground">You order as an individual</span> — partner prices, excl. VAT ({fmtVatRate(pricing.vat.rate)},{" "}
-            {pricing.vat.source === "exempt" ? "VAT exempt" : "zero-rated"}). The RRP column is shown for reference.
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // Column captions for the two price columns, highlighting the one the customer pays.
 function priceHeader(label: string, sub: string, active: boolean) {
   return (
@@ -967,118 +907,6 @@ function Stepper({ value, onChange }: { value: number; onChange: (n: number) => 
   );
 }
 
-// ── Volume discount tiers ────────────────────────────────────────────────────
-// What the partner sees of a tab's discount ladder: the tier they've reached, how far
-// the next one is, and the whole ladder. The thresholds are measured against the
-// WHOLE order (every tab), so the caller passes all `tabs` — the widget only shows
-// the ladder of `tab`. Renders nothing when the tab has no tiers.
-export function TabTierBanner({
-  tab,
-  tabs,
-  quantities,
-  currency,
-  className,
-  pricing,
-  bare,
-}: {
-  tab: PreorderTab;
-  tabs: PreorderTab[]; // the whole sheet — the order subtotal unlocks the tiers
-  quantities: QtyMap;
-  currency: string;
-  className?: string;
-  pricing?: PricingContext | null; // thresholds are compared in the customer's basis
-  bare?: boolean; // no border / radius — the caller frames it
-}) {
-  const ladder = activeTiers(tab.tiers);
-  const totals = useMemo(
-    () => computeTabTotals({ tabs, pricing: pricing ?? null }, quantities).find((t) => t.tabId === tab.id) ?? null,
-    [tab.id, tabs, quantities, pricing],
-  );
-  const fixedCount = tabFixedCount(tab);
-  if (ladder.length === 0 || !totals) return null;
-
-  const reached = totals.tier;
-  const next = totals.nextTier;
-  // Progress towards the next tier, measured from the tier already reached, on the
-  // order subtotal.
-  const from = reached?.minAmount ?? 0;
-  const pct = next ? Math.min(100, Math.max(0, ((totals.orderAmount - from) / (next.minAmount - from)) * 100)) : 100;
-
-  return (
-    <div
-      className={cn(
-        "px-4 py-3",
-        !bare && "rounded-xl border",
-        !bare && "border-border bg-surface",
-        className,
-      )}
-    >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <Percent className={cn("w-3.5 h-3.5 shrink-0", reached ? "text-lime-600" : "text-muted-foreground")} />
-        {reached ? (
-          <span className="text-[13px] font-medium text-lime-700 dark:text-lime-300">
-            {reached.name || "Volume discount"} unlocked — −{reached.discountPct}% on everything in {tab.name || "this tab"}
-            {fixedCount > 0 && " except fixed-price products"}
-          </span>
-        ) : (
-          <span className="text-[13px] font-medium text-foreground">Volume discount available in {tab.name || "this tab"}</span>
-        )}
-        <div className="flex-1" />
-        {reached && (
-          <span className="text-[12px] tabular-nums text-lime-700 dark:text-lime-300 font-semibold">
-            −{fmtMoney(totals.discount, currency)}
-          </span>
-        )}
-      </div>
-
-      {next && (
-        <div className="mt-2">
-          <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full bg-lime-500 transition-[width] duration-300"
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-          <div className="mt-1 text-[11px] text-muted-foreground">
-            {fmtMoney(totals.toNextTier, currency)} more on your order unlocks{" "}
-            <span className="font-medium text-foreground">{next.name || "the next tier"}</span> · −{next.discountPct}%
-          </div>
-        </div>
-      )}
-
-      {fixedCount > 0 && (
-        <div className="mt-2">
-          <FixedPriceChip tab={tab} quantities={quantities} currency={currency} basis={pricing?.basis ?? "partner"} nextTierName={next?.name || null} />
-        </div>
-      )}
-
-      <div className="mt-2 flex flex-wrap gap-1">
-        {ladder.map((t) => {
-          const hit = !!reached && t.minAmount <= reached.minAmount;
-          const current = reached?.id === t.id;
-          return (
-            <span
-              key={t.id}
-              className={cn(
-                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
-                current
-                  ? "bg-foreground text-background font-semibold"
-                  : hit
-                    ? "bg-muted text-foreground"
-                    : "bg-muted/60 text-muted-foreground",
-              )}
-            >
-              {current && <Check className="w-2.5 h-2.5" />}
-              {t.name || "Tier"} −{t.discountPct}%
-              <span className="tabular-nums opacity-70">from {fmtMoney(t.minAmount, currency)}</span>
-            </span>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // ── Sheet context bar ────────────────────────────────────────────────────────
 // One dense row above the products: who is ordering and how they are priced (left),
 // the tab's volume-discount ladder as a stepped track with the current position
@@ -1392,7 +1220,7 @@ export function SheetContextBar({
             <div className="min-w-0 text-[10px] leading-tight text-muted-foreground/70">
               <div className="truncate uppercase tracking-wide">No discount</div>
             </div>
-            {ladder.map((t, i) => {
+            {ladder.map((t) => {
               const hit = amount + 1e-9 >= t.minAmount;
               const current = reached?.id === t.id;
               return (
