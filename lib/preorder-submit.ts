@@ -18,7 +18,7 @@ import { connectDB, PreorderCampaign, PreorderSubmission, loadEffectiveCampaignF
 import { getMkCustomer, effectiveCountryIso, customerKind } from "@/lib/mk-customers";
 import { getPartnerById } from "@/lib/metakocka";
 import { getVatSettings } from "@/lib/vat-settings";
-import { registerSalesOrder, type SubmitActor, type RegisterResult } from "@/lib/preorder-mk";
+import { actorSubmittedBy, registerSalesOrder, type SubmitActor, type RegisterResult } from "@/lib/preorder-mk";
 import type { MkOrderPort } from "@/lib/preorder-mk";
 import { buildCommercialSnapshot } from "@/lib/preorder-snapshot";
 import type { IPreorderCampaign } from "@/models/preorder-campaign";
@@ -185,7 +185,7 @@ export async function saveOrSubmitPreorder(input: SubmitInput): Promise<SubmitRe
             ...identity,
             snapshot: { ...snapshot, resolvedAt: now, deadline: snapshot.deadline ? new Date(snapshot.deadline) : null },
             submitSource: actor.source,
-            submittedBy: actor.source === "admin" ? actor.email : null,
+            submittedBy: actorSubmittedBy(actor),
             resultPublishedToCustomer: false,
             publishedHash: null,
             unlockRequestNote: null,

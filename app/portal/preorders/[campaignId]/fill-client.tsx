@@ -93,7 +93,10 @@ type LoadData = {
 
 const TOUR_KEY = "t4a.portal.preorder-guide.v1";
 
-export default function FillClient({ campaignId }: { campaignId: string }) {
+// `account` — a portal agent filling for one of their clients (validated server-side
+// against the agent's accounts; absent = the user's own partner).
+export default function FillClient({ campaignId, account = "" }: { campaignId: string; account?: string }) {
+  const accountQs = account ? `?account=${encodeURIComponent(account)}` : "";
   const [campaign, setCampaign] = useState<PortalCampaign | null>(null);
   const [frozen, setFrozen] = useState<PreorderCampaign | null>(null);
   const [allocation, setAllocation] = useState<AllocationResult | null>(null);
@@ -132,11 +135,11 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
   }, []);
 
   const load = useCallback(async () => {
-    const r = await fetch(`/api/portal/preorder/campaigns/${campaignId}`, { cache: "no-store" });
+    const r = await fetch(`/api/portal/preorder/campaigns/${campaignId}${accountQs}`, { cache: "no-store" });
     const data = await r.json();
     if (!r.ok) throw new Error(data?.error === "no-account" ? "no-account" : "not-found");
     return data as LoadData;
-  }, [campaignId]);
+  }, [campaignId, accountQs]);
 
   useEffect(() => {
     mounted.current = true;
@@ -250,7 +253,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
         const r = await fetch(`/api/portal/preorder/submissions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ campaignId, quantities, terms, action }),
+          body: JSON.stringify({ campaignId, account: account || undefined, quantities, terms, action }),
         });
         const data = await r.json();
         if (r.status === 409 && data?.error === "locked") throw new Error("This preorder is locked. Please contact us to make changes.");
@@ -280,7 +283,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
         setBusy(null);
       }
     },
-    [campaign, campaignId, quantities, terms, load, applyLoad],
+    [campaign, campaignId, account, quantities, terms, load, applyLoad],
   );
 
   // Autosave the draft: every change after the first load is saved 1.2 s after the
@@ -310,7 +313,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
         const r = await fetch(`/api/portal/preorder/submissions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ campaignId, quantities, terms, action: "save" }),
+          body: JSON.stringify({ campaignId, account: account || undefined, quantities, terms, action: "save" }),
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(data?.message ?? data?.error ?? "Autosave failed");
@@ -326,14 +329,14 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
     }, 1200);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoState, quantities, terms, locked, busy, campaignId]);
+  }, [autoState, quantities, terms, locked, busy, campaignId, account]);
 
   const retryRegistration = useCallback(async () => {
     if (!submission?.id) return;
     setBusy("retry");
     setError(null);
     try {
-      const r = await fetch(`/api/portal/preorder/submissions/${submission.id}/register`, { method: "POST" });
+      const r = await fetch(`/api/portal/preorder/submissions/${submission.id}/register${accountQs}`, { method: "POST" });
       const data = await r.json().catch(() => ({}));
       if (data?.submission) setSubmission(data.submission);
       const fresh = await load();
@@ -343,7 +346,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
     } finally {
       setBusy(null);
     }
-  }, [submission?.id, load, applyLoad]);
+  }, [submission?.id, accountQs, load, applyLoad]);
 
   async function submitUnlockRequest() {
     setRequestBusy(true);
@@ -352,7 +355,7 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
       const r = await fetch(`/api/portal/preorder/unlock-request`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ campaignId, note: requestNote }),
+        body: JSON.stringify({ campaignId, account: account || undefined, note: requestNote }),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data?.error ?? "Failed");
@@ -668,6 +671,11 @@ export default function FillClient({ campaignId }: { campaignId: string }) {
           <div className="min-w-0">
             <h1 className="text-[15px] font-semibold text-foreground truncate leading-tight">{campaign.title}</h1>
             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              {account && partnerName && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-teal-500/10 text-teal-700 dark:text-teal-300 px-2 font-medium max-w-[14rem]" title={`Ordering for ${partnerName}`}>
+                  <span className="truncate">For {partnerName}</span>
+                </span>
+              )}
               {sheet.deadline && (
                 <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" /> Deadline {fmtDate(sheet.deadline)}</span>
               )}

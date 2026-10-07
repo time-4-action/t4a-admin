@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
 import { SUBMISSION_STATUS_LABELS, type PreorderCampaignSummary, type SubmissionStatus, type SubmissionStage } from "@/types/preorder";
+import type { PortalAccount } from "@/types/portal-agent";
 
 type MyCampaign = PreorderCampaignSummary & {
   mySubmissionStatus: SubmissionStatus | null;
@@ -20,7 +21,15 @@ type MyCampaign = PreorderCampaignSummary & {
   myTotal: number;
   mySubmittedAt: string | null;
   myUpdatedAt: string | null;
+  // Portal agents: the account this row is for (one row per campaign per account).
+  account?: PortalAccount;
 };
+
+// The fill page of a row — an agent's client row carries its account explicitly.
+export function preorderHref(campaignId: string, account?: PortalAccount | null): string {
+  const base = `/portal/preorders/${campaignId}`;
+  return account && !account.own ? `${base}?account=${encodeURIComponent(account.mkId)}` : base;
+}
 
 // Customer-facing wording for the stage — never Metakocka terminology.
 function stagePill(stage: SubmissionStage | null, status: SubmissionStatus | null, campaignOpen: boolean): { label: string; cls: string; icon: React.ReactNode } {
@@ -50,24 +59,31 @@ function fmtDate(v?: string | null): string {
 
 const GRID = "grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,0.6fr)_minmax(0,1.4fr)_minmax(0,1fr)_24px] items-center gap-x-4";
 
-export function PreordersList() {
+export function PreordersList({ scope = "", multiAccount = false }: { scope?: string; multiAccount?: boolean }) {
   const [campaigns, setCampaigns] = useState<MyCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
 
   useEffect(() => {
-    fetch("/api/portal/preorder/campaigns", { cache: "no-store" })
+    setLoading(true);
+    fetch(`/api/portal/preorder/campaigns${scope ? `?account=${encodeURIComponent(scope)}` : ""}`, { cache: "no-store" })
       .then(async (r) => {
         const data = await r.json();
         setCampaigns(data.campaigns ?? []);
       })
       .catch(() => setCampaigns([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [scope]);
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return campaigns.filter((c) => !needle || c.title.toLowerCase().includes(needle) || (c.season ?? "").toLowerCase().includes(needle));
+    return campaigns.filter(
+      (c) =>
+        !needle ||
+        c.title.toLowerCase().includes(needle) ||
+        (c.season ?? "").toLowerCase().includes(needle) ||
+        (c.account?.name ?? "").toLowerCase().includes(needle),
+    );
   }, [campaigns, q]);
 
   const openToFill = campaigns.filter((c) => c.status === "open" && (!c.mySubmissionStatus || c.mySubmissionStatus === "draft")).length;
@@ -153,13 +169,19 @@ export function PreordersList() {
               const pill = stagePill(c.myStage, c.mySubmissionStatus, c.status === "open");
               const hasAmount = !!c.mySubmissionStatus && c.myItems > 0;
               return (
-                <Link key={c.id} href={`/portal/preorders/${c.id}`} className={cn(GRID, "group px-4 py-3 hover:bg-muted/30 transition-colors")}>
+                <Link key={`${c.id}:${c.account?.mkId ?? ""}`} href={preorderHref(c.id, c.account)} className={cn(GRID, "group px-4 py-3 hover:bg-muted/30 transition-colors")}>
                   <div className="min-w-0 flex items-center gap-3">
                     <span className="w-9 h-9 rounded-lg bg-lime-600/10 flex items-center justify-center shrink-0">
                       <ShoppingCart className="w-4 h-4 text-lime-600 dark:text-lime-500" />
                     </span>
                     <div className="min-w-0">
                       <p className="text-[13px] font-semibold text-foreground truncate">{c.title}</p>
+                      {multiAccount && c.account && (
+                        <p className="text-[11px] font-medium text-teal-700 dark:text-teal-300 truncate">
+                          {c.account.name}
+                          {c.account.own && <span className="font-normal opacity-70"> (you)</span>}
+                        </p>
+                      )}
                       <p className="text-[11px] text-muted-foreground truncate">
                         {c.season ? `${c.season}` : ""}
                         {c.mySubmittedAt ? `${c.season ? " · " : ""}submitted ${fmtDate(c.mySubmittedAt)}` : c.myUpdatedAt && c.mySubmissionStatus === "draft" ? `${c.season ? " · " : ""}draft saved ${fmtDate(c.myUpdatedAt)}` : ""}

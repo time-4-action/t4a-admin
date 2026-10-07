@@ -7,6 +7,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { viewingAsName, type ViewingAs } from "@/components/viewing-as";
 import { ReceiptText, FileMinus, ClipboardList, Building2, LogOut, Menu, X, ShoppingCart } from "lucide-react";
 import { PLATFORM_NAME } from "@/lib/brand";
+import { PortalAccountSwitcher } from "@/components/portal-account-switcher";
 
 // The B2B customer portal shell. Shown to any authenticated non-admin (they hold
 // no role; their documents are matched by email inside the portal). Deliberately
@@ -82,6 +83,9 @@ export default function PortalNav({ user, viewingAs }: { user?: PortalUser; view
           </button>
         )}
       </div>
+
+      {/* Agents only: which account(s) the portal shows */}
+      <PortalAccountSwitcher />
 
       {/* Links */}
       <div className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">

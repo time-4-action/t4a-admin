@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionPartner } from "@/lib/portal";
+import { resolvePortalAccount } from "@/lib/portal";
 import { connectDB, PreorderCampaign, toObjectId, toPortalSubmissionView, partnerHasCampaignAccess } from "@/lib/preorder";
 import { saveOrSubmitPreorder } from "@/lib/preorder-submit";
 import { defaultTermsFromPartner } from "@/lib/preorder-terms";
@@ -14,15 +14,18 @@ export const dynamic = "force-dynamic";
 // partner's EFFECTIVE campaign; on submit the Metakocka sales order is registered
 // immediately (lib/preorder-submit.ts). The response never carries MK identifiers.
 export async function POST(request: Request) {
-  const partner = await getSessionPartner();
-  if (!partner) return NextResponse.json({ error: "no-account" }, { status: 404 });
-
   const body = (await request.json().catch(() => ({}))) as {
+    account?: string;
     campaignId?: string;
     quantities?: Record<string, number>;
     terms?: PreorderTerms;
     action?: "save" | "submit";
   };
+  // A portal agent acting for a client names the account; it must be one of theirs.
+  const resolved = await resolvePortalAccount(body.account);
+  if (!resolved) return NextResponse.json({ error: "no-account" }, { status: 404 });
+  const { partner, account } = resolved;
+
   const campaignId = (body.campaignId || "").trim();
   if (!toObjectId(campaignId)) {
     return NextResponse.json({ error: "invalid campaign" }, { status: 400 });
@@ -50,7 +53,13 @@ export async function POST(request: Request) {
     action: body.action === "submit" ? "submit" : "save",
     // An admin "viewing as" the customer acts AS the customer — the submission reads
     // exactly as if the customer had made it.
-    actor: { source: "customer" },
+    // An agent acting for a client submits AS that client too; who placed it is kept.
+    actor: account.own
+      ? { source: "customer" }
+      : {
+          source: "customer",
+          agent: { partnerMkId: resolved.access.partner!.mkId, name: resolved.access.partner!.name, email: resolved.access.partner!.emails?.[0] ?? null },
+        },
   });
   if (!result.ok) {
     return NextResponse.json(

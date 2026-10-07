@@ -220,6 +220,18 @@ export function DocumentList({
   );
   const paging = usePaging(filtered.length, filters.value);
   const pageItems = filtered.slice(paging.start, paging.start + PAGE_SIZE);
+  // A portal agent's list spanning several accounts: show + filter by account.
+  const accountOptions = useMemo(() => {
+    const byId = new Map<string, { name: string; own: boolean; count: number }>();
+    for (const d of allItems) {
+      if (!d.account) continue;
+      const cur = byId.get(d.account.mkId);
+      if (cur) cur.count += 1;
+      else byId.set(d.account.mkId, { name: d.account.name, own: d.account.own, count: 1 });
+    }
+    return Array.from(byId, ([mkId, v]) => ({ mkId, ...v })).sort((a, b) => Number(b.own) - Number(a.own) || a.name.localeCompare(b.name));
+  }, [allItems]);
+  const multiAccount = accountOptions.length > 1;
 
   if (state.status === "loading") return <DocumentListSkeleton kind={kind} />;
 
@@ -242,17 +254,35 @@ export function DocumentList({
   }
 
   const noun = DOC_KIND_LABELS[kind].plural.toLowerCase();
+  // The summary follows the account filter (an agent narrowing to one customer
+  // wants that customer's open balance), not the search / status filters.
+  const summaryItems = filters.value.account === "all" ? state.items : state.items.filter((d) => d.account?.mkId === filters.value.account);
 
   return (
     <div className="space-y-4">
-      {isBill ? <BillSummary kind={kind} items={state.items} /> : <OrderSummaryStrip items={state.items} />}
+      {isBill ? <BillSummary kind={kind} items={summaryItems} /> : <OrderSummaryStrip items={summaryItems} />}
       <div className="rounded-2xl border border-border bg-surface overflow-hidden">
         <DocumentFilterBar kind={kind} items={state.items} filters={filters} shown={filtered.length} />
 
         {/* Column header — the same grid as the rows below. Sort lives on the
             column headings; the status heading is the status filter itself. */}
         <div className={cn(gridCols(kind), "hidden md:grid px-4 h-9 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border/60 bg-muted/25")}>
-          <SortHeader col="doc" sort={sort}>{DOC_KIND_LABELS[kind].singular}</SortHeader>
+          {multiAccount ? (
+            <div className="flex items-center gap-3 min-w-0">
+              <SortHeader col="doc" sort={sort}>{DOC_KIND_LABELS[kind].singular}</SortHeader>
+              <HeaderFilter
+                label="Customer"
+                value={filters.value.account}
+                onChange={(v) => filters.set("account", v)}
+                options={[
+                  { value: "all", label: "All customers" },
+                  ...accountOptions.map((a) => ({ value: a.mkId, label: a.own ? `${a.name} (you)` : a.name, count: a.count })),
+                ]}
+              />
+            </div>
+          ) : (
+            <SortHeader col="doc" sort={sort}>{DOC_KIND_LABELS[kind].singular}</SortHeader>
+          )}
           <SortHeader col="issued" sort={sort}>Issued</SortHeader>
           {isBill && <SortHeader col="due" sort={sort}>Due</SortHeader>}
           <SortHeader col="items" sort={sort} align="center">Items</SortHeader>
@@ -271,8 +301,9 @@ export function DocumentList({
           )}
           {pageItems.map((d) => (
             <DocumentRow
-              key={d.mkId}
+              key={d.account ? `${d.account.mkId}:${d.mkId}` : d.mkId}
               d={d}
+              showAccount={multiAccount}
               href={`${hrefBase}/${encodeURIComponent(d.mkId)}`}
               activeStatus={filters.value.status}
               onStatus={(key) => filters.set("status", filters.value.status === key ? "all" : key)}
@@ -345,8 +376,10 @@ function DocumentRow({
   href,
   activeStatus,
   onStatus,
+  showAccount = false,
 }: {
   d: DocSummary;
+  showAccount?: boolean;
   href: string;
   activeStatus: string;
   onStatus: (key: string) => void;
@@ -382,6 +415,12 @@ function DocumentRow({
       {/* Document */}
       <div className="min-w-0">
         <p className="text-[13px] font-semibold text-foreground truncate group-hover:underline">{d.countCode}</p>
+        {showAccount && d.account && (
+          <p className="text-[11px] font-medium text-teal-700 dark:text-teal-300 mt-0.5 truncate" title={d.account.name}>
+            {d.account.name}
+            {d.account.own && <span className="font-normal opacity-70"> (you)</span>}
+          </p>
+        )}
         {d.title && <p className="hidden md:block text-[11px] text-muted-foreground mt-0.5 truncate">{d.title}</p>}
         {/* Folded-in columns on narrow screens */}
         <p className="md:hidden text-[11px] text-muted-foreground mt-0.5 truncate">
@@ -479,15 +518,16 @@ function StatusFilterTrigger({
 export const PAGE_SIZE = 25;
 const EMPTY_ITEMS: DocSummary[] = [];
 
-type DocFilters = { q: string; status: string };
-const EMPTY_FILTERS: DocFilters = { q: "", status: "all" };
+// `account` narrows a portal agent's combined list to one of their accounts.
+type DocFilters = { q: string; status: string; account: string };
+const EMPTY_FILTERS: DocFilters = { q: "", status: "all", account: "all" };
 
 function useDocumentFilters(kind: DocKind) {
   const [value, setValue] = useState<DocFilters>(EMPTY_FILTERS);
   // A different family (invoices → orders) starts with clean filters.
   useEffect(() => setValue(EMPTY_FILTERS), [kind]);
   const set = <K extends keyof DocFilters>(k: K, v: DocFilters[K]) => setValue((f) => ({ ...f, [k]: v }));
-  const active = value.q !== "" || value.status !== "all";
+  const active = value.q !== "" || value.status !== "all" || value.account !== "all";
   return { value, set, reset: () => setValue(EMPTY_FILTERS), active };
 }
 type DocFiltersApi = ReturnType<typeof useDocumentFilters>;
@@ -509,8 +549,9 @@ function statusLabel(kind: DocKind, key: string): string {
 function applyDocumentFilters(items: DocSummary[], f: DocFilters): DocSummary[] {
   const q = f.q.trim().toLowerCase();
   return items.filter((d) => {
-    if (q && !`${d.countCode} ${d.title ?? ""}`.toLowerCase().includes(q)) return false;
+    if (q && !`${d.countCode} ${d.title ?? ""} ${d.account?.name ?? ""}`.toLowerCase().includes(q)) return false;
     if (f.status !== "all" && statusKey(d) !== f.status) return false;
+    if (f.account !== "all" && d.account?.mkId !== f.account) return false;
     return true;
   });
 }

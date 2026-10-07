@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSessionPartner, isPortalDocKind } from "@/lib/portal";
+import { accountOf, getPortalAccess, isPortalDocKind } from "@/lib/portal";
 import { getDocument, getDocumentPdf } from "@/lib/metakocka";
 import { customerMayViewDocument } from "@/lib/preorder-visibility";
 import { parseDocKind } from "@/types/documents";
@@ -8,19 +8,21 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Stream a document PDF to the logged-in customer. Re-verifies ownership
-// (doc.partner.mkId === session partner) so a customer can't fetch another
-// partner's document by guessing an mk_id.
+// (doc.partner.mkId is one of the session's accounts — their own partner, or an
+// agent's assigned client) so a customer can't fetch another partner's document
+// by guessing an mk_id.
 export async function GET(req: NextRequest) {
   const kind = parseDocKind(req.nextUrl.searchParams.get("kind"));
   const mkId = req.nextUrl.searchParams.get("mkId");
   if (!isPortalDocKind(kind) || !mkId) return NextResponse.json({ error: "invalid request" }, { status: 400 });
 
-  const partner = await getSessionPartner();
-  if (!partner) return NextResponse.json({ error: "no-account" }, { status: 404 });
+  const access = await getPortalAccess();
+  if (!access.partner) return NextResponse.json({ error: "no-account" }, { status: 404 });
 
   const doc = await getDocument(kind, mkId);
+  const owner = accountOf(access, doc?.partner?.mkId);
   // Ownership + preorder visibility (an unpublished preorder order is not theirs to see yet).
-  if (!doc || !(await customerMayViewDocument(partner, doc))) {
+  if (!doc || !owner || !(await customerMayViewDocument({ mkId: owner.mkId }, doc))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
