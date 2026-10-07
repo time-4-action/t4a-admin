@@ -51,8 +51,16 @@ values `scripts/build.bat` reads from `.env.local`): `NEXT_PUBLIC_APP_NAME`,
 `NEXT_PUBLIC_DEV_ROLE_NAME`, `NEXT_PUBLIC_EUR_USD_RATE`. Unset ones build empty,
 as they do locally.
 
-The `deploy` user must be in the `docker` group, own the server directory, and
-have `curl`.
+The SSH user is `deploy` unless the `DEPLOY_USER` repository variable names
+another. It must be in the `docker` group, be able to write the server
+directory, and have `curl`.
+
+## Server setup (once)
+
+The server's `docker-compose.yaml` must be `deploy/docker-compose.yaml`. A copy
+with a `build:` section or a fixed `image:` tag ignores `APP_IMAGE`, so every
+deploy would fail its `APP_VERSION` check and roll back. `.env.local` sits
+beside it and holds the runtime secrets (`AUTH0_*`, `MONGODB_URI`, `MK_*`, …).
 
 ## Dependency updates
 
