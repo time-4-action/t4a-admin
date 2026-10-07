@@ -25,6 +25,13 @@ scripts\build.bat --latest   # Build image (tag: latest)
 scripts\push.bat --latest    # Push image to time4action/t4a-admin
 ```
 
+**CI/CD** (`.github/workflows/deploy.yml`, see `docs/deployment.md`): every pull
+request runs typecheck + tests + build; a push to `main` also builds the image
+in Actions (`:<sha>` + `:latest`), rolls it out over SSH with a `/healthz` +
+`APP_VERSION` check and automatic rollback, then checks the public URL. The
+`.bat` scripts remain for manual builds. `/healthz` is public (excluded in the
+`middleware.ts` matcher) and must stay free of Mongo/Auth0.
+
 ## Git Workflow
 
 Work flows through an integration branch — **never PR a feature branch directly into `main`.**

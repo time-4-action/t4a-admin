@@ -53,3 +53,9 @@ as they do locally.
 
 The `deploy` user must be in the `docker` group, own the server directory, and
 have `curl`.
+
+## Dependency updates
+
+`.github/dependabot.yml` opens at most one grouped pull request per ecosystem a
+month (npm minor + patch, GitHub Actions); each goes through `check` like any
+other pull request. Major npm versions are left to a deliberate upgrade.
