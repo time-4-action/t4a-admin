@@ -23,8 +23,12 @@ import {
   Building2,
   User,
   AlertTriangle,
+  LayoutGrid,
+  Table2,
+  Lock,
 } from "lucide-react";
 import Link from "next/link";
+import { Popover as PopoverPrimitive } from "radix-ui";
 import {
   Dialog,
   DialogContent,
@@ -35,6 +39,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
+import { TagPill } from "@/app/preorder/tag-pill";
 import {
   rowUnitPrice,
   computeTabTotals,
@@ -44,6 +49,7 @@ import {
   totalsNet,
   totalsDiscount,
   CUSTOMER_KIND_LABELS,
+  tagLabel,
   type PreorderCampaign,
   type PreorderSubmissionTotals,
   type PreorderTab,
@@ -67,6 +73,36 @@ export function fmtMoney(amount: number, currency = "EUR"): string {
 }
 
 type QtyMap = Record<string, number>;
+
+// ── Fixed price ──────────────────────────────────────────────────────────────
+// A fixed-price product (`row.fixedPrice`) is never volume-discounted; it still counts
+// towards the order total that unlocks the discount levels. One pill marks it
+// everywhere the customer meets it (sheet, catalogue, product, review) and in the
+// admin builder.
+export const FIXED_PRICE_HINT =
+  "Fixed price — volume discounts don't apply to this product. It still counts towards your order total for reaching a discount level.";
+
+export function FixedPricePill({ className, size = "sm" }: { className?: string; size?: "sm" | "md" }) {
+  return (
+    <span
+      title={FIXED_PRICE_HINT}
+      className={cn(
+        "inline-flex items-center gap-1 shrink-0 rounded-full whitespace-nowrap font-medium",
+        "bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-300/70 dark:bg-slate-800/70 dark:text-slate-200 dark:ring-slate-600/60",
+        size === "md" ? "px-2 py-0.5 text-[11px]" : "px-1.5 py-px text-[10px]",
+        className,
+      )}
+    >
+      <Lock className={size === "md" ? "w-3 h-3" : "w-2.5 h-2.5"} aria-hidden />
+      Fixed price
+    </span>
+  );
+}
+
+/** Fixed-price rows of a tab (for the "not discounted" notes). */
+export function tabFixedCount(tab: PreorderTab | null | undefined): number {
+  return tab ? tab.groups.reduce((n, g) => n + g.rows.filter((r) => r.fixedPrice).length, 0) : 0;
+}
 
 // Per-tab item counts for the tab bar.
 export function TabBar({
@@ -164,23 +200,18 @@ function Zoomable({ src, alt, className }: { src?: string | null; alt?: string; 
   );
 }
 
-function RowThumb({ row }: { row: PreorderRow }) {
-  return <Zoomable src={row.image} alt={row.name} className="w-8 h-8 rounded ring-1 ring-border" />;
+// A variant without its own picture shows the group's cover.
+function RowThumb({ row, cover }: { row: PreorderRow; cover?: string | null }) {
+  return <Zoomable src={row.image ?? cover ?? null} alt={row.name} className="w-8 h-8 rounded ring-1 ring-border" />;
 }
 
-function TagPill({ tag }: { tag?: PreorderRow["tag"] }) {
-  if (!tag) return null;
-  return (
-    <span className="text-[9px] font-bold uppercase text-lime-700 bg-lime-100 dark:bg-lime-900/50 dark:text-lime-300 rounded px-1 shrink-0">
-      {tag === "NEW" ? "NEW" : "PRE"}
-    </span>
-  );
-}
 
 // ── Pricing banner ───────────────────────────────────────────────────────────
-// Tells the customer how THEY are priced: a company orders at partner prices,
-// zero-rated; an individual at the RRP with their country's VAT inside it. When the
-// VAT rate is not configured the banner turns amber — the order cannot be submitted.
+// Tells the customer how THEY are priced: everyone orders at partner prices — a
+// company zero-rated (unless the layer charges VAT), an individual with their
+// country's VAT added on top. A legacy RRP-basis snapshot still reads "incl. VAT".
+// When the VAT rate is not configured the banner turns amber — the order cannot be
+// submitted.
 export function PricingBanner({ pricing, className, bare }: { pricing: PricingContext | null | undefined; className?: string; bare?: boolean }) {
   if (!pricing) return null;
   const missing = vatIsMissing(pricing);
@@ -212,16 +243,22 @@ export function PricingBanner({ pricing, className, bare }: { pricing: PricingCo
               : ` (${fmtVatRate(pricing.vat.rate)}, ${pricing.vat.source === "exempt" ? "VAT exempt" : "zero-rated"}).`}{" "}
             The RRP column is shown for reference.
           </>
-        ) : pricing.vat.source === "exempt" ? (
+        ) : pricing.basis === "rrp" ? (
           <>
-            <span className="font-semibold text-foreground">You order as an individual</span> — retail prices (RRP), VAT exempt (0%). The partner column is
-            shown for reference.
+            <span className="font-semibold text-foreground">You order as an individual</span> — retail prices (RRP) incl.{" "}
+            {fmtVatRate(pricing.vat.rate)} VAT{pricing.countryIso ? ` (${pricing.countryIso})` : ""}. VAT is included in every price shown. The partner
+            column is shown for reference.
+          </>
+        ) : (pricing.vat.rate ?? 0) > 0 ? (
+          <>
+            <span className="font-semibold text-foreground">You order as an individual</span> — partner prices, excl. VAT.{" "}
+            {fmtVatRate(pricing.vat.rate)} VAT{pricing.countryIso ? ` (${pricing.countryIso})` : ""} is added on top of every price at checkout. The RRP
+            column is shown for reference.
           </>
         ) : (
           <>
-            <span className="font-semibold text-foreground">You order as an individual</span> — retail prices (RRP) incl.{" "}
-            {fmtVatRate(pricing.vat.rate)} VAT{pricing.countryIso ? ` (${pricing.countryIso})` : ""}. VAT is included in every price shown, never added on
-            top. The partner column is shown for reference.
+            <span className="font-semibold text-foreground">You order as an individual</span> — partner prices, excl. VAT ({fmtVatRate(pricing.vat.rate)},{" "}
+            {pricing.vat.source === "exempt" ? "VAT exempt" : "zero-rated"}). The RRP column is shown for reference.
           </>
         )}
       </div>
@@ -313,8 +350,8 @@ export function PreorderGridTab({
         <thead className="sticky top-0 z-10 bg-surface">
           <tr className="border-b border-border bg-muted/20">
             <th className={cn(th, "text-left pl-4 min-w-[220px]")}>Product</th>
-            <th className={cn(th, "text-left")}>SKU</th>
-            <th className={cn(th, "text-right")}>{priceHeader("RRP", "incl. VAT", basis === "rrp")}</th>
+            <th className={cn(th, "text-left")}>SKU / EAN</th>
+            <th className={cn(th, "text-right")}>{priceHeader("RRP", basis === "rrp" ? "incl. VAT" : "reference", basis === "rrp")}</th>
             <th className={cn(th, "text-right")}>{priceHeader("Partner", "excl. VAT", basis === "partner")}</th>
             <th className={cn(th, "text-right w-28")}>{qtyHeader ?? "Qty"}</th>
             <th className={cn(th, "text-right pr-4 w-24")}>Total</th>
@@ -322,10 +359,15 @@ export function PreorderGridTab({
           </tr>
         </thead>
         <tbody>
-          {groups.map((g) => (
+          {groups.map((g, i) => (
             <GroupRows
               key={g.id}
+              solo={isSoloGroup(g)}
+              // A run of single products after a group with variants starts with a thin
+              // band, so the products don't read as more variants of that group.
+              separate={isSoloGroup(g) && i > 0 && groups[i - 1].rows.length > 0 && !isSoloGroup(groups[i - 1])}
               groupName={g.name}
+              cover={g.images?.[0] ?? null}
               rows={g.rows}
               quantities={quantities}
               onQty={onQty}
@@ -350,8 +392,21 @@ export function PreorderGridTab({
   );
 }
 
+// A group holding ONE product whose name already says the group's ("Patrik Uphaul
+// Line" in "Patrik Uphaul Line"): its header would only repeat the row, so the sheet
+// lists it as a plain row and consecutive single products stack one under another.
+function isSoloGroup(g: { name: string; rows: PreorderRow[] }): boolean {
+  if (g.rows.length !== 1) return false;
+  const group = g.name.trim().toLowerCase();
+  const name = g.rows[0].name.trim().toLowerCase();
+  return !group || name.includes(group) || group.includes(name);
+}
+
 function GroupRows({
+  solo = false,
+  separate = false,
   groupName,
+  cover,
   rows,
   quantities,
   onQty,
@@ -362,7 +417,10 @@ function GroupRows({
   hasExtra,
   basis,
 }: {
+  solo?: boolean;
+  separate?: boolean;
   groupName: string;
+  cover?: string | null;
   rows: PreorderRow[];
   quantities: QtyMap;
   onQty?: (rowId: string, qty: number) => void;
@@ -377,11 +435,19 @@ function GroupRows({
   const span = 6 + (hasExtra ? 1 : 0);
   return (
     <>
-      <tr className="bg-muted/15">
-        <td colSpan={span} className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {groupName}
-        </td>
-      </tr>
+      {solo ? (
+        separate && (
+          <tr aria-hidden>
+            <td colSpan={span} className="h-2.5 p-0 border-t-2 border-foreground/15 bg-muted/20" />
+          </tr>
+        )
+      ) : (
+        <tr className="bg-muted/15">
+          <td colSpan={span} className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {groupName}
+          </td>
+        </tr>
+      )}
       {rows.map((r) => {
         const qty = quantities[r.id] || 0;
         const unit = rowUnitPrice(r, basis);
@@ -397,14 +463,17 @@ function GroupRows({
             <tr key={r.id} className={cn("border-b border-border/40", qty > 0 ? "bg-amber-50/60 dark:bg-amber-950/20" : "opacity-70")}>
               <td className="pl-4 pr-2 py-1.5">
                 <div className="flex items-center gap-2 min-w-0">
-                  <RowThumb row={r} />
+                  <RowThumb row={r} cover={cover} />
                   <span className="text-[12px] text-foreground truncate">{r.name}</span>
-                  <TagPill tag={r.tag} />
+                  <TagPill tag={r.tag} color={r.tagColor} />
                 </div>
               </td>
-              <td className="px-2 py-1.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap">{r.code}</td>
+              <td className="px-2 py-1.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap leading-tight">
+                <div>{r.code}</div>
+                {r.ean && <div className="text-[10px] text-muted-foreground/70" title="EAN">{r.ean}</div>}
+              </td>
               <td colSpan={2} className="px-2 py-1.5 text-right text-[11px] text-amber-700 dark:text-amber-300">
-                <span className="inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> no consumer price yet — not orderable</span>
+                <span className="inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> no price yet — not orderable</span>
               </td>
               <td className="px-2 py-1.5 text-right">
                 {qty > 0 && !readOnly ? (
@@ -422,12 +491,16 @@ function GroupRows({
           <tr key={r.id} className={cn("border-b border-border/40 hover:bg-muted/20", qty > 0 && "bg-muted/25")}>
             <td className="pl-4 pr-2 py-1.5">
               <div className="flex items-center gap-2 min-w-0">
-                <RowThumb row={r} />
+                <RowThumb row={r} cover={cover} />
                 <span className="text-[12px] text-foreground truncate">{r.name}</span>
-                <TagPill tag={r.tag} />
+                <TagPill tag={r.tag} color={r.tagColor} />
+                {r.fixedPrice && <FixedPricePill />}
               </div>
             </td>
-            <td className="px-2 py-1.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap">{r.code}</td>
+            <td className="px-2 py-1.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap leading-tight">
+                <div>{r.code}</div>
+                {r.ean && <div className="text-[10px] text-muted-foreground/70" title="EAN">{r.ean}</div>}
+              </td>
             {priceCell(r.rrp ?? null, basis === "rrp")}
             {priceCell(partnerShown, basis === "partner")}
             <td className="px-2 py-1.5">
@@ -465,6 +538,38 @@ function groupHero(group: PreorderTab["groups"][number]): string | null {
   return group.images?.[0] ?? group.rows.find((r) => r.image)?.image ?? null;
 }
 
+function rowLabel(r: PreorderRow): string {
+  return (r.variantLabel ?? r.size ?? r.name ?? "").trim();
+}
+
+/**
+ * Short per-variant labels for a group's rows: the run of leading words shared by
+ * every row (typically the product name, e.g. "Patrik AEON Foil Set") is lifted out
+ * as `prefix`, and each row keeps only its own tail ("SL 750"). A row whose whole
+ * label is the prefix keeps it in full. `prefix` is null when the group name already
+ * says it (or there is nothing shared), so the caller only shows it when it adds
+ * information.
+ */
+function variantLabels(group: PreorderTab["groups"][number]): { prefix: string | null; short: Record<string, string> } {
+  const full = group.rows.map((r) => rowLabel(r));
+  const words = full.map((s) => s.split(/\s+/).filter(Boolean));
+  let n = 0;
+  if (words.length > 1) {
+    const first = words[0];
+    outer: for (; n < first.length; n++) {
+      for (const w of words) if (w[n]?.toLowerCase() !== first[n].toLowerCase()) break outer;
+    }
+  }
+  const prefix = n > 0 ? words[0].slice(0, n).join(" ") : "";
+  const short: Record<string, string> = {};
+  group.rows.forEach((r, i) => {
+    const tail = words[i].slice(n).join(" ").replace(/^[\s\-–—·:,/|]+/, "");
+    short[r.id] = tail || full[i];
+  });
+  const redundant = !prefix || group.name.toLowerCase().includes(prefix.toLowerCase());
+  return { prefix: redundant ? null : prefix, short };
+}
+
 export function PreorderGuidedTab({
   tab,
   quantities,
@@ -497,7 +602,7 @@ export function PreorderGuidedTab({
 
   return (
     <div className="space-y-4">
-      <div className="relative max-w-sm">
+      <div data-tour="search" className="relative max-w-sm">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
         <input
           value={search}
@@ -513,8 +618,16 @@ export function PreorderGuidedTab({
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-          {groups.map((g) => (
-            <ProductCard key={g.id} group={g} quantities={quantities} currency={currency} basis={basis} onOpen={() => setOpenGroupId(g.id)} />
+          {groups.map((g, i) => (
+            <ProductCard
+              key={g.id}
+              group={g}
+              quantities={quantities}
+              currency={currency}
+              basis={basis}
+              onOpen={() => setOpenGroupId(g.id)}
+              tour={i === 0 ? "product" : undefined}
+            />
           ))}
         </div>
       )}
@@ -539,23 +652,28 @@ function ProductCard({
   currency,
   basis,
   onOpen,
+  tour,
 }: {
   group: PreorderTab["groups"][number];
   quantities: QtyMap;
   currency: string;
   basis: PriceBasis;
   onOpen: () => void;
+  /** data-tour target for the portal's quick guide. */
+  tour?: string;
 }) {
   const hero = groupHero(group);
   const [lo, hi] = groupPriceRange(group, basis);
   const [olo, ohi] = groupPriceRange(group, basis === "rrp" ? "partner" : "rrp");
   const fmtRange = (a: number, b: number) => (a === 0 ? "—" : a === b ? fmtMoney(a, currency) : `${fmtMoney(a, currency)}–${fmtMoney(b, currency)}`);
   const cart = groupCartCount(group, quantities);
-  const hasNew = group.rows.some((r) => r.tag);
+  const cardTagRow = group.rows.find((r) => tagLabel(r.tag)) ?? null;
+  const fixedRows = group.rows.filter((r) => r.fixedPrice).length;
   return (
     <button
       type="button"
       onClick={onOpen}
+      data-tour={tour}
       className={cn(
         "group text-left rounded-xl border bg-surface overflow-hidden transition-colors flex flex-col",
         cart > 0 ? "border-foreground/50" : "border-border hover:border-foreground/20",
@@ -568,9 +686,7 @@ function ProductCard({
         ) : (
           <ImageIcon className="w-6 h-6 text-muted-foreground/40" />
         )}
-        {hasNew && (
-          <span className="absolute top-1.5 left-1.5 text-[9px] font-bold uppercase text-lime-700 bg-lime-100 dark:bg-lime-900/70 dark:text-lime-300 rounded px-1 py-0.5">New</span>
-        )}
+        {cardTagRow && <TagPill tag={cardTagRow.tag} color={cardTagRow.tagColor} size="lg" className="absolute top-2.5 left-2.5" />}
         {cart > 0 && (
           <span className="absolute top-1.5 right-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-white bg-lime-600 rounded-full px-1.5 py-0.5">
             <ShoppingCart className="w-2.5 h-2.5" /> {cart}
@@ -579,7 +695,15 @@ function ProductCard({
       </div>
       <div className="p-2.5 flex flex-col gap-0.5 flex-1">
         <div className="text-[12px] font-medium text-foreground leading-snug line-clamp-2">{group.name}</div>
-        <div className="text-[10px] text-muted-foreground">{group.rows.length} variant{group.rows.length === 1 ? "" : "s"}</div>
+        <div className="flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
+          {group.rows.length} variant{group.rows.length === 1 ? "" : "s"}
+          {fixedRows > 0 && fixedRows === group.rows.length && <FixedPricePill />}
+          {fixedRows > 0 && fixedRows < group.rows.length && (
+            <span className="inline-flex items-center gap-0.5" title={FIXED_PRICE_HINT}>
+              · <Lock className="w-2.5 h-2.5" /> {fixedRows} fixed price
+            </span>
+          )}
+        </div>
         <div className="flex items-end justify-between mt-auto pt-1 gap-1">
           <span className="flex flex-col leading-tight min-w-0">
             <span className="text-[12px] font-semibold tabular-nums text-foreground truncate">{fmtRange(lo, hi)}</span>
@@ -639,12 +763,23 @@ function ProductDetailModal({
 
   const cart = groupCartCount(group, quantities);
   const subtotal = group.rows.reduce((s, r) => s + (quantities[r.id] || 0) * rowUnitPrice(r, basis), 0);
+  // Variant rows carry only what tells them apart: the words every row shares (the
+  // product name repeated on each variant) move up into one caption, so a long list
+  // reads "SL 750 / SL 900 / CR 900 …" instead of eleven truncated copies of the same
+  // prefix. Rows have no thumbnail of their own — pointing at a row shows its picture
+  // in the gallery instead.
+  const variants = useMemo(() => variantLabels(group), [group]);
+  const fixedRows = group.rows.filter((r) => r.fixedPrice).length;
+  const showRow = (r: PreorderRow) => {
+    const i = r.image ? gallery.indexOf(r.image) : -1;
+    if (i >= 0) setIndex(i);
+  };
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-3xl p-0 overflow-hidden gap-0">
+      <DialogContent className="sm:max-w-4xl p-0 overflow-hidden gap-0">
         <DialogTitle className="sr-only">{group.name}</DialogTitle>
-        <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_1.25fr] max-h-[85vh]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 max-h-[85vh] overflow-y-auto sm:overflow-visible">
           {/* Gallery */}
           <div className="bg-muted/40 p-4 flex flex-col gap-3 border-b sm:border-b-0 sm:border-r border-border min-w-0">
             <div className="relative group/gallery">
@@ -686,67 +821,75 @@ function ProductDetailModal({
               )}
             </div>
             {gallery.length > 1 && (
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => thumbsRef.current?.scrollBy({ left: -160, behavior: "smooth" })}
-                  aria-label="Scroll thumbnails left"
-                  className="h-7 w-7 shrink-0 rounded-full border border-border bg-background text-muted-foreground hover:text-foreground flex items-center justify-center"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                </button>
-                <div ref={thumbsRef} className="flex-1 min-w-0 flex gap-2 overflow-x-auto scrollbar-none py-0.5 px-0.5 snap-x">
-                  {gallery.map((img, i) => (
-                    <button
-                      key={img}
-                      type="button"
-                      onClick={() => setIndex(i)}
-                      aria-current={i === index ? "true" : undefined}
-                      className={cn("w-12 h-12 rounded-lg overflow-hidden border-2 shrink-0 snap-start transition-colors", i === index ? "border-lime-500" : "border-transparent hover:border-border")}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={img} alt="" className="w-full h-full object-cover" />
-                    </button>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => thumbsRef.current?.scrollBy({ left: 160, behavior: "smooth" })}
-                  aria-label="Scroll thumbnails right"
-                  className="h-7 w-7 shrink-0 rounded-full border border-border bg-background text-muted-foreground hover:text-foreground flex items-center justify-center"
-                >
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
+              <div ref={thumbsRef} className="flex gap-2 overflow-x-auto scrollbar-none py-0.5 px-0.5 snap-x">
+                {gallery.map((img, i) => (
+                  <button
+                    key={img}
+                    type="button"
+                    onClick={() => setIndex(i)}
+                    aria-current={i === index ? "true" : undefined}
+                    className={cn("w-12 h-12 rounded-lg overflow-hidden border-2 shrink-0 snap-start transition-colors", i === index ? "border-lime-500" : "border-transparent hover:border-border")}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img} alt="" className="w-full h-full object-cover" />
+                  </button>
+                ))}
               </div>
+            )}
+            {group.description && (
+              <p className="text-[12px] text-muted-foreground leading-relaxed whitespace-pre-line line-clamp-3">{group.description}</p>
             )}
           </div>
 
-          {/* Details + variants */}
-          <div className="flex flex-col min-h-0">
+          {/* Details + variants — sized by the gallery column, scrolling inside it */}
+          <div className="relative min-h-[60vh] sm:min-h-0">
+          <div className="sm:absolute sm:inset-0 flex flex-col min-h-0 h-full">
             <div className="p-4 pb-2">
               <h2 className="text-[15px] font-semibold text-foreground leading-tight">{group.name}</h2>
-              {group.description && (
-                <p className="text-[12px] text-muted-foreground mt-1.5 whitespace-pre-line line-clamp-4">{group.description}</p>
+              <div className="text-[11px] text-muted-foreground mt-1">
+                {variants.prefix && <span className="text-foreground/80 font-medium">{variants.prefix} · </span>}
+                {group.rows.length} variant{group.rows.length === 1 ? "" : "s"}
+              </div>
+              {fixedRows > 0 && (
+                <div className="mt-2 flex items-start gap-2 rounded-lg bg-slate-50 dark:bg-slate-900/40 ring-1 ring-inset ring-slate-200 dark:ring-slate-700/60 px-2.5 py-2 text-[11px] text-slate-700 dark:text-slate-300">
+                  <Lock className="w-3.5 h-3.5 shrink-0 mt-px" />
+                  <span>
+                    <span className="font-semibold">
+                      {fixedRows === group.rows.length ? "Fixed price" : `Fixed price on ${fixedRows} of ${group.rows.length} variants`}
+                    </span>{" "}
+                    — volume discounts don&apos;t apply{fixedRows === group.rows.length ? " to this product" : " to those"}, but they still count towards your
+                    order total for reaching a discount level.
+                  </span>
+                </div>
               )}
             </div>
-            <div className="flex-1 overflow-y-auto px-4 divide-y divide-border/60">
+            <div className="relative flex-1 min-h-0">
+              <div className="h-full overflow-y-auto px-4 pb-4 divide-y divide-border/60">
               {group.rows.map((r) => {
                 const qty = quantities[r.id] || 0;
                 const unit = rowUnitPrice(r, basis);
                 const other = basis === "rrp" ? (r.discountedPrice ?? r.partnerPrice ?? null) : (r.rrp ?? null);
                 return (
-                  <div key={r.id} className="flex items-center gap-2.5 py-2.5">
-                    <RowThumb row={r} />
+                  <div
+                    key={r.id}
+                    onMouseEnter={() => showRow(r)}
+                    onFocusCapture={() => showRow(r)}
+                    className="flex items-center gap-3 py-2"
+                  >
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1">
-                        <span className="text-[12px] font-medium text-foreground truncate">{r.variantLabel ?? r.size ?? r.name}</span>
-                        <TagPill tag={r.tag} />
+                      <div className="flex items-start gap-1">
+                        <span className="text-[12px] font-medium text-foreground leading-snug line-clamp-2">{variants.short[r.id]}</span>
+                        <TagPill tag={r.tag} color={r.tagColor} />
+                        {r.fixedPrice && fixedRows < group.rows.length && <FixedPricePill />}
                       </div>
-                      <div className="text-[10px] text-muted-foreground font-mono truncate">{r.code}</div>
+                      <div className="text-[10px] text-muted-foreground font-mono truncate">
+                        {r.code}
+                        {r.ean && <span className="text-muted-foreground/70"> · EAN {r.ean}</span>}
+                      </div>
                     </div>
                     {r.unpriced ? (
                       <span className="text-[11px] text-amber-700 dark:text-amber-300 text-right inline-flex items-center gap-1 shrink-0">
-                        <AlertTriangle className="w-3 h-3" /> no consumer price yet
+                        <AlertTriangle className="w-3 h-3" /> no price yet
                         {qty > 0 && (
                           <button type="button" onClick={() => onQty(r.id, 0)} className="underline ml-1">remove {qty}</button>
                         )}
@@ -767,6 +910,9 @@ function ProductDetailModal({
                   </div>
                 );
               })}
+              </div>
+              {/* Fade hints at more variants below the fold; the padding above keeps the last row clear of it. */}
+              <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-5 bg-gradient-to-t from-background to-transparent" />
             </div>
             <div className="flex items-center justify-between gap-2 p-4 border-t border-border bg-muted/20">
               <div className="text-[12px] text-muted-foreground">
@@ -782,6 +928,7 @@ function ProductDetailModal({
                 Done
               </button>
             </div>
+          </div>
           </div>
         </div>
       </DialogContent>
@@ -822,9 +969,12 @@ function Stepper({ value, onChange }: { value: number; onChange: (n: number) => 
 
 // ── Volume discount tiers ────────────────────────────────────────────────────
 // What the partner sees of a tab's discount ladder: the tier they've reached, how far
-// the next one is, and the whole ladder. Renders nothing when the tab has no tiers.
+// the next one is, and the whole ladder. The thresholds are measured against the
+// WHOLE order (every tab), so the caller passes all `tabs` — the widget only shows
+// the ladder of `tab`. Renders nothing when the tab has no tiers.
 export function TabTierBanner({
   tab,
+  tabs,
   quantities,
   currency,
   className,
@@ -832,6 +982,7 @@ export function TabTierBanner({
   bare,
 }: {
   tab: PreorderTab;
+  tabs: PreorderTab[]; // the whole sheet — the order subtotal unlocks the tiers
   quantities: QtyMap;
   currency: string;
   className?: string;
@@ -839,14 +990,19 @@ export function TabTierBanner({
   bare?: boolean; // no border / radius — the caller frames it
 }) {
   const ladder = activeTiers(tab.tiers);
-  const totals = useMemo(() => computeTabTotals({ tabs: [tab], pricing: pricing ?? null }, quantities)[0], [tab, quantities, pricing]);
-  if (ladder.length === 0) return null;
+  const totals = useMemo(
+    () => computeTabTotals({ tabs, pricing: pricing ?? null }, quantities).find((t) => t.tabId === tab.id) ?? null,
+    [tab.id, tabs, quantities, pricing],
+  );
+  const fixedCount = tabFixedCount(tab);
+  if (ladder.length === 0 || !totals) return null;
 
   const reached = totals.tier;
   const next = totals.nextTier;
-  // Progress towards the next tier, measured from the tier already reached.
+  // Progress towards the next tier, measured from the tier already reached, on the
+  // order subtotal.
   const from = reached?.minAmount ?? 0;
-  const pct = next ? Math.min(100, Math.max(0, ((totals.amount - from) / (next.minAmount - from)) * 100)) : 100;
+  const pct = next ? Math.min(100, Math.max(0, ((totals.orderAmount - from) / (next.minAmount - from)) * 100)) : 100;
 
   return (
     <div
@@ -862,6 +1018,7 @@ export function TabTierBanner({
         {reached ? (
           <span className="text-[13px] font-medium text-lime-700 dark:text-lime-300">
             {reached.name || "Volume discount"} unlocked — −{reached.discountPct}% on everything in {tab.name || "this tab"}
+            {fixedCount > 0 && " except fixed-price products"}
           </span>
         ) : (
           <span className="text-[13px] font-medium text-foreground">Volume discount available in {tab.name || "this tab"}</span>
@@ -883,9 +1040,15 @@ export function TabTierBanner({
             />
           </div>
           <div className="mt-1 text-[11px] text-muted-foreground">
-            {fmtMoney(totals.toNextTier, currency)} more in this tab unlocks{" "}
+            {fmtMoney(totals.toNextTier, currency)} more on your order unlocks{" "}
             <span className="font-medium text-foreground">{next.name || "the next tier"}</span> · −{next.discountPct}%
           </div>
+        </div>
+      )}
+
+      {fixedCount > 0 && (
+        <div className="mt-2">
+          <FixedPriceChip tab={tab} quantities={quantities} currency={currency} basis={pricing?.basis ?? "partner"} nextTierName={next?.name || null} />
         </div>
       )}
 
@@ -919,39 +1082,265 @@ export function TabTierBanner({
 // ── Sheet context bar ────────────────────────────────────────────────────────
 // One dense row above the products: who is ordering and how they are priced (left),
 // the tab's volume-discount ladder as a stepped track with the current position
-// (middle), and what the reached tier saves (right). Replaces the stacked
-// pricing sentence + discount banner on the customer's and the admin's order views.
+// (middle), and what the reached tier saves (right). The position is the WHOLE
+// order's subtotal (every tab), which is what unlocks the tiers — so `tabs` is the
+// full sheet and `tab` only picks the ladder shown. Replaces the stacked pricing
+// sentence + discount banner on the customer's and the admin's order views.
+export type FillMode = "grid" | "guided";
+
+// A compact chip beside the discount progress when the section holds fixed-price
+// products: "1 fixed price". Hover (or tap / focus) opens the why and the which — the
+// products it covers, their price and how many are in the order — so the ladder row
+// stays one line instead of carrying a sentence.
+function FixedPriceChip({
+  tab,
+  quantities,
+  currency,
+  basis,
+  nextTierName,
+}: {
+  tab: PreorderTab;
+  quantities: QtyMap;
+  currency: string;
+  basis: PriceBasis;
+  nextTierName?: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<number | null>(null);
+  const rows = useMemo(
+    () => tab.groups.flatMap((g) => g.rows.filter((r) => r.fixedPrice).map((r) => ({ r, group: g.name }))),
+    [tab],
+  );
+  if (rows.length === 0) return null;
+  const one = rows.length === 1;
+  const inOrder = rows.reduce((n, { r }) => n + (quantities[r.id] || 0), 0);
+  const shown = rows.slice(0, 6);
+
+  const hoverOpen = () => {
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    setOpen(true);
+  };
+  const hoverClose = () => {
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => setOpen(false), 150);
+  };
+
+  return (
+    <PopoverPrimitive.Root open={open} onOpenChange={setOpen}>
+      <PopoverPrimitive.Trigger asChild>
+        <button
+          type="button"
+          onPointerEnter={(e) => e.pointerType === "mouse" && hoverOpen()}
+          onPointerLeave={(e) => e.pointerType === "mouse" && hoverClose()}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap transition-colors",
+            "bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-300/70 hover:bg-slate-200/80",
+            "dark:bg-slate-800/70 dark:text-slate-200 dark:ring-slate-600/60 dark:hover:bg-slate-700/70",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            open && "bg-slate-200/80 dark:bg-slate-700/70",
+          )}
+          aria-label={`${rows.length} fixed-price product${one ? "" : "s"} — not discounted. Show which`}
+        >
+          <Lock className="w-2.5 h-2.5" aria-hidden />
+          {rows.length} fixed price
+          {inOrder > 0 && <span className="tabular-nums font-normal text-slate-500 dark:text-slate-400">· {inOrder} in order</span>}
+        </button>
+      </PopoverPrimitive.Trigger>
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Content
+          side="bottom"
+          align="start"
+          sideOffset={6}
+          collisionPadding={12}
+          onPointerEnter={hoverOpen}
+          onPointerLeave={hoverClose}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          className="z-50 w-72 rounded-xl border border-border bg-popover text-popover-foreground shadow-lg outline-none overflow-hidden"
+        >
+          <div className="px-3.5 pt-3 pb-2.5">
+            <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-foreground">
+              <Lock className="w-3.5 h-3.5 text-slate-500" /> Fixed price
+            </div>
+            <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
+              Volume discounts don&apos;t apply to {one ? "this product" : "these products"}. {one ? "It still counts" : "They still count"} towards your
+              order total{nextTierName ? `, so ${one ? "it helps" : "they help"} you reach ${nextTierName}` : ""}.
+            </p>
+          </div>
+          <ul className="border-t border-border/70 max-h-56 overflow-y-auto">
+            {shown.map(({ r, group }) => {
+              const qty = quantities[r.id] || 0;
+              const unit = rowUnitPrice(r, basis);
+              const label = r.name.toLowerCase().startsWith(group.toLowerCase()) || !group ? r.name : `${group} · ${r.variantLabel || r.name}`;
+              return (
+                <li key={r.id} className="flex items-center gap-2 px-3.5 py-1.5 text-[11.5px] border-b border-border/40 last:border-b-0">
+                  <span className="min-w-0 flex-1 truncate text-foreground" title={label}>{label}</span>
+                  {qty > 0 && <span className="shrink-0 rounded-full bg-lime-600 px-1.5 text-[10px] font-semibold tabular-nums text-white">{qty}</span>}
+                  <span className="shrink-0 tabular-nums text-muted-foreground">{unit > 0 ? fmtMoney(unit, currency) : "—"}</span>
+                </li>
+              );
+            })}
+            {rows.length > shown.length && (
+              <li className="px-3.5 py-1.5 text-[11px] text-muted-foreground">and {rows.length - shown.length} more — marked with a Fixed price badge</li>
+            )}
+          </ul>
+        </PopoverPrimitive.Content>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
+  );
+}
+
+// ── Discount status (sticky header) ─────────────────────────────────────────
+// The always-visible answer to "which discount do I have": a compact card on the
+// right of the fill page's sticky title row (beside Quick guide), so it stays on
+// screen while the customer scrolls — the full ladder (SheetContextBar) scrolls away
+// with the sheet. Applied tier + what the whole order saves, then how much more
+// unlocks the next tier over a thin progress bar. On phones only the tier shows.
+// Renders nothing when the active section has no ladder.
+export function DiscountStatus({
+  tab,
+  tabs,
+  quantities,
+  currency,
+  pricing,
+  className,
+}: {
+  tab: PreorderTab | null;
+  tabs: PreorderTab[]; // the whole sheet — the order subtotal unlocks the tiers
+  quantities: QtyMap;
+  currency: string;
+  pricing?: PricingContext | null;
+  className?: string;
+}) {
+  const all = useMemo(() => computeTabTotals({ tabs, pricing: pricing ?? null }, quantities), [tabs, quantities, pricing]);
+  const totals = tab ? all.find((t) => t.tabId === tab.id) ?? null : null;
+  if (!tab || !totals || activeTiers(tab.tiers).length === 0) return null;
+  const reached = totals.tier;
+  const next = totals.nextTier;
+  const saved = all.reduce((n, t) => n + t.discount, 0);
+  const from = reached?.minAmount ?? 0;
+  const pct = next ? Math.min(100, Math.max(0, ((totals.orderAmount - from) / Math.max(1e-9, next.minAmount - from)) * 100)) : 100;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={cn("flex items-center gap-3 h-10 rounded-xl border border-border bg-surface pl-1.5 pr-3 min-w-0", className)}
+    >
+      <span
+        className={cn(
+          "flex size-7 shrink-0 items-center justify-center rounded-lg transition-colors",
+          reached ? "bg-lime-100 text-lime-700 dark:bg-lime-900/40 dark:text-lime-300" : "bg-muted text-muted-foreground",
+        )}
+      >
+        <Percent className="w-3.5 h-3.5" />
+      </span>
+      <div key={reached?.id ?? "none"} className="min-w-0 leading-tight animate-in fade-in duration-300">
+        <div className="text-[12.5px] font-semibold text-foreground whitespace-nowrap">
+          {reached ? `${reached.name || "Volume discount"} −${reached.discountPct}%` : "No discount yet"}
+          {saved > 0 && (
+            <span className="hidden sm:inline font-medium tabular-nums text-lime-700 dark:text-lime-400"> · −{fmtMoney(saved, currency)}</span>
+          )}
+        </div>
+        <div className="hidden sm:block text-[10.5px] text-muted-foreground whitespace-nowrap">
+          {reached ? "Volume discount applied" : "Volume discount"}
+        </div>
+      </div>
+      {(next || reached) && <span className="hidden md:block h-6 w-px bg-border shrink-0" aria-hidden />}
+      {next ? (
+        <div className="hidden md:block w-40 leading-tight">
+          <div className="text-[10.5px] text-muted-foreground whitespace-nowrap truncate tabular-nums">
+            <span className="font-medium text-foreground">{fmtMoney(totals.toNextTier, currency)}</span> to {next.name || "next tier"} −{next.discountPct}%
+          </div>
+          <div className="mt-1.5 h-1 rounded-full bg-muted overflow-hidden">
+            <div className="h-full rounded-full bg-lime-500 transition-[width] duration-500 ease-out" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      ) : (
+        reached && (
+          <div className="hidden md:flex items-center gap-1 text-[10.5px] text-muted-foreground whitespace-nowrap">
+            <Check className="w-3 h-3 text-lime-600" /> Top tier
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+// How the customer browses the sheet — "Order sheet" (the grid, the default) or
+// "Catalogue" (guided cards). Underline tabs, sat at the right end of the section TabBar row. Shared
+// by the portal fill page and the admin preview so both read exactly the same.
+export function FillModeNav({ mode, onChange }: { mode: FillMode; onChange: (m: FillMode) => void }) {
+  return (
+    <nav className="flex items-stretch gap-0.5 -mb-px h-9" aria-label="View">
+      {(
+        [
+          ["grid", Table2, "Order sheet"],
+          ["guided", LayoutGrid, "Catalogue"],
+        ] as [FillMode, React.ElementType, string][]
+      ).map(([m, Icon, label]) => {
+        const on = mode === m;
+        return (
+          <button
+            key={m}
+            type="button"
+            onClick={() => onChange(m)}
+            aria-pressed={on}
+            className={cn(
+              "group relative isolate inline-flex items-center gap-1.5 whitespace-nowrap px-2.5 text-[12.5px] font-medium transition-colors border-b-2",
+              on ? "border-lime-600 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Icon className={cn("w-3.5 h-3.5 shrink-0", on ? "text-lime-600" : "text-muted-foreground/70 group-hover:text-foreground/70")} />
+            {label}
+            <span className="pointer-events-none absolute inset-x-0.5 top-1 bottom-1.5 rounded-md transition-colors group-hover:bg-muted/60 -z-10" aria-hidden />
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
 export function SheetContextBar({
   pricing,
   tab,
+  tabs,
   quantities,
   currency,
   className,
 }: {
   pricing: PricingContext | null | undefined;
   tab: PreorderTab | null;
+  tabs: PreorderTab[]; // the whole sheet — the order subtotal unlocks the tiers
   quantities: QtyMap;
   currency: string;
   className?: string;
 }) {
   const ladder = tab ? activeTiers(tab.tiers) : [];
-  const totals = useMemo(() => (tab ? computeTabTotals({ tabs: [tab], pricing: pricing ?? null }, quantities)[0] : null), [tab, quantities, pricing]);
+  const totals = useMemo(
+    () => (tab ? computeTabTotals({ tabs, pricing: pricing ?? null }, quantities).find((t) => t.tabId === tab.id) ?? null : null),
+    [tab, tabs, quantities, pricing],
+  );
+  const fixedCount = tabFixedCount(tab);
   if (!pricing && ladder.length === 0) return null;
   const missing = vatIsMissing(pricing);
   const company = pricing?.kind === "business";
   const reached = totals?.tier ?? null;
   const next = totals?.nextTier ?? null;
-  const amount = totals?.amount ?? 0;
-  // Tiers sit at EQUAL spacing along the track (thresholds can be wildly apart —
-  // €10k then €4bn — so a proportional track would pile every marker at the left).
-  // The current position is interpolated inside the segment it is in.
+  const amount = totals?.orderAmount ?? 0;
+  // The track is split into ZONES at equal width — the base zone (no discount) and
+  // one per tier — because thresholds can be wildly apart (€10k then €4bn) and a
+  // proportional track would pile every marker at the left. Each zone owns its
+  // label cell, so labels never collide; the current position is interpolated
+  // inside the zone it is in.
   const n = ladder.length;
-  const tierX = (i: number) => ((i + 1) / n) * 100; // i-th tier (0-based) → % along the track
+  const zones = n + 1;
   const reachedCount = ladder.filter((t) => amount + 1e-9 >= t.minAmount).length;
   const lower = reachedCount === 0 ? 0 : ladder[reachedCount - 1].minAmount;
   const upper = reachedCount < n ? ladder[reachedCount].minAmount : null;
   const frac = upper == null ? 1 : Math.min(1, Math.max(0, (amount - lower) / Math.max(1e-9, upper - lower)));
-  const pos = n === 0 ? 0 : upper == null ? 100 : ((reachedCount + frac) / n) * 100;
+  const zoneFill = (z: number) => (z < reachedCount ? 1 : z === reachedCount ? frac : 0);
+  const pos = n === 0 ? 0 : ((reachedCount + frac) / zones) * 100;
+  const gridCols = { gridTemplateColumns: `repeat(${zones}, minmax(0, 1fr))` };
 
   return (
     <div className={cn("grid grid-cols-1 lg:grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-6 gap-y-3 px-4 py-3", className)}>
@@ -968,7 +1357,9 @@ export function SheetContextBar({
                 ? `VAT rate not configured${pricing.countryIso ? ` for ${pricing.countryIso}` : ""} — cannot submit`
                 : company
                   ? `Partner prices · ${(pricing.vat.rate ?? 0) > 0 ? `+${fmtVatRate(pricing.vat.rate)} VAT` : `${fmtVatRate(pricing.vat.rate)} VAT, ${pricing.vat.source === "exempt" ? "exempt" : "zero-rated"}`}`
-                  : `RRP · incl. ${fmtVatRate(pricing.vat.rate)} VAT${pricing.countryIso ? ` (${pricing.countryIso})` : ""}`}
+                  : pricing.basis === "rrp"
+                    ? `RRP · incl. ${fmtVatRate(pricing.vat.rate)} VAT${pricing.countryIso ? ` (${pricing.countryIso})` : ""}`
+                    : `Partner prices · ${(pricing.vat.rate ?? 0) > 0 ? `+${fmtVatRate(pricing.vat.rate)} VAT${pricing.countryIso ? ` (${pricing.countryIso})` : ""}` : `${fmtVatRate(pricing.vat.rate)} VAT, ${pricing.vat.source === "exempt" ? "exempt" : "zero-rated"}`}`}
             </div>
           </div>
         </div>
@@ -977,32 +1368,52 @@ export function SheetContextBar({
       {/* ladder */}
       {ladder.length > 0 && totals ? (
         <div className="min-w-0">
-          <div className="relative h-7">
-            {/* track */}
-            <div className="absolute left-0 right-0 top-[9px] h-1.5 rounded-full bg-muted" />
-            <div className="absolute left-0 top-[9px] h-1.5 rounded-full bg-lime-600 transition-[width] duration-300" style={{ width: `${pos}%` }} />
-            {/* tier markers */}
+          {/* segmented track — the gaps ARE the thresholds */}
+          <div className="relative">
+            <div className="grid gap-1" style={gridCols}>
+              {Array.from({ length: zones }, (_, z) => (
+                <div key={z} className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-lime-600 transition-[width] duration-500 ease-out"
+                    style={{ width: `${zoneFill(z) * 100}%` }}
+                  />
+                </div>
+              ))}
+            </div>
+            {/* current position */}
+            <span
+              className="absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground ring-[3px] ring-background shadow-md transition-[left] duration-500 ease-out"
+              style={{ left: `${pos}%` }}
+            />
+          </div>
+
+          {/* one label cell per zone, left-aligned to where the zone starts */}
+          <div className="mt-2 grid gap-1" style={gridCols}>
+            <div className="min-w-0 text-[10px] leading-tight text-muted-foreground/70">
+              <div className="truncate uppercase tracking-wide">No discount</div>
+            </div>
             {ladder.map((t, i) => {
-              const x = tierX(i);
               const hit = amount + 1e-9 >= t.minAmount;
-              const last = i === n - 1;
+              const current = reached?.id === t.id;
               return (
-                <div key={t.id} className={cn("absolute top-0 flex flex-col", last ? "-translate-x-full items-end" : "-translate-x-1/2 items-center")} style={{ left: `${x}%` }}>
-                  <span className={cn("mt-[6px] size-3 rounded-full border-2 bg-background", hit ? "border-lime-600" : "border-border", last && "translate-x-1/2")} />
-                  <span className={cn("mt-1 whitespace-nowrap text-[10px] leading-none", hit ? "text-foreground font-semibold" : "text-muted-foreground")}>
-                    {t.name || "Tier"} −{t.discountPct}% <span className="font-normal text-muted-foreground/80">from {fmtMoney(t.minAmount, currency)}</span>
-                  </span>
+                <div key={t.id} className={cn("min-w-0 text-[10px] leading-tight", hit ? "text-foreground" : "text-muted-foreground")}>
+                  <div className={cn("truncate uppercase tracking-wide", hit && "font-semibold", current && "text-lime-700 dark:text-lime-400")}>
+                    {t.name || "Tier"} −{t.discountPct}%
+                  </div>
+                  <div className="truncate tabular-nums text-muted-foreground/80">from {fmtMoney(t.minAmount, currency)}</div>
                 </div>
               );
             })}
-            {/* current position */}
-            <div className="absolute top-0 -translate-x-1/2 flex flex-col items-center" style={{ left: `${pos}%` }}>
-              <span className="mt-[3px] size-[18px] rounded-full bg-foreground ring-2 ring-background shadow-sm" />
-            </div>
           </div>
+
           <div className="mt-2 flex items-center justify-between gap-3 text-[11px]">
-            <span className="text-muted-foreground tabular-nums">
-              {fmtMoney(amount, currency)} in {tab?.name || "this section"}
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+              <span className="text-muted-foreground tabular-nums">
+                <span className="font-medium text-foreground">{fmtMoney(amount, currency)}</span> on the whole order
+              </span>
+              {tab && fixedCount > 0 && (
+                <FixedPriceChip tab={tab} quantities={quantities} currency={currency} basis={pricing?.basis ?? "partner"} nextTierName={next?.name || null} />
+              )}
             </span>
             <span className="text-muted-foreground tabular-nums truncate">
               {next
@@ -1023,7 +1434,9 @@ export function SheetContextBar({
           {reached ? (
             <>
               <div className="text-[15px] font-bold tabular-nums text-lime-700 dark:text-lime-400">−{fmtMoney(totals.discount, currency)}</div>
-              <div className="text-[11px] text-muted-foreground">{reached.name || "Volume discount"} −{reached.discountPct}% applied</div>
+              <div className="text-[11px] text-muted-foreground">
+                {reached.name || "Volume discount"} −{reached.discountPct}% applied{fixedCount > 0 ? " · fixed prices excluded" : ""}
+              </div>
             </>
           ) : (
             <>
@@ -1037,59 +1450,104 @@ export function SheetContextBar({
   );
 }
 
-// ── VAT breakdown ────────────────────────────────────────────────────────────
-// Under a total: what the figure includes. An individual sees the net / VAT split of
-// their VAT-inclusive total; a company sees "excl. VAT · zero-rated". Without a pricing
-// context (admin builder) it says nothing.
-export function VatBreakdown({
+// ── Totals ladder ────────────────────────────────────────────────────────────
+// The bottom of every order summary, receipt-style: one figure per row, the amount
+// the customer actually pays in bold last. Anyone charged VAT (an individual, a
+// company in a layer that charges it) reads Net → VAT → Total; a zero-rated company
+// reads Total with a quiet "VAT · not charged" row; a legacy RRP-basis snapshot shows
+// its VAT-inclusive total with the VAT it contains. Without a pricing context (admin
+// builder) it is just the total. `payable` is the order's net in the customer's basis
+// (`totalsNet`); the VAT figures come from the priced order.
+/** VAT is added on top of the net figure (individuals, or companies in a layer that charges it). */
+function vatCharged(pricing: PricingContext | null | undefined): boolean {
+  return !!pricing && pricing.basis === "partner" && (pricing.vat.rate ?? 0) > 0;
+}
+
+export function TotalsLadder({
   pricing,
   vat,
+  payable,
   currency,
-  className,
+  totalLabel = "Total",
+  afterDiscount = false,
+  size = "md",
 }: {
   pricing: PricingContext | null | undefined;
   vat: OrderVatTotals | null | undefined;
+  payable: number;
   currency: string;
-  className?: string;
+  totalLabel?: string;
+  /** Discount rows sit above: the net row then reads "Net" rather than "Subtotal". */
+  afterDiscount?: boolean;
+  size?: "md" | "lg";
 }) {
-  if (!pricing) return null;
+  const row = "flex items-baseline justify-between gap-3 text-[13px]";
+  const muted = "text-muted-foreground";
+  const totalCls = cn("font-bold tabular-nums text-foreground", size === "lg" ? "text-[18px]" : "text-[16px]");
+  // The rule above Total only separates it from the ladder's own rows.
+  const Total = ({ label, value, divided }: { label: string; value: number; divided?: boolean }) => (
+    <div className={cn(row, divided && "pt-1.5 mt-1.5 border-t border-border/60")}>
+      <span className={muted}>{label}</span>
+      <span className={totalCls}>{fmtMoney(value, currency)}</span>
+    </div>
+  );
+
+  if (!pricing) return <Total label={totalLabel} value={payable} />;
+
   if (vatIsMissing(pricing)) {
-    return <div className={cn("text-[10px] text-amber-700 dark:text-amber-400 text-right -mt-0.5", className)}>VAT rate not configured</div>;
-  }
-  if (pricing.basis === "partner") {
-    if ((pricing.vat.rate ?? 0) > 0) {
-      return (
-        <div className={cn("text-[10px] text-muted-foreground -mt-0.5 space-y-px", className)}>
-          <div className="text-right">excl. VAT · {fmtVatRate(pricing.vat.rate)} VAT added</div>
-          {vat && vat.gross > 0 && (
-            <div className="flex items-center justify-between tabular-nums">
-              <span>
-                Net {fmtMoney(vat.net, currency)} + VAT {fmtMoney(vat.vat, currency)}
-              </span>
-              <span>= {fmtMoney(vat.gross, currency)}</span>
-            </div>
-          )}
+    return (
+      <>
+        <Total label={`${totalLabel} · excl. VAT`} value={payable} />
+        <div className={cn(row, "text-amber-700 dark:text-amber-400")}>
+          <span>VAT</span>
+          <span className="text-[12px]">rate not configured</span>
         </div>
+      </>
+    );
+  }
+
+  const rate = pricing.vat.rate ?? 0;
+  const net = vat?.net ?? payable;
+  const vatAmount = vat?.vat ?? 0;
+  const gross = vat?.gross ?? payable;
+
+  if (pricing.basis === "partner") {
+    if (rate > 0) {
+      return (
+        <>
+          <div className={row}>
+            <span className={muted}>{afterDiscount ? "Net" : "Subtotal"} <span className="text-muted-foreground/70">· excl. VAT</span></span>
+            <span className={cn("tabular-nums", muted)}>{fmtMoney(net, currency)}</span>
+          </div>
+          <div className={row}>
+            <span className={muted}>VAT {fmtVatRate(rate)}</span>
+            <span className={cn("tabular-nums", muted)}>{fmtMoney(vatAmount, currency)}</span>
+          </div>
+          <Total label={totalLabel} value={gross} divided />
+        </>
       );
     }
     return (
-      <div className={cn("text-[10px] text-muted-foreground text-right -mt-0.5", className)}>
-        excl. VAT · {fmtVatRate(pricing.vat.rate)} ({CUSTOMER_KIND_LABELS[pricing.kind].toLowerCase()}, {pricing.vat.source === "exempt" ? "VAT exempt" : "zero-rated"})
-      </div>
+      <>
+        <Total label={totalLabel} value={payable} />
+        <div className={cn(row, "text-[12px]")}>
+          <span className={muted}>VAT</span>
+          <span className={muted}>
+            not charged <span className="text-muted-foreground/70">· {CUSTOMER_KIND_LABELS[pricing.kind].toLowerCase()}, {pricing.vat.source === "exempt" ? "exempt" : "zero-rated"}</span>
+          </span>
+        </div>
+      </>
     );
   }
+  // Legacy RRP basis: the payable figure already includes VAT.
   return (
-    <div className={cn("text-[10px] text-muted-foreground -mt-0.5 space-y-px", className)}>
-      <div className="text-right">incl. {fmtVatRate(pricing.vat.rate)} VAT</div>
-      {vat && vat.gross > 0 && (
-        <div className="flex items-center justify-between tabular-nums">
-          <span>
-            Net {fmtMoney(vat.net, currency)} · VAT {fmtMoney(vat.vat, currency)}
-          </span>
-          <span>= {fmtMoney(vat.gross, currency)}</span>
-        </div>
-      )}
-    </div>
+    <>
+      <Total label={`${totalLabel} · incl. VAT`} value={gross} />
+      <div className={cn(row, "text-[12px]")}>
+        <span className={muted}>of which VAT {fmtVatRate(rate)}</span>
+        <span className={cn("tabular-nums", muted)}>{fmtMoney(vatAmount, currency)}</span>
+      </div>
+    </>
   );
 }
 
@@ -1135,16 +1593,21 @@ export function OrderSummaryPanel({
             </div>
           </>
         )}
-        <div className="flex items-baseline justify-between">
-          <span className="text-[13px] text-muted-foreground">{confirmed ? "Ordered total" : "Total"}</span>
-          <span className="text-[18px] font-bold tabular-nums text-foreground">{fmtMoney(totalsNet(totals), currency)}</span>
-        </div>
-        <VatBreakdown pricing={pricing} vat={priced.vat} currency={currency} />
+        <TotalsLadder
+          pricing={pricing}
+          vat={priced.vat}
+          payable={totalsNet(totals)}
+          currency={currency}
+          totalLabel={confirmed ? "Ordered total" : "Total"}
+          afterDiscount={discounted > 0}
+          size="lg"
+        />
         {confirmed && (
           <div className="mt-1 pt-1 border-t border-border/50">
             <div className="flex items-baseline justify-between">
               <span className="text-[13px] text-lime-700 dark:text-lime-400">
                 Confirmed{confirmed.qty > 0 ? ` · ${confirmed.qty}` : ""}
+                {vatCharged(pricing) && <span className="text-muted-foreground/70"> · excl. VAT</span>}
               </span>
               <span className="text-[16px] font-bold tabular-nums text-lime-700 dark:text-lime-400">
                 {fmtMoney(totalsNet(confirmed), currency)}
@@ -1182,6 +1645,14 @@ export function OrderSummaryPanel({
                 {t.discount === 0 && t.nextTier && (
                   <div className="text-[11px] text-muted-foreground/80 truncate">
                     {fmtMoney(t.toNextTier, currency)} more → {t.nextTier.name || "next tier"} −{t.nextTier.discountPct}%
+                  </div>
+                )}
+                {t.fixedAmount > 0 && (t.tier || t.nextTier) && (
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground" title={FIXED_PRICE_HINT}>
+                    <span className="inline-flex items-center gap-1 truncate">
+                      <Lock className="w-2.5 h-2.5 shrink-0" /> Fixed price · {t.fixedQty} item{t.fixedQty === 1 ? "" : "s"}, not discounted
+                    </span>
+                    <span className="tabular-nums">{fmtMoney(t.fixedAmount, currency)}</span>
                   </div>
                 )}
               </li>
@@ -1272,7 +1743,10 @@ export function PreorderReviewModal({
                           const line = qty * rowUnitPrice(r, basis);
                           return (
                             <li key={r.id} className="flex items-center gap-2 py-1 text-[12px]">
-                              <span className="flex-1 truncate text-foreground">{r.name}</span>
+                              <span className="flex-1 min-w-0 flex items-center gap-1.5">
+                                <span className="truncate text-foreground">{r.name}</span>
+                                {r.fixedPrice && tt?.tier && <FixedPricePill />}
+                              </span>
                               <span className="tabular-nums text-muted-foreground">{qty} ×</span>
                               <span className="tabular-nums text-muted-foreground w-20 text-right">{fmtMoney(rowUnitPrice(r, basis), currency)}</span>
                               <span className="tabular-nums font-medium w-24 text-right">{fmtMoney(line, currency)}</span>
@@ -1286,6 +1760,7 @@ export function PreorderReviewModal({
                     <div className="flex items-center justify-between text-[12px] border-t border-border/50 pt-1">
                       <span className="text-muted-foreground">
                         {tab.name} after {tt.tier?.name || "discount"}
+                        {tt.fixedQty > 0 && <span className="text-muted-foreground/70"> · fixed prices excluded</span>}
                       </span>
                       <span className="tabular-nums text-lime-700 dark:text-lime-400 font-medium">
                         −{fmtMoney(tt.discount, currency)} → {fmtMoney(tt.net, currency)}
@@ -1312,13 +1787,14 @@ export function PreorderReviewModal({
                 </div>
               </>
             )}
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">
-                Total · {totals.qty} item{totals.qty === 1 ? "" : "s"}
-              </span>
-              <span className="text-[16px] font-bold tabular-nums text-foreground">{fmtMoney(totalsNet(totals), currency)}</span>
-            </div>
-            <VatBreakdown pricing={pricing} vat={priced.vat} currency={currency} />
+            <TotalsLadder
+              pricing={pricing}
+              vat={priced.vat}
+              payable={totalsNet(totals)}
+              currency={currency}
+              totalLabel={`Total · ${totals.qty} item${totals.qty === 1 ? "" : "s"}`}
+              afterDiscount={discount > 0}
+            />
           </div>
         )}
         {vatMissing && (
@@ -1413,7 +1889,7 @@ export function PreorderGridSkeleton({
         <thead className="sticky top-0 z-10 bg-surface">
           <tr className="border-b border-border">
             <th className={cn(th, "text-left pl-4 min-w-[220px]")}>Product</th>
-            <th className={cn(th, "text-left")}>SKU</th>
+            <th className={cn(th, "text-left")}>SKU / EAN</th>
             <th className={cn(th, "text-right")}>RRP</th>
             <th className={cn(th, "text-right")}>Partner</th>
             <th className={cn(th, "text-right w-28")}>{qtyHeader}</th>
@@ -1478,7 +1954,10 @@ export function OrderSummaryPanelSkeleton({ confirmed = false }: { confirmed?: b
           {/* text-[18px] → 27px line */}
           <SkeletonLine lh="h-[27px]" h="h-4" w="w-24" delay={80} />
         </div>
-        <div className="text-[10px] text-muted-foreground text-right -mt-0.5">VAT</div>
+        <div className="flex items-baseline justify-between text-[12px] text-muted-foreground">
+          <span>VAT</span>
+          <SkeletonLine lh="h-[18px]" h="h-3" w="w-16" delay={100} />
+        </div>
         {confirmed && (
           <div className="mt-1 pt-1 border-t border-border/50">
             <div className="flex items-baseline justify-between">

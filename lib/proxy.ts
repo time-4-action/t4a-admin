@@ -8,6 +8,7 @@ import {
   isPortalPath,
 } from "@/lib/access";
 import type { NextRequest } from "next/server";
+import { IMPERSONATION_COOKIE, decodeImpersonation, effectiveRoles } from "@/lib/portal-impersonation-codec";
 
 export async function proxy(req: NextRequest) {
   const res = await auth0.middleware(req);
@@ -44,7 +45,11 @@ export async function proxy(req: NextRequest) {
 
   // Decode roles from the ID token directly (custom claims are in the JWT
   // payload but not forwarded through the userinfo endpoint).
-  const roles = rolesFromIdToken(session.tokenSet?.idToken);
+  // A super-admin "viewing as" an Auth0 user (lib/portal-impersonation.ts) is
+  // gated by THAT user's roles — the same rule every page and API applies — so
+  // they hit /forbidden or the portal exactly where that user would.
+  const sessionRoles = rolesFromIdToken(session.tokenSet?.idToken);
+  const roles = effectiveRoles(sessionRoles, await readImpersonationCookie(req));
   const admin = hasAnyAccess(roles);
 
   // The B2B customer portal is open to any authenticated user. A customer holds
@@ -67,4 +72,11 @@ export async function proxy(req: NextRequest) {
   }
 
   return res;
+}
+
+async function readImpersonationCookie(req: NextRequest) {
+  const raw = req.cookies.get(IMPERSONATION_COOKIE)?.value;
+  const secret = process.env.AUTH0_SECRET;
+  if (!raw || !secret) return null;
+  return decodeImpersonation(raw, secret);
 }

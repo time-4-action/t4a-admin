@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getProduct } from "@/lib/product-api";
-import { getMkProductPrices, pickMkListGrossPrice, pickMkListNetPrice, productTaxCode } from "@/lib/metakocka";
+import { getProduct, getCatalogueCodes } from "@/lib/product-api";
+import { getMkProductIndex, getMkProductPrices, pickMkListGrossPrice, pickMkListNetPrice, productTaxCode } from "@/lib/metakocka";
 import type { CatalogueProduct, ProductPrice } from "@/types/product";
 
 export const runtime = "nodejs";
@@ -12,7 +12,16 @@ export const dynamic = "force-dynamic";
 // tier discounts applied). A column with no list selected falls back to the catalogue
 // name heuristic so it isn't wiped.
 
-type RepricePrices = { rrp: number | null; partnerPrice: number | null; taxCode: string | null };
+// `name` / `ean` are Metakocka's (the source of truth); `inMk` false = MK has no such
+// product. All three are omitted when MK couldn't be read, so nothing is overwritten.
+type RepricePrices = {
+  rrp: number | null;
+  partnerPrice: number | null;
+  taxCode: string | null;
+  ean?: string | null;
+  name?: string;
+  inMk?: boolean;
+};
 
 // Catalogue-name heuristic fallback (used only for a column with no MK list chosen).
 function heuristicPrice(
@@ -40,7 +49,7 @@ export async function POST(request: Request) {
   const codes = (body.codes ?? [])
     .map((c) => String(c).trim())
     .filter(Boolean)
-    .slice(0, 1000);
+    .slice(0, 20_000); // the builder sends big sheets in chunks; only a sanity bound
   const rrpTitle = body.rrpPricelist ?? null;
   const partnerTitle = body.partnerPricelist ?? null;
   if (codes.length === 0) return NextResponse.json({ prices: {} });
@@ -60,6 +69,14 @@ export async function POST(request: Request) {
     );
   }
 
+  // Metakocka-only products (not in the catalogue) are priced 0 when MK has no price
+  // for them, same as when they were added — never re-priced back to unpriced.
+  const catalogueCodes = await getCatalogueCodes();
+  // Name + barcode ride along: a re-price also brings every row's name and EAN back to
+  // what Metakocka says.
+  const mkIndex = await getMkProductIndex();
+  const isMkOnly = (code: string) => catalogueCodes != null && !catalogueCodes.has(code);
+
   const prices: Record<string, RepricePrices> = {};
   for (const code of codes) {
     const parent = catalogueByCode[code];
@@ -75,7 +92,14 @@ export async function POST(request: Request) {
         ? heuristicPrice(parent, code, /partner/i)
         : null;
     // The MK tax code rides along so submissions can be pushed without re-reading prices.
-    prices[code] = { rrp, partnerPrice, taxCode: mk[code]?.length ? productTaxCode(mk[code]) : null };
+    const zero = isMkOnly(code) ? 0 : null;
+    const mkProduct = mkIndex?.get(code);
+    prices[code] = {
+      rrp: rrp ?? zero,
+      partnerPrice: partnerPrice ?? zero,
+      taxCode: mk[code]?.length ? productTaxCode(mk[code]) : null,
+      ...(mkIndex ? { inMk: !!mkProduct, ...(mkProduct ? { name: mkProduct.name, ean: mkProduct.barcode ?? null } : {}) } : {}),
+    };
   }
   return NextResponse.json({ prices });
 }

@@ -22,20 +22,52 @@ export function isPortalDocKind(kind: DocKind | null | undefined): kind is DocKi
 }
 
 // The partner the portal shows. Normally the session email's partner; for an admin
-// who is "viewing the portal as" a customer (lib/portal-impersonation.ts — a signed
-// cookie honoured only with an eligible admin role) it is that customer.
+// who is "viewing the portal as" someone (lib/portal-impersonation.ts — a signed
+// cookie honoured only with an eligible admin role) it is that customer, or the
+// partner the impersonated Auth0 user's email resolves to.
 export async function getSessionPartner(): Promise<MkPartner | null> {
   return (await getPortalViewer()).partner;
 }
 
+// Set while an admin views the portal as someone else: who that is + who they really are.
+export type PortalImpersonating =
+  | { kind: "customer"; partnerMkId: string; partnerName: string; adminEmail: string | null; returnTo: string }
+  | {
+      kind: "user";
+      userId: string;
+      email: string;
+      name: string;
+      // The partner that user's email resolves to — null means they would see no-account.
+      partnerMkId: string | null;
+      partnerName: string | null;
+      adminEmail: string | null;
+      returnTo: string;
+    };
+
 export type PortalViewer = {
   partner: MkPartner | null;
-  // Set while an admin views the portal as a customer: who they really are.
-  impersonating: { partnerMkId: string; partnerName: string; adminEmail: string | null; returnTo: string } | null;
+  impersonating: PortalImpersonating | null;
 };
 
 export async function getPortalViewer(): Promise<PortalViewer> {
   const imp = await readImpersonation();
+  if (imp?.kind === "user") {
+    // Exactly the resolution a real login by that user gets.
+    const partner = await resolvePartnerByEmail(imp.email);
+    return {
+      partner,
+      impersonating: {
+        kind: "user",
+        userId: imp.userId,
+        email: imp.email,
+        name: imp.name,
+        partnerMkId: partner?.mkId ?? null,
+        partnerName: partner?.name ?? null,
+        adminEmail: imp.adminEmail,
+        returnTo: imp.returnTo,
+      },
+    };
+  }
   if (imp) {
     // Live Metakocka partner, else the directory record (MK unreachable / partner not
     // returned by id) — an admin viewing as a customer must not land on "no account".
@@ -47,9 +79,18 @@ export async function getPortalViewer(): Promise<PortalViewer> {
     });
     return {
       partner,
-      impersonating: { partnerMkId: imp.partnerMkId, partnerName: partner?.name ?? imp.partnerName, adminEmail: imp.adminEmail, returnTo: imp.returnTo },
+      impersonating: { kind: "customer", partnerMkId: imp.partnerMkId, partnerName: partner?.name ?? imp.partnerName, adminEmail: imp.adminEmail, returnTo: imp.returnTo },
     };
   }
   const session = await auth0.getSession();
   return { partner: await resolvePartnerByEmail(session?.user?.email), impersonating: null };
+}
+
+// The email the portal identity is derived from: the impersonated user's while a
+// super-admin views as them, otherwise the session's. For the no-account page.
+export async function getPortalIdentityEmail(): Promise<string | null> {
+  const imp = await readImpersonation();
+  if (imp?.kind === "user") return imp.email;
+  const session = await auth0.getSession();
+  return session?.user?.email ?? null;
 }

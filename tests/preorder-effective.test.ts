@@ -250,11 +250,12 @@ describe("resolveEffectiveCampaign — pricing context (kind, basis, VAT)", () =
     expect(e.effective.warnings).toEqual([]);
   });
 
-  it("individual → RRP basis with the country's global rate", () => {
+  it("individual → the same partner basis, with the country's global rate added on top", () => {
     const e = resolveEffectiveCampaign(baseCampaign(), person("SI"), vat);
-    expect(e.pricing).toEqual({ kind: "person", basis: "rrp", countryIso: "SI", vat: { rate: 22, source: "global" } });
-    expect(rowUnitPrice(flattenRows(e)[0].row, e.pricing!.basis)).toBe(200);
-    expect(computeTotals(e, { s1: 1 })).toEqual({ qty: 1, amount: 200, discount: 0, net: 200 });
+    expect(e.pricing).toEqual({ kind: "person", basis: "partner", countryIso: "SI", vat: { rate: 22, source: "global" } });
+    expect(rowUnitPrice(flattenRows(e)[0].row, e.pricing!.basis)).toBe(100); // the partner price, never the 200 RRP
+    expect(computeTotals(e, { s1: 1 })).toEqual({ qty: 1, amount: 100, discount: 0, net: 100 });
+    expect(computePricedOrder(e, { s1: 1 }).vat).toEqual({ rate: 22, net: 100, vat: 22, gross: 122 });
   });
 
   it("campaign override beats the global rate; fallback covers the rest", () => {
@@ -295,15 +296,26 @@ describe("resolveEffectiveCampaign — pricing context (kind, basis, VAT)", () =
     expect(resolveEffectiveCampaign(baseCampaign(), person("SI"), vat).effective.pricing.vatPolicy).toEqual({ mode: "country", fixedRate: null, chargeCompanies: false, source: "campaign" });
   });
 
-  it("unknown kind defaults to company with a warning; individuals without an RRP are flagged", () => {
+  it("unknown kind defaults to company with a warning; a missing RRP changes nothing for an individual", () => {
     const e = resolveEffectiveCampaign(baseCampaign(), ctx("SI"), vat);
     expect(e.pricing?.kind).toBe("business");
     expect(e.effective.warnings).toContain("kind-unknown");
     const noRrp = baseCampaign();
     noRrp.tabs[1].groups[0].rows[0].rrp = null;
     const p = resolveEffectiveCampaign(noRrp, person("SI"), vat);
-    expect(p.effective.warnings).toContain("rrp-missing:SKU-m1");
-    expect(flattenRows(p).find((r) => r.row.id === "m1")?.row.unpriced).toBe(true); // listed, not orderable
-    expect(computeTotals(p, { m1: 3 })).toEqual({ qty: 0, amount: 0, discount: 0, net: 0 });
+    expect(p.effective.warnings).toEqual([]);
+    expect(flattenRows(p).find((r) => r.row.id === "m1")?.row.unpriced).toBeUndefined();
+    expect(computeTotals(p, { m1: 3 })).toEqual({ qty: 3, amount: 150, discount: 0, net: 150 });
+  });
+
+  it("a row with no price at all is listed but not orderable, for everyone", () => {
+    const c = baseCampaign();
+    Object.assign(c.tabs[1].groups[0].rows[0], { rrp: null, partnerPrice: null, discountedPrice: null });
+    for (const who of [person("SI"), company("SI")]) {
+      const p = resolveEffectiveCampaign(c, who, vat);
+      expect(p.effective.warnings).toContain("unpriced:SKU-m1");
+      expect(flattenRows(p).find((r) => r.row.id === "m1")?.row.unpriced).toBe(true);
+      expect(computeTotals(p, { m1: 3 })).toEqual({ qty: 0, amount: 0, discount: 0, net: 0 });
+    }
   });
 });

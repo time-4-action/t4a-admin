@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveEffectiveCampaign } from "@/lib/preorder-effective";
 import { allocationFromDocument, buildCommercialSnapshot, orderHash, snapshotTotals, snapshotVatTotals } from "@/lib/preorder-snapshot";
-import { campaignFromSnapshot, computeTotals, flattenRows, rowUnitPrice, snapshotQuantities } from "@/types/preorder";
+import { campaignFromSnapshot, computePricedOrder, computeTotals, flattenRows, rowUnitPrice, snapshotQuantities } from "@/types/preorder";
 import type { DocDetail } from "@/types/documents";
 import { baseCampaign } from "./helpers/fixtures";
 
@@ -107,16 +107,32 @@ describe("allocation (live MK order vs request)", () => {
 describe("commercial snapshot — frozen VAT arithmetic", () => {
   const vat = { rates: { SI: 22 }, fallbackRate: null, taxCodes: [] };
   const person = { partnerMkId: "p2", countryIso: "SI", countrySource: "mk" as const, kind: "person" as const };
-  const qty = { s1: 100, m1: 20 }; // Sails: 100 × 200 RRP = 20 000 ⇒ Gold 10 %
+  const qty = { s1: 100, m1: 20 }; // 100 × 100 + 20 × 50 = 11 000 net on the order ⇒ Gold 10 % on Sails
 
-  it("individual: lines carry unit/line net, VAT and gross; pricing block sums the lines", () => {
+  it("individual: partner prices, tier off the net, VAT added on top; pricing block sums the lines", () => {
     const snap = buildCommercialSnapshot(resolveEffectiveCampaign(baseCampaign(), person, vat), qty);
-    expect(snap.pricing).toMatchObject({ kind: "person", basis: "rrp", countryIso: "SI", vatRate: 22, vatSource: "global" });
+    expect(snap.pricing).toMatchObject({ kind: "person", basis: "partner", countryIso: "SI", vatRate: 22, vatSource: "global" });
     const s1 = snap.lines.find((l) => l.code === "SKU-s1")!;
-    expect(s1).toMatchObject({ unitPrice: 200, rrp: 200, partnerPrice: 100, tierPct: 10, unitGross: 180, unitNet: 147.54, unitVat: 32.46, lineGross: 18000 });
+    expect(s1).toMatchObject({ unitPrice: 100, rrp: 200, partnerPrice: 100, tierPct: 10, unitNet: 90, unitVat: 19.8, unitGross: 109.8, lineNet: 9000, lineGross: 10980 });
     expect(snap.pricing?.totals).toEqual(snapshotVatTotals(snap));
-    expect(snap.pricing?.totals.gross).toBe(18000 + 20 * 100);
-    expect(snapshotTotals(snap).net).toBe(snap.pricing?.totals.gross);
+    expect(snap.pricing?.totals).toEqual({ net: 10000, vat: 2200, gross: 12200 });
+    // The legacy totals stay net (what the tiers were measured on); the VAT rides in the pricing block.
+    expect(snapshotTotals(snap).net).toBe(snap.pricing?.totals.net);
+  });
+
+  it("freezes the fixed-price flag: no tier on that line, and the frozen view re-prices identically", () => {
+    const c = baseCampaign();
+    c.tabs[1].groups[0].rows[0].fixedPrice = true; // m1
+    c.tabs[1].tiers = [{ id: "mt", name: "Mast deal", minAmount: 100, discountPct: 20 }];
+    const snap = buildCommercialSnapshot(resolveEffectiveCampaign(c, person, vat), qty);
+    const m1 = snap.lines.find((l) => l.code === "SKU-m1")!;
+    expect(m1).toMatchObject({ fixedPrice: true, tierPct: 0, unitNet: 50, lineNet: 1000 });
+    expect(snap.lines.find((l) => l.code === "SKU-s1")!.fixedPrice).toBeUndefined();
+    // The flag later removed from the sheet does not change the frozen order.
+    c.tabs[1].groups[0].rows[0].fixedPrice = false;
+    const frozen = campaignFromSnapshot(baseCampaign(), snap);
+    expect(computeTotals(frozen, snapshotQuantities(snap))).toEqual(snapshotTotals(snap));
+    expect(computePricedOrder(frozen, snapshotQuantities(snap)).vat).toEqual({ rate: 22, ...snap.pricing!.totals });
   });
 
   it("company: net lines, zero VAT, gross = net", () => {
@@ -131,14 +147,29 @@ describe("commercial snapshot — frozen VAT arithmetic", () => {
     const snap = buildCommercialSnapshot(resolveEffectiveCampaign(baseCampaign(), person, vat), qty);
     // The VAT table and the sheet change after submit.
     const mutated = baseCampaign({ vatOverrides: [{ iso: "SI", rate: 9.5 }] });
-    mutated.tabs[0].groups[0].rows[0].rrp = 999;
+    mutated.tabs[0].groups[0].rows[0].partnerPrice = 999;
     const live = resolveEffectiveCampaign(mutated, person, { rates: { SI: 25 }, fallbackRate: null, taxCodes: [] });
     expect(live.pricing?.vat.rate).toBe(9.5);
     const frozen = campaignFromSnapshot(mutated, snap);
-    expect(frozen.pricing).toEqual({ kind: "person", basis: "rrp", countryIso: "SI", vat: { rate: 22, source: "global" } });
-    expect(rowUnitPrice(flattenRows(frozen)[0].row, "rrp")).toBe(200);
+    expect(frozen.pricing).toEqual({ kind: "person", basis: "partner", countryIso: "SI", vat: { rate: 22, source: "global" } });
+    expect(rowUnitPrice(flattenRows(frozen)[0].row, "partner")).toBe(100);
     expect(computeTotals(frozen, snapshotQuantities(snap))).toEqual(snapshotTotals(snap));
-    expect(snapshotVatTotals(snap)?.vat).toBeCloseTo(3246 + 360.6, 5); // 100 × 32.46 + 20 × 18.03
+    expect(snapshotVatTotals(snap)?.vat).toBeCloseTo(1980 + 220, 5); // 100 × 19.80 + 20 × 11
+  });
+
+  it("a legacy snapshot frozen on the RRP basis keeps pricing exactly as submitted", () => {
+    const legacy = buildCommercialSnapshot(resolveEffectiveCampaign(baseCampaign(), person, vat), qty);
+    // Rewrite it the way the pre-change code froze an individual: gross RRP units, VAT inside.
+    legacy.pricing = { ...legacy.pricing!, basis: "rrp", totals: { net: 15573.77, vat: 4426.23, gross: 20000 } };
+    legacy.lines = legacy.lines.map((l) => ({ ...l, unitPrice: l.rrp!, unitNet: null, unitVat: null, unitGross: null, lineNet: null, lineVat: null, lineGross: null }));
+    const frozen = campaignFromSnapshot(baseCampaign(), legacy);
+    expect(frozen.pricing?.basis).toBe("rrp");
+    expect(rowUnitPrice(flattenRows(frozen)[0].row, "rrp")).toBe(200);
+    // 100 × 200 = 20 000 ⇒ Gold 10 % off the gross; VAT extracted, never added.
+    const priced = computePricedOrder(frozen, snapshotQuantities(legacy));
+    expect(priced.totals).toEqual({ qty: 120, amount: 22000, discount: 2000, net: 20000 });
+    expect(priced.vat?.gross).toBe(20000);
+    expect(priced.tabs[0].lines.s1).toMatchObject({ unit: 200, unitFinal: 180, unitNet: 147.54, unitVat: 32.46, unitGross: 180 });
   });
 
   it("a missing VAT rate leaves no pricing block (submit refuses such an order)", () => {

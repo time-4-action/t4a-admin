@@ -384,6 +384,7 @@ export function snapshotView(s?: ICommercialSnapshot | null): CommercialSnapshot
       partnerPrice: l.partnerPrice ?? null,
       taxCode: l.taxCode ?? null,
       priceSource: l.priceSource ?? "sheet",
+      ...(l.fixedPrice ? { fixedPrice: true } : {}),
       tierPct: l.tierPct ?? null,
       unitNet: l.unitNet ?? null,
       unitVat: l.unitVat ?? null,

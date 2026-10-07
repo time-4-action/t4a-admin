@@ -1,20 +1,24 @@
 import Link from "next/link";
 import { auth0 } from "@/lib/auth";
-import { rolesFromIdToken, canSee } from "@/lib/access";
+import { canSee } from "@/lib/access";
+import { getCurrentRoles } from "@/lib/current-user";
+import { readImpersonation } from "@/lib/portal-impersonation";
 import { ChevronRight } from "lucide-react";
 import { sections } from "./sections";
 
 export default async function WelcomePage() {
   const session = await auth0.getSession();
-  const roles = rolesFromIdToken(session?.tokenSet?.idToken);
+  // Effective roles: a super-admin "viewing as" a user sees that user's cards.
+  const roles = await getCurrentRoles();
   // A card may carry its own gate (General mixes user-admin and access-admin cards).
   const visibleSections = sections
     .map((s) => ({ ...s, cards: s.cards.filter((c) => canSee(roles, c.section ?? s.section)) }))
     .filter((s) => s.cards.length > 0);
 
-  const firstName = (session?.user?.name || session?.user?.email || "")
-    .toString()
-    .split(/[\s@]+/)[0];
+  // Greet the person whose home this is — the viewed user while "viewing as" one.
+  const imp = await readImpersonation();
+  const whose = imp?.kind === "user" ? imp.name || imp.email : session?.user?.name || session?.user?.email || "";
+  const firstName = whose.toString().split(/[\s@]+/)[0];
 
   return (
     <div className="flex flex-col h-full">

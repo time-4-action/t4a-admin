@@ -755,6 +755,138 @@ export async function listSalesPricelists(): Promise<MkPricelist[]> {
   return value;
 }
 
+// ── sales product index (MK-only products) ──────────────────────────────────────
+
+// The product catalogue API is built from PNV, so a product that lives only in
+// Metakocka never reaches it. MK's json/product_list has no name search (every
+// name/search parameter is ignored, `code` is exact), so the preorder builder
+// searches an in-memory index of every sales product instead: ~1.7k
+// rows, two pages of 1000, ~2 s. Cached; concurrent callers share one fetch.
+// `activated: false` products stay in the index: an exact SKU / EAN (the import) still
+// resolves them, only the name / prefix search leaves them out. The same goes for items
+// flagged `service` in MK: real products are mis-flagged that way (P14240003999, a sail
+// batten, is a "service"), and with MK as the source of truth an item missing from the
+// index counts as not existing — so they stay, out of the free-text search only.
+export type MkSalesProduct = { code: string; name: string; barcode: string | null; activated: boolean; service: boolean };
+
+const MK_PRODUCT_PAGE = 1000;
+const MK_PRODUCT_MAX_PAGES = 20;
+const MK_PRODUCT_TTL_MS = 10 * 60 * 1000;
+let mkProductCache: { at: number; value: MkSalesProduct[] } | null = null;
+let mkProductInflight: Promise<MkSalesProduct[] | null> | null = null;
+
+async function fetchMkSalesProducts(): Promise<MkSalesProduct[] | null> {
+  const out: MkSalesProduct[] = [];
+  for (let page = 0; page < MK_PRODUCT_MAX_PAGES; page++) {
+    const res = await callMetakocka(
+      "json/product_list",
+      { sales: "true", limit: String(MK_PRODUCT_PAGE), offset: String(page * MK_PRODUCT_PAGE) },
+      { timeoutMs: 60_000 },
+    );
+    if (!res.ok) return null;
+    const raw = res.data.product_list;
+    const rows = Array.isArray(raw)
+      ? (raw as Record<string, unknown>[])
+      : raw && typeof raw === "object"
+        ? [raw as Record<string, unknown>]
+        : [];
+    for (const p of rows) {
+      const code = str(p.code);
+      if (!code) continue;
+      out.push({
+        code,
+        name: str(p.name) ?? code,
+        barcode: str(p.barcode) ?? null,
+        activated: str(p.activated) !== "false",
+        service: str(p.service) === "true",
+      });
+    }
+    if (rows.length < MK_PRODUCT_PAGE) break;
+  }
+  return out;
+}
+
+// Drop the cached Metakocka product index (names, codes, barcodes, activation) and the
+// price-list names, so the next read comes straight from MK. The SKU import calls it
+// first: a product / barcode just fixed in MK must be what the import sees. (Prices
+// themselves are never cached — getMkProductPrices reads them live.)
+export function invalidateMkProductCaches(): void {
+  mkProductCache = null;
+  pricelistCache = null;
+}
+
+// The index, or null when MK can't be read and nothing is cached — callers that treat
+// MK as the source of truth must then leave data alone instead of dropping it.
+async function loadMkSalesProducts(): Promise<MkSalesProduct[] | null> {
+  if (mkProductCache && Date.now() - mkProductCache.at < MK_PRODUCT_TTL_MS) {
+    return mkProductCache.value;
+  }
+  mkProductInflight ??= fetchMkSalesProducts()
+    .then((value) => {
+      if (value) mkProductCache = { at: Date.now(), value };
+      return value ?? mkProductCache?.value ?? null;
+    })
+    .finally(() => {
+      mkProductInflight = null;
+    });
+  return mkProductInflight;
+}
+
+export async function listMkSalesProducts(): Promise<MkSalesProduct[]> {
+  return (await loadMkSalesProducts()) ?? [];
+}
+
+// Every MK sales product by code — Metakocka is the source of truth for which products
+// exist and for their code, name and barcode (the catalogue only adds images and
+// descriptions). null = MK unavailable: don't treat an absent code as "not in MK".
+export async function getMkProductIndex(): Promise<Map<string, MkSalesProduct> | null> {
+  const list = await loadMkSalesProducts();
+  return list ? new Map(list.map((p) => [p.code, p])) : null;
+}
+
+// Same matching as the catalogue search: exact code / barcode first (deactivated
+// products included), then code prefix, then names containing every word of the query.
+export async function searchMkSalesProducts(q: string, limit = 15): Promise<MkSalesProduct[]> {
+  const query = q.trim().toLowerCase();
+  if (query.length < 2) return [];
+  const words = query.split(/\s+/).filter(Boolean);
+  const exact: MkSalesProduct[] = [];
+  const prefix: MkSalesProduct[] = [];
+  const byName: MkSalesProduct[] = [];
+  for (const p of await listMkSalesProducts()) {
+    const code = p.code.toLowerCase();
+    if (code === query || p.barcode === query) exact.push(p);
+    else if (!p.activated || p.service) continue;
+    else if (code.startsWith(query)) prefix.push(p);
+    else if (words.every((w) => p.name.toLowerCase().includes(w))) byName.push(p);
+  }
+  return [...exact, ...prefix, ...byName].slice(0, limit);
+}
+
+// By exact code, else by barcode (EAN; leading zeros ignored, see normalizeEan).
+export async function getMkSalesProduct(codeOrEan: string): Promise<MkSalesProduct | null> {
+  const want = codeOrEan.trim();
+  const all = await listMkSalesProducts();
+  const byCode = all.find((p) => p.code === want);
+  if (byCode) return byCode;
+  const ean = /^\d{6,14}$/.test(want) ? want.replace(/^0+/, "") : null;
+  if (!ean) return null;
+  return all.find((p) => p.barcode != null && p.barcode.trim().replace(/^0+/, "") === ean) ?? null;
+}
+
+// Metakocka barcodes (EANs) by product code, from the same cached index. The catalogue
+// misses the EAN of many variants; MK is where barcodes are maintained.
+export async function getMkBarcodes(codes: string[]): Promise<Record<string, string>> {
+  const want = new Set(codes.map((c) => c.trim()).filter(Boolean));
+  const out: Record<string, string> = {};
+  if (want.size === 0) return out;
+  for (const p of await listMkSalesProducts()) {
+    const b = p.barcode?.trim();
+    if (b && want.has(p.code)) out[p.code] = b;
+  }
+  return out;
+}
+
 // ── per-product prices (read straight from MK) ─────────────────────────────────
 
 function round2(n: number): number {
@@ -928,16 +1060,19 @@ export type SalesOrderInput = {
   deliveryDeadline?: string; // yyyy-mm-dd
   // Each line references an existing product by code with an EXPLICIT unit price locked
   // at order time (we don't put a price list on the document) and its VAT factor:
-  //  • consumer lines carry the GROSS price (priceWithTax = RRP, tier discount baked
-  //    in) and the country's factor — MK backs the net/VAT out of the gross;
-  //  • company lines carry the NET price (price = partner price after tier) and a
-  //    factor of 0 (zero-rated).
+  //  • consumer lines carry the GROSS price (priceWithTax = RRP) and the country's
+  //    factor — MK backs the net/VAT out of the gross;
+  //  • company lines carry the NET price (price = partner price) and a factor of 0
+  //    (zero-rated).
+  // The volume tier is NOT baked into the price: it goes out as the line's `discount`
+  // (percent) next to the LIST price, so staff see "price − x %" in MK exactly as the
+  // customer saw it, and can adjust either. Omitted when 0.
   // VAT per line: MK's documented `tax_factor` ("0.22") by default — no account
   // codes needed. A configured tax code for the rate (VAT settings → Metakocka tax
   // codes) is sent as `tax` instead, which is the fallback for lines MK refuses a
   // factor for (a zero-rated line: MK_ZERO_TAX_CODE or the 0 % code).
   // `MK_LINE_TAX_MODE=code` makes codes mandatory.
-  lines: { code: string; amount: number; price?: number; priceWithTax?: number; taxFactor: number; tax: string | null }[];
+  lines: { code: string; amount: number; price?: number; priceWithTax?: number; discount?: number; taxFactor: number; tax: string | null }[];
 };
 
 function mkLineTax(l: SalesOrderInput["lines"][number]): Record<string, string> {
@@ -960,29 +1095,34 @@ export async function createSalesOrder(
   if (lines.length === 0) return { ok: false, error: "No lines to order", status: 400 };
 
   const addr = partner.address ?? {};
+  const partnerRef = {
+    business_entity: partner.businessEntity ? "true" : "false",
+    ...(partner.foreignCountry !== undefined ? { foreign_county: partner.foreignCountry ? "true" : "false" } : {}),
+    ...(partner.taxpayer !== undefined ? { taxpayer: partner.taxpayer ? "true" : "false" } : {}),
+    tax_id_number: partner.taxId ?? "",
+    customer: partner.name,
+    street: addr.street ?? "",
+    post_number: addr.postNumber ?? "",
+    place: addr.city ?? partner.city ?? "",
+    country: addr.country ?? "",
+  };
   const body: Record<string, unknown> = {
     doc_type: "sales_order",
     doc_date: mkDocDate(),
     title,
     currency_code: currencyCode,
     status_code: "created",
-    partner: {
-      business_entity: partner.businessEntity ? "true" : "false",
-      ...(partner.foreignCountry !== undefined ? { foreign_county: partner.foreignCountry ? "true" : "false" } : {}),
-      ...(partner.taxpayer !== undefined ? { taxpayer: partner.taxpayer ? "true" : "false" } : {}),
-      tax_id_number: partner.taxId ?? "",
-      customer: partner.name,
-      street: addr.street ?? "",
-      post_number: addr.postNumber ?? "",
-      place: addr.city ?? partner.city ?? "",
-      country: addr.country ?? "",
-    },
-    // Explicit unit price + VAT factor per line (see SalesOrderInput.lines). No price
-    // list on the document.
+    partner: partnerRef,
+    // Recipient (delivery address) = the customer, like a hand-entered order where
+    // staff pick the same partner for both. Without it MK leaves the recipient empty.
+    receiver: { ...partnerRef },
+    // Explicit unit price + discount % + VAT factor per line (see SalesOrderInput.lines).
+    // No price list on the document.
     product_list: lines.map((l) => ({
       code: l.code,
       amount: String(l.amount),
       ...(l.priceWithTax != null ? { price_with_tax: String(l.priceWithTax) } : { price: String(l.price ?? 0) }),
+      ...(l.discount ? { discount: String(round4(l.discount)) } : {}),
       ...mkLineTax(l),
     })),
   };

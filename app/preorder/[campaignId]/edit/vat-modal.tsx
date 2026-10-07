@@ -136,9 +136,9 @@ export function VatModal({
         title="Pricing & VAT"
         description={
           <>
-            Companies pay <span className="text-foreground font-medium">partner prices excl. VAT (0%)</span>; individuals pay the{" "}
-            <span className="text-foreground font-medium">RRP incl. their country&apos;s VAT</span>, extracted from the price — never added. Rates
-            come from the global table; override a country here for this campaign only.
+            Everyone pays <span className="text-foreground font-medium">partner prices excl. VAT</span>. Companies are zero-rated (0%); individuals get{" "}
+            <span className="text-foreground font-medium">their country&apos;s VAT added on top</span>. Rates come from the global table; override a country
+            here for this campaign only.
           </>
         }
       />

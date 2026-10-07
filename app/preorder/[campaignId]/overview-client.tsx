@@ -8,7 +8,7 @@ import {
   Users,
   Wallet,
   CheckCircle2,
-  UserPlus,
+  UserRoundSearch,
   Link2,
   Eye,
   AlertTriangle,
@@ -105,8 +105,8 @@ export default function OverviewClient({ campaignId }: { campaignId: string }) {
         }
         actions={
           <>
-            <Link href={`/preorder/${campaignId}/preview?fill=1`}>
-              <Button variant="outline" size="sm" className="h-8"><UserPlus className="w-3.5 h-3.5" /> Fill for customer</Button>
+            <Link href={`/preorder/${campaignId}/preview?pick=1`} title="Open the B2B portal as a customer and fill this campaign for them">
+              <Button variant="outline" size="sm" className="h-8"><UserRoundSearch className="w-3.5 h-3.5" /> View as customer</Button>
             </Link>
           </>
         }
@@ -201,7 +201,7 @@ function OverviewSkeleton({ campaignId }: { campaignId: string }) {
         meta={<><Skeleton className="h-[16.5px] w-12 rounded-full" delay={40} /><Skeleton className="h-2.5 w-24" delay={60} /></>}
         actions={
           <>
-            <Button variant="outline" size="sm" className="h-8" disabled><UserPlus className="w-3.5 h-3.5" /> Fill for customer</Button>
+            <Button variant="outline" size="sm" className="h-8" disabled><UserRoundSearch className="w-3.5 h-3.5" /> View as customer</Button>
           </>
         }
       />

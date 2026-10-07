@@ -5,19 +5,32 @@
 // Pure and framework-agnostic (imported client & server); no `server-only`.
 //
 // Rules
+//  • EVERYONE orders at the PARTNER price, which is NET (excl. VAT). The RRP is a
+//                reference figure only — what the goods retail for — and is never what
+//                anybody is charged.
 //  • A customer is a "business" (Metakocka carries a tax id) or a "person".
-//  • Business  → PARTNER price, which is NET (excl. VAT), and 0% VAT (zero-rated).
-//  • Person    → RRP, which is GROSS (VAT-inclusive). VAT is EXTRACTED from the RRP at
-//                the customer's country rate — never added on top:
-//                €100 RRP in SI (22%) = €81.97 net + €18.03 VAT = €100.
+//  • Business  → partner price, 0% VAT (zero-rated) by default. A market / customer
+//                rule may switch VAT on for companies too.
+//  • Person    → partner price + their country's VAT ADDED ON TOP:
+//                €82 partner price in SI (22%) = €82 net + €18.04 VAT = €100.04.
 //  • The VAT rate of a country comes from: campaign override → global setting →
 //                configured fallback → otherwise it is MISSING and the order is blocked.
 //                A missing rate is never guessed.
 //  • A market or customer rule can change the VAT policy (VatPolicy): switch VAT off
 //                (exempt, 0%), pin one fixed rate for everyone in the layer, or charge
-//                VAT to companies too (on top of the net partner price).
+//                VAT to companies too.
 //  • Volume tiers apply to both kinds; the threshold is compared with the customer's
-//                subtotal in their own price basis (business: net, person: gross).
+//                WHOLE-ORDER net subtotal (all tabs). Each tab keeps its own ladder /
+//                percentage. The tier comes off the net unit, so VAT is charged on the
+//                discounted price.
+//  • A FIXED-PRICE row (`row.fixedPrice`) is never tier-discounted: its line still
+//                counts towards the order subtotal that unlocks the tiers, but it is
+//                charged at its own price (tierPct 0) whatever tier the tab reaches.
+//
+// `PriceBasis` survives for SUBMISSIONS FROZEN BEFORE this change: those snapshots
+// carry `basis: "rrp"` (individuals were charged the VAT-inclusive RRP) and must keep
+// rendering and registering exactly as they were submitted. Nothing new is ever
+// resolved onto the "rrp" basis — see `basisFor`.
 //
 // Money is handled as INTEGER CENTS. Prices enter as decimals (what admins type and
 // what MK returns), are rounded to cents once, and every operation after that is
@@ -147,8 +160,10 @@ export function addVat(netC: Cents, ratePct: number): VatSplit {
 
 // ── policy ───────────────────────────────────────────────────────────────────
 
-export function basisFor(kind: CustomerKind): PriceBasis {
-  return kind === "person" ? "rrp" : "partner";
+// The basis every customer is resolved onto today: the partner price, for companies
+// and individuals alike. (Legacy snapshots may still carry "rrp"; see the note above.)
+export function basisFor(_kind: CustomerKind): PriceBasis {
+  return "partner";
 }
 
 function isoOf(v: unknown): string | null {
@@ -226,9 +241,10 @@ export function resolveVatRate(input: {
 
 // ── rows & lines ─────────────────────────────────────────────────────────────
 
-// The unit price a customer orders a row at, in their basis. Partner basis keeps the
-// legacy fallback chain (discounted → partner → rrp) so a sheet without partner
-// prices still works; RRP basis never falls back to a net price.
+// The unit price a customer orders a row at. Everybody is on the partner basis: the
+// manually discounted price if the sheet carries one, else the partner price, else —
+// as a last resort, so a half-filled sheet still works — the RRP. The "rrp" basis is
+// only reached by a legacy snapshot and never falls back to a net price.
 export function unitPriceFor(
   row: Pick<PreorderRow, "discountedPrice" | "partnerPrice" | "rrp">,
   basis: PriceBasis = "partner",
@@ -251,8 +267,9 @@ export type LinePricing = {
   lineGross: number;
 };
 
-// Price one line: apply the tier to the unit, then split (person) or zero-rate
-// (business), then multiply by the quantity.
+// Price one line: apply the tier to the unit, then add the VAT on top of the
+// discounted net (legacy "rrp" snapshots extract it from the gross instead), then
+// multiply by the quantity.
 export function priceLine(input: { basis: PriceBasis; unit: number; qty: number; tierPct: number; vatRate: number }): LinePricing {
   const qty = Math.max(0, Math.floor(input.qty || 0));
   const unitC = toCents(input.unit);
@@ -276,9 +293,13 @@ export function priceLine(input: { basis: PriceBasis; unit: number; qty: number;
 }
 
 // ── volume discount tiers ────────────────────────────────────────────────────
-// A tab's tiers turn its subtotal into a discount: order enough within the tab and
-// every line in it drops by the tier's percentage. Tiers never stack — exactly one
-// (the highest threshold reached) applies.
+// A tab's tiers turn the ORDER subtotal into a discount on that tab: the thresholds
+// are compared with the whole order (every tab together), and once one is reached
+// every line in the tab drops by the tier's percentage — except fixed-price rows,
+// which count towards the threshold but are never discounted. Each tab keeps its own
+// ladder (different percentages / thresholds per product family), but the amount
+// that unlocks them is always the full order. Tiers never stack — exactly one (the
+// highest threshold reached) applies per tab.
 
 // The usable tiers of a tab, cleaned and sorted by threshold ascending. A tier with a
 // non-positive percentage is inert (it would discount nothing) and is dropped here so
@@ -316,13 +337,16 @@ export type PreorderTabTotal = {
   tabId: string;
   tabName: string;
   qty: number;
-  amount: number; // basis subtotal, before the tab's volume discount
-  tier: PreorderTier | null; // the tier this tab reached
+  amount: number; // this tab's net subtotal, before its volume discount
+  orderAmount: number; // the WHOLE order's net subtotal — what the tiers are measured against
+  tier: PreorderTier | null; // the tier this tab reached (on the order subtotal)
   discountPct: number; // 0 when no tier applies
   discount: number; // Σ per-line (unit − discounted unit) × qty
   net: number; // amount − discount (what is actually payable, in the basis)
+  fixedAmount: number; // the part of `amount` on fixed-price rows — counted, never discounted
+  fixedQty: number;
   nextTier: PreorderTier | null; // the tier just out of reach
-  toNextTier: number; // how much more this tab needs to reach it
+  toNextTier: number; // how much more the ORDER needs to reach it
 };
 
 export type PricedTab = PreorderTabTotal & { lines: Record<string, LinePricing> }; // by rowId
@@ -365,10 +389,14 @@ export function priceOrder(
   let vatC = 0;
   let grossC = 0;
 
-  const tabs: PricedTab[] = campaign.tabs.map((tab) => {
+  // Pass 1 — collect every ordered line; the tiers are measured against the
+  // subtotal of the WHOLE order, so it has to be known before any tab is priced.
+  const collected = campaign.tabs.map((tab) => {
     const ordered: { row: PreorderRow; qty: number; unitC: Cents }[] = [];
     let qty = 0;
     let amountC = 0;
+    let fixedC = 0;
+    let fixedQty = 0;
     for (const group of tab.groups) {
       for (const row of group.rows) {
         const q = Math.max(0, Math.floor(qtyOf(row) || 0));
@@ -377,33 +405,47 @@ export function priceOrder(
         ordered.push({ row, qty: q, unitC });
         qty += q;
         amountC += mulCents(unitC, q);
+        if (row.fixedPrice) {
+          fixedC += mulCents(unitC, q);
+          fixedQty += q;
+        }
       }
     }
+    return { tab, ordered, qty, amountC, fixedC, fixedQty };
+  });
+  const orderAmountC = collected.reduce((sum, t) => sum + t.amountC, 0);
+  const orderAmount = fromCents(orderAmountC);
+
+  // Pass 2 — each tab's own ladder, unlocked by the order subtotal.
+  const tabs: PricedTab[] = collected.map(({ tab, ordered, qty, amountC, fixedC, fixedQty }) => {
     const amount = fromCents(amountC);
-    const tier = tierForAmount(tab.tiers, amount);
+    const tier = tierForAmount(tab.tiers, orderAmount);
     const discountPct = tier?.discountPct ?? 0;
     const lines: Record<string, LinePricing> = {};
     let discountC = 0;
     for (const o of ordered) {
-      const lp = priceLine({ basis, unit: fromCents(o.unitC), qty: o.qty, tierPct: discountPct, vatRate: rate });
+      const lp = priceLine({ basis, unit: fromCents(o.unitC), qty: o.qty, tierPct: o.row.fixedPrice ? 0 : discountPct, vatRate: rate });
       lines[o.row.id] = lp;
       discountC += mulCents(o.unitC - toCents(lp.unitFinal), o.qty);
       netC += toCents(lp.lineNet);
       vatC += toCents(lp.lineVat);
       grossC += toCents(lp.lineGross);
     }
-    const next = nextTierAfter(tab.tiers, amount);
+    const next = nextTierAfter(tab.tiers, orderAmount);
     return {
       tabId: tab.id,
       tabName: tab.name,
       qty,
       amount,
+      orderAmount,
       tier,
       discountPct,
       discount: fromCents(discountC),
       net: fromCents(amountC - discountC),
+      fixedAmount: fromCents(fixedC),
+      fixedQty,
       nextTier: next,
-      toNextTier: next ? fromCents(Math.max(0, toCents(next.minAmount) - amountC)) : 0,
+      toNextTier: next ? fromCents(Math.max(0, toCents(next.minAmount) - orderAmountC)) : 0,
       lines,
     };
   });
@@ -423,8 +465,8 @@ export function fmtVatRate(rate: number | null | undefined): string {
   return `${Number.isInteger(rate) ? rate : rate.toFixed(2).replace(/\.?0+$/, "")}%`;
 }
 
-// Short human line for totals ("incl. 22% VAT", "excl. VAT · 0% (company)",
-// "excl. VAT · +22% VAT").
+// Short human line for totals ("excl. VAT · +22% VAT", "excl. VAT · 0% (company)";
+// "incl. 22% VAT" only on a legacy RRP-basis snapshot).
 export function vatLabel(ctx: PricingContext | null | undefined): string {
   if (!ctx) return "";
   if (ctx.vat.rate == null) return "VAT rate not configured";
