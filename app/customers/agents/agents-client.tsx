@@ -1,19 +1,17 @@
 "use client";
 
 // Customers → Agents: customers who also see (and order for) assigned client
-// customers in the portal. List + one modal for create / edit.
+// customers in the portal. Each agent opens on its own page (./[partnerMkId]).
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, Briefcase, Pencil, Plus, Search, X } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, Briefcase, ChevronRight, Plus, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SkeletonLine, stagger } from "@/components/ui/skeleton";
 import { ViewAsCustomerButton } from "@/components/view-as-customer-button";
-import type { PickedCustomer } from "@/components/customer-directory-picker";
 import type { PortalAgentView } from "@/types/portal-agent";
 import { cn } from "@/lib/utils";
-import { AgentModal } from "./agent-modal";
 
 const MAX_CHIPS = 6;
 
@@ -24,15 +22,10 @@ function fmtWhen(v: string | null): string {
 }
 
 export function AgentsClient() {
-  const router = useRouter();
-  const params = useSearchParams();
   const [agents, setAgents] = useState<PortalAgentView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
-  const [editing, setEditing] = useState<PortalAgentView | null>(null);
-  const [seed, setSeed] = useState<PickedCustomer | null>(null);
-  const [open, setOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -42,39 +35,17 @@ export function AgentsClient() {
       if (!r.ok) throw new Error(`Could not load agents (${r.status})`);
       const j = (await r.json()) as { agents: PortalAgentView[] };
       setAgents(j.agents);
-      return j.agents;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load agents");
-      return [];
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Deep links from the Customers list: ?agent=<id> edits, ?new=<id>&name=… creates.
   useEffect(() => {
-    void load().then((list) => {
-      const edit = params.get("agent");
-      const fresh = params.get("new");
-      if (edit) {
-        const a = list.find((x) => x.partnerMkId === edit);
-        if (a) {
-          setEditing(a);
-          setSeed(null);
-          setOpen(true);
-        }
-      } else if (fresh) {
-        const a = list.find((x) => x.partnerMkId === fresh);
-        setEditing(a ?? null);
-        setSeed(a ? null : { partnerMkId: fresh, partnerName: params.get("name") || fresh });
-        setOpen(true);
-      }
-      if (edit || fresh) router.replace("/customers/agents");
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void load();
   }, [load]);
 
-  const agentIds = useMemo(() => new Set(agents.map((a) => a.partnerMkId)), [agents]);
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return agents;
@@ -94,16 +65,10 @@ export function AgentsClient() {
               {loading ? "" : `${agents.length} agent${agents.length === 1 ? "" : "s"} · ${clientTotal} client assignment${clientTotal === 1 ? "" : "s"}`}
             </span>
           </div>
-          <Button
-            size="sm"
-            className="h-8 text-xs gap-1.5"
-            onClick={() => {
-              setEditing(null);
-              setSeed(null);
-              setOpen(true);
-            }}
-          >
-            <Plus className="w-3.5 h-3.5" /> New agent
+          <Button asChild size="sm" className="h-8 text-xs gap-1.5">
+            <Link href="/customers/agents/new">
+              <Plus className="w-3.5 h-3.5" /> New agent
+            </Link>
           </Button>
         </div>
       </header>
@@ -156,7 +121,7 @@ export function AgentsClient() {
             ) : rows.length === 0 ? (
               <div className="px-4 py-14 text-center">
                 <Briefcase className="w-6 h-6 mx-auto mb-3 text-muted-foreground/50" />
-                <p className="text-[13px] text-muted-foreground">{q ? "No agent matches." : "No agents yet. Create one with “New agent”."}</p>
+                <p className="text-[13px] text-muted-foreground">{q ? "No agent matches." : "No agents yet. Create one with New agent."}</p>
               </div>
             ) : (
               rows.map((a) => {
@@ -164,7 +129,9 @@ export function AgentsClient() {
                 return (
                   <div key={a.partnerMkId} className={cn("grid grid-cols-1 gap-y-2 md:gap-3 items-center px-4 py-3 hover:bg-muted/20", grid)}>
                     <div className="min-w-0">
-                      <div className="text-[13px] font-medium text-foreground truncate">{a.partnerName}</div>
+                      <Link href={`/customers/agents/${encodeURIComponent(a.partnerMkId)}`} className="block text-[13px] font-medium text-foreground truncate hover:underline">
+                        {a.partnerName}
+                      </Link>
                       <div className="text-[11px] text-muted-foreground truncate">
                         {a.clients.length} client{a.clients.length === 1 ? "" : "s"}
                         {a.note ? ` · ${a.note}` : ""}
@@ -184,19 +151,12 @@ export function AgentsClient() {
                       {a.updatedBy && <div className="truncate">{a.updatedBy}</div>}
                     </div>
                     <div className="flex md:justify-end items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-[11px] gap-1"
-                        onClick={() => {
-                          setEditing(a);
-                          setSeed(null);
-                          setOpen(true);
-                        }}
-                      >
-                        <Pencil className="w-3 h-3" /> Edit
-                      </Button>
                       <ViewAsCustomerButton partnerMkId={a.partnerMkId} to="/portal/invoices" />
+                      <Button asChild size="sm" variant="outline" className="h-7 text-[11px] gap-1">
+                        <Link href={`/customers/agents/${encodeURIComponent(a.partnerMkId)}`}>
+                          Open <ChevronRight className="w-3 h-3" />
+                        </Link>
+                      </Button>
                     </div>
                   </div>
                 );
@@ -206,20 +166,6 @@ export function AgentsClient() {
         </div>
       </div>
 
-      <AgentModal
-        open={open}
-        onOpenChange={setOpen}
-        agent={editing}
-        seed={seed}
-        agentIds={agentIds}
-        onSaved={(saved) =>
-          setAgents((prev) => {
-            const rest = prev.filter((x) => x.partnerMkId !== saved.partnerMkId);
-            return [...rest, saved].sort((x, y) => x.partnerName.localeCompare(y.partnerName));
-          })
-        }
-        onDeleted={(id) => setAgents((prev) => prev.filter((x) => x.partnerMkId !== id))}
-      />
     </div>
   );
 }

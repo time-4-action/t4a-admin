@@ -258,7 +258,7 @@ export function CustomersClient() {
                         <div className="mt-0.5 flex flex-wrap gap-1">
                           {asAgent && (
                             <Link
-                              href={`/customers/agents?agent=${encodeURIComponent(c.partnerMkId)}`}
+                              href={`/customers/agents/${encodeURIComponent(c.partnerMkId)}`}
                               className="inline-flex items-center gap-1 rounded-full bg-teal-500/10 text-teal-700 dark:text-teal-300 px-1.5 py-px text-[10px] font-medium hover:bg-teal-500/20"
                               title="Edit this agent's clients"
                             >
@@ -267,7 +267,7 @@ export function CustomersClient() {
                           )}
                           {servedBy.length > 0 && (
                             <Link
-                              href={`/customers/agents?agent=${encodeURIComponent(servedBy[0].partnerMkId)}`}
+                              href={`/customers/agents/${encodeURIComponent(servedBy[0].partnerMkId)}`}
                               className="inline-flex items-center gap-1 rounded-full bg-muted text-muted-foreground px-1.5 py-px text-[10px] hover:text-foreground max-w-full"
                               title={servedBy.map((s) => s.partnerName).join(", ")}
                             >
@@ -305,7 +305,7 @@ export function CustomersClient() {
                     <div className="flex md:justify-end items-center gap-2">
                       {!asAgent && (
                         <Link
-                          href={`/customers/agents?new=${encodeURIComponent(c.partnerMkId)}&name=${encodeURIComponent(c.name)}`}
+                          href={`/customers/agents/new?partner=${encodeURIComponent(c.partnerMkId)}`}
                           className="text-[11px] text-muted-foreground hover:text-foreground hover:underline whitespace-nowrap"
                           title="Let this customer see and order for other customers"
                         >

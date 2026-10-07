@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { startMongo, stopMongo, clearMongo } from "./helpers/mongo";
 import { PortalAgent } from "@/models/portal-agent";
-import { deleteAgent, getAgent, getAgentClients, listAgents, saveAgent } from "@/lib/portal-agents";
+import { MkCustomer } from "@/models/mk-customer";
+import { agentsOfClients, deleteAgent, getAgent, getAgentClients, listAgents, resolveCustomerLines, saveAgent } from "@/lib/portal-agents";
 import { ALL_ACCOUNTS, normalizeAgentClients, portalAccountsFor, resolvePortalScope } from "@/types/portal-agent";
 
 describe("normalizeAgentClients", () => {
@@ -130,6 +131,34 @@ describe("agent storage", () => {
     expect(await deleteAgent("a1")).toBe(true);
     expect(await getAgentClients("a1")).toEqual([]);
     expect(await deleteAgent("a1")).toBe(false);
+  });
+
+  it("lists the agents a client is shared with", async () => {
+    await saveAgent({ partnerMkId: "a1", partnerName: "Agent One", clients: [{ partnerMkId: "c1", partnerName: "One" }], actor: null });
+    await saveAgent({ partnerMkId: "a2", partnerName: "Agent Two", clients: [{ partnerMkId: "c1", partnerName: "One" }], actor: null });
+    const out = await agentsOfClients(["c1", "c9"]);
+    expect(out.c1.map((a) => a.partnerMkId).sort()).toEqual(["a1", "a2"]);
+    expect(out.c9).toBeUndefined();
+  });
+
+  it("resolves a pasted list by id, customer code, email and exact name — never guessing", async () => {
+    const seen = { mkSyncedAt: new Date(), lastSeenInMk: new Date() };
+    await MkCustomer.create([
+      { ...seen, partnerMkId: "100", name: "Recharge d.o.o.", countCode: "257/2025", emails: ["Info@Recharge.si"], address: {} },
+      { ...seen, partnerMkId: "101", name: "Surf Shop", countCode: "300/2025", emails: ["a@surf.example"], address: {} },
+      { ...seen, partnerMkId: "102", name: "Surf Shop", countCode: "301/2025", emails: ["b@surf.example"], address: {} },
+      { ...seen, partnerMkId: "103", name: "Gone Ltd", countCode: "999/2020", emails: [], address: {}, stale: true },
+    ]);
+    const res = await resolveCustomerLines(["100", "257/2025", "info@recharge.si", "recharge D.O.O.", "Surf Shop", "999/2020", "nobody", " ", "100"]);
+    const by = Object.fromEntries(res.map((r) => [r.line, r]));
+    expect(res).toHaveLength(7); // blanks and duplicates dropped
+    expect(by["100"]).toMatchObject({ status: "matched", via: "id" });
+    expect(by["257/2025"]).toMatchObject({ status: "matched", via: "code" });
+    expect(by["info@recharge.si"]).toMatchObject({ status: "matched", via: "email" });
+    expect(by["recharge D.O.O."]).toMatchObject({ status: "matched", via: "name" });
+    expect(by["Surf Shop"].status).toBe("ambiguous");
+    expect(by["999/2020"].status).toBe("unmatched"); // stale directory rows are not offered
+    expect(by["nobody"].status).toBe("unmatched");
   });
 
   it("one agent record per partner", async () => {

@@ -18,7 +18,9 @@ export type PortalAgentView = {
 };
 
 // One account the portal user may act for: their own partner, or a client.
-export type PortalAccount = { mkId: string; name: string; own: boolean };
+// `city` / `code` (MK customer code) only come with GET /api/portal/accounts — they
+// tell two similarly named clients apart in the account finder.
+export type PortalAccount = { mkId: string; name: string; own: boolean; city?: string | null; code?: string | null };
 
 // The portal's current view: every account together, or one of them.
 export const ALL_ACCOUNTS = "all";
