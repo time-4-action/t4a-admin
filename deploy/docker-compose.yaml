@@ -1,0 +1,15 @@
+# Production compose for /data/stack/apps/time-4-action/admin on the VM.
+# CI exports APP_IMAGE=time4action/t4a-admin:<commit sha>; without it this runs
+# :latest. The VM never builds: images come from Docker Hub. Copy changes to
+# the server by hand; the deploy only swaps images.
+services:
+  t4a-admin:
+    image: ${APP_IMAGE:-time4action/t4a-admin:latest}
+    ports:
+      - "3005:3005"
+    env_file:
+      - .env.local
+    environment:
+      PORT: 3005
+      AUTH0_BASE_URL: ${AUTH0_BASE_URL:-https://admin.time-4-action.com}
+    restart: unless-stopped
