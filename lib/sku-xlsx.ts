@@ -11,6 +11,7 @@
 // dialog puts the result in its text box and resolves it like pasted text.
 import "server-only";
 import ExcelJS from "exceljs";
+import { PLATFORM_NAME } from "@/lib/brand";
 import { loadXlsx } from "@/lib/xlsx-load";
 import { isTruthyFlag, mergeSkuEntry, parsePrice, SKU_CODE_RE, TAG_MAX, type SkuEntry } from "@/lib/sku-entries";
 
@@ -32,7 +33,7 @@ const CODE_RE = SKU_CODE_RE;
 
 export async function buildSkuTemplateWorkbook(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "T4A Admin";
+  wb.creator = PLATFORM_NAME;
   const ws = wb.addWorksheet("SKUs", { views: [{ state: "frozen", ySplit: 1 }] });
   ws.columns = [
     { header: HEADER, key: "code", width: 28 },

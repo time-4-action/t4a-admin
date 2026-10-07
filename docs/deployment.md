@@ -46,7 +46,7 @@ Environment `production` secrets:
 | `NEXT_PUBLIC_DEEPGRAM_API_KEY` | Optional; baked into the client bundle |
 
 Repository variables (baked into the client bundle at build time, replacing the
-values `scripts/build.bat` reads from `.env.local`): `NEXT_PUBLIC_APP_NAME`,
+values `scripts/build.bat` reads from `.env.local`):
 `NEXT_PUBLIC_COMPANY_COLOR`, `NEXT_PUBLIC_AI_ROLE_NAME`,
 `NEXT_PUBLIC_DEV_ROLE_NAME`, `NEXT_PUBLIC_EUR_USD_RATE`. Unset ones build empty,
 as they do locally.

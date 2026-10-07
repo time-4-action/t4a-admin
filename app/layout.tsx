@@ -9,6 +9,7 @@ import { ThemeProvider } from "@/lib/theme-context";
 import { auth0 } from "@/lib/auth";
 import { effectiveRoles, readImpersonation } from "@/lib/portal-impersonation";
 import { hasAnyAccess, rolesFromIdToken } from "@/lib/access";
+import { PLATFORM_NAME } from "@/lib/brand";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -21,7 +22,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: process.env.NEXT_PUBLIC_APP_NAME ?? "Admin",
+  title: PLATFORM_NAME,
 };
 
 // Inline before-paint script: applies the .dark class on <html> based on the
