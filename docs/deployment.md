@@ -43,13 +43,13 @@ pulling use the workflow's `GITHUB_TOKEN` (`packages: write` on the deploy job),
 so there is no registry secret. The `org.opencontainers.image.source` label in
 the Dockerfile links the package to this repository.
 
-Environment `production` secrets:
+Organization secrets (shared with the other time-4-action repos on this VM):
 
 | Secret                         | Value |
 | ------------------------------ | ----- |
-| `DEPLOY_HOST`                  | The VM's hostname or IP |
-| `DEPLOY_SSH_KEY`               | Private key whose public half is in `deploy`'s `authorized_keys` |
-| `DEPLOY_FINGERPRINT`           | `SHA256:…` from `ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub` (the action prefers ECDSA; the ED25519 one fails with "host key fingerprint mismatch") |
+| `PROD_DEPLOY_HOST`                  | The VM's hostname or IP |
+| `PROD_DEPLOY_SSH_KEY`               | Private key whose public half is in `deploy`'s `authorized_keys` |
+| `PROD_DEPLOY_FINGERPRINT`           | `SHA256:…` from `ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub` (the action prefers ECDSA; the ED25519 one fails with "host key fingerprint mismatch") |
 | `NEXT_PUBLIC_DEEPGRAM_API_KEY` | Optional; baked into the client bundle |
 
 Repository variables (baked into the client bundle at build time, replacing the
