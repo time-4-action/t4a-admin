@@ -1,7 +1,7 @@
 # check -> deploy -> verify.
 #
 # Checks every pull request and every push to main. On main, a green check
-# builds the image, pushes it to Docker Hub tagged with the commit SHA and
+# builds the image, pushes it to GHCR tagged with the commit SHA and
 # `latest`, and rolls the production container onto that exact SHA over SSH,
 # rolling back to the previous image if it does not come up healthy on that
 # commit. `verify` then checks the public URL through nginx. The VM only pulls;
@@ -24,7 +24,7 @@ permissions:
   contents: read
 
 env:
-  IMAGE: time4action/t4a-admin
+  IMAGE: ghcr.io/time-4-action/t4a-admin
   # Overridable with the PRODUCTION_URL repository variable.
   PRODUCTION_URL: ${{ vars.PRODUCTION_URL || 'https://admin.time-4-action.com' }}
 
@@ -52,8 +52,12 @@ jobs:
     needs: check
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    # The Docker Hub and SSH secrets are environment secrets on "production".
+    # The SSH secrets are environment secrets on "production". GHCR needs none:
+    # the job's own GITHUB_TOKEN pushes the image and lets the VM pull it.
     environment: production
+    permissions:
+      contents: read
+      packages: write
     concurrency:
       group: deploy-prod
       cancel-in-progress: false
@@ -65,8 +69,9 @@ jobs:
 
       - uses: docker/login-action@v4
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/build-push-action@v7
         with:
@@ -89,6 +94,9 @@ jobs:
           cache-to: type=gha,mode=max
 
       - uses: appleboy/ssh-action@v1
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           # The SSH login on the VM; override with the DEPLOY_USER variable.
@@ -97,11 +105,12 @@ jobs:
           fingerprint: ${{ secrets.DEPLOY_FINGERPRINT }}
           timeout: 30s
           command_timeout: 15m
+          envs: GHCR_USER,GHCR_TOKEN
           script: |
             set -u
             cd /data/stack/apps/time-4-action/admin || exit 1
             SHA=${{ github.sha }}
-            NEW=time4action/t4a-admin:$SHA
+            NEW=${{ env.IMAGE }}:$SHA
             SVC=t4a-admin
 
             # The image the service runs now is what a failed deploy goes back to.
@@ -128,9 +137,15 @@ jobs:
               [ "$RUNNING" = "$SHA" ]
             }
 
+            # The pull logs in with this job's GITHUB_TOKEN, which expires when
+            # the job ends, and logs out again on every exit: the VM keeps no
+            # registry credential. Rollback needs none, the previous image is local.
+            trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null || exit 1
+
             export APP_IMAGE=$NEW
             # A failed pull changes nothing on the server. Retried, because
-            # Docker Hub has transient failures.
+            # registries have transient failures.
             for i in 1 2 3; do
               docker compose pull $SVC && break
               [ "$i" = 3 ] && exit 1

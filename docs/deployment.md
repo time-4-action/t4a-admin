@@ -9,11 +9,14 @@ on `main` are queued, so pushes deploy strictly in order.
 
 **deploy** runs only on `main` after a green check, one at a time. It builds the
 image on GitHub Actions with the commit SHA baked in as `APP_VERSION`, pushes
-`time4action/t4a-admin:<sha>` and `:latest`, then SSHes to the VM as `deploy`
-and, in `/data/stack/apps/time-4-action/admin`:
+`ghcr.io/time-4-action/t4a-admin:<sha>` and `:latest` to GitHub Container
+Registry, then SSHes to the VM as `deploy` and, in
+`/data/stack/apps/time-4-action/admin`:
 
 1. records the image the running `t4a-admin` container uses;
-2. `docker compose pull t4a-admin` (three attempts) and `docker compose up -d`
+2. logs in to `ghcr.io` with the job's own `GITHUB_TOKEN` (valid only while the
+   job runs; logged out again on exit, so the VM stores no registry
+   credential), `docker compose pull t4a-admin` (three attempts) and `docker compose up -d`
    with `APP_IMAGE` exported to the new SHA;
 3. waits up to 60 s for `http://127.0.0.1:3005/healthz` to answer 200;
 4. checks the container reports `APP_VERSION` equal to the commit SHA.
@@ -30,16 +33,20 @@ The deploy only swaps images. `.env.local` and `docker-compose.yaml` on the
 server are edited by hand; the server copy of the compose file is
 `deploy/docker-compose.yaml` (the root one is for local builds). To go back to
 an older release, re-run that commit's workflow, or on the server:
-`export APP_IMAGE=time4action/t4a-admin:<sha> && docker compose up -d`.
+`export APP_IMAGE=ghcr.io/time-4-action/t4a-admin:<sha> && docker compose up -d`
+(a `docker login ghcr.io` first if the package is private).
 
 ## GitHub settings
+
+The image lives in GHCR as `ghcr.io/time-4-action/t4a-admin`. Pushing and
+pulling use the workflow's `GITHUB_TOKEN` (`packages: write` on the deploy job),
+so there is no registry secret. The `org.opencontainers.image.source` label in
+the Dockerfile links the package to this repository.
 
 Environment `production` secrets:
 
 | Secret                         | Value |
 | ------------------------------ | ----- |
-| `DOCKERHUB_USERNAME`           | Docker Hub account that can push `time4action/t4a-admin` |
-| `DOCKERHUB_TOKEN`              | Docker Hub access token (read/write) |
 | `DEPLOY_HOST`                  | The VM's hostname or IP |
 | `DEPLOY_SSH_KEY`               | Private key whose public half is in `deploy`'s `authorized_keys` |
 | `DEPLOY_FINGERPRINT`           | `SHA256:…` from `ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub` (the action prefers ECDSA; the ED25519 one fails with "host key fingerprint mismatch") |

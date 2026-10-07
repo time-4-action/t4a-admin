@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: time4action/t4a-admin:latest
+    image: ghcr.io/time-4-action/t4a-admin:latest
     ports:
       - "3005:3005"
     env_file:

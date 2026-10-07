@@ -107,9 +107,10 @@ This builds a standalone Next.js container and exposes it on port **3005**.
 docker build \
   --build-arg NEXT_PUBLIC_AI_ROLE_NAME="AI User" \
   --build-arg NEXT_PUBLIC_EUR_USD_RATE=0.92 \
-  -t time4action/t4a-admin:latest .
+  -t ghcr.io/time-4-action/t4a-admin:latest .
 
-docker push time4action/t4a-admin:latest
+# needs: docker login ghcr.io (token with write:packages)
+docker push ghcr.io/time-4-action/t4a-admin:latest
 ```
 
 On Windows, use the included scripts which read build args from `.env.local` automatically:
