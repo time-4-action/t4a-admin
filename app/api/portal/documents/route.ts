@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getPortalAccess, isAgentAccess, isPortalDocKind, scopedAccounts } from "@/lib/portal";
 import { listDocuments } from "@/lib/metakocka";
+import { cached } from "@/lib/auth0-cache";
 import { filterCustomerVisible } from "@/lib/preorder-visibility";
 import { parseDocKind, type DocSummary } from "@/types/documents";
 import { ALL_ACCOUNTS } from "@/types/portal-agent";
@@ -9,8 +10,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // How many accounts' lists are pulled from Metakocka at once for an agent's
-// "all accounts" view (each list is itself paged through to the end).
-const ACCOUNT_CONCURRENCY = 4;
+// "all accounts" view (each list is itself paged through to the end). An agent
+// may have 100+ clients, so in that view each account's list is also cached
+// briefly: moving between pages and filters does not re-read every account.
+const ACCOUNT_CONCURRENCY = 8;
+const COMBINED_CACHE_MS = 60_000;
 
 // List the logged-in customer's documents for one family. The partner is derived
 // from the session email — any partner id in the request is ignored, except an
@@ -36,7 +40,10 @@ export async function GET(req: NextRequest) {
     const batch = await Promise.all(
       accounts.slice(i, i + ACCOUNT_CONCURRENCY).map(async (account) => {
         try {
-          const { items } = await listDocuments(kind, account.mkId);
+          const { items } =
+            accounts.length > 1
+              ? await cached(`portal-docs:${kind}:${account.mkId}`, COMBINED_CACHE_MS, () => listDocuments(kind, account.mkId))
+              : await listDocuments(kind, account.mkId);
           const visible = await filterCustomerVisible({ mkId: account.mkId }, items);
           return annotate ? visible.map((d) => ({ ...d, account })) : visible;
         } catch (err) {

@@ -627,17 +627,29 @@ sees the documents and preorders of assigned **client** partners
 (`models/portal-agent.ts`, `lib/portal-agents.ts`, pure rules in
 `types/portal-agent.ts`). Keyed by the agent's partner id, so admin "View as
 customer" on an agent shows the agent view. **Managed in Customers → Agents**
-(`/customers/agents`, `app/customers/agents/`; API `/api/admin/portal/agents`
-GET/POST and `/[partnerMkId]` GET/PUT/DELETE, gated by the `/api/admin/portal`
-→ customers rule); the Customers list badges agents / "Client of …" and offers
-"Make agent". The client picker is `components/customer-directory-picker.tsx`.
+(`/customers/agents` list → one page per agent `/customers/agents/[partnerMkId]`,
+`/customers/agents/new?partner=`; `agent-editor.tsx`), built for 100+ clients:
+filterable client table (search, Country / Type / Added heading filters,
+multi-select remove), changes **staged** until "Save changes" (new rows marked,
+removed rows kept with Undo, unsaved-changes guard), "also with <other agent>"
+per client, and an add panel — directory search with Add / "Add all shown", or
+**Paste a list** (codes / ids / emails / exact names → `POST
+/api/admin/portal/agents/resolve` → `resolveCustomerLines`: exact, case-blind,
+ambiguous lines are reported for a pick, never guessed). API
+`/api/admin/portal/agents` GET/POST and `/[partnerMkId]` GET/PUT/DELETE, gated
+by the `/api/admin/portal` → customers rule; the Customers list badges agents /
+"Client of …" and offers "Make agent".
 In the portal (`lib/portal.ts`): `getPortalAccess()` = own partner + `accounts`
 (own first, then clients) + `scope` (`"all"` or one account id, remembered in
 the httpOnly `t4a_portal_scope` cookie via `POST /api/portal/accounts`;
 `resolvePortalScope` re-validates it every request — a stale / foreign id falls
-back to `"all"`, a plain customer is always scoped to themselves). The nav
-switcher (`components/portal-account-switcher.tsx`) and `AccountsStrip`
-(`app/portal/accounts-strip.tsx`) change it. Document lists follow the scope
+back to `"all"`, a plain customer is always scoped to themselves). It changes
+through ONE account finder (`components/portal-account-switcher.tsx`, a
+popover: search by name / city / customer code, "Recently viewed" from
+localStorage, clients A–Z with sticky letter headings, full keyboard support),
+opened from the sidebar trigger and from the one-line scope bar above each list
+(`AccountsStrip` → `AccountScopeBar`, with "Show all accounts"). The combined
+view reads up to 8 accounts in parallel and caches each account's list 60 s. Document lists follow the scope
 (`/api/portal/documents?account=all|<id>` merges every account's list, items
 carry `account`, `DocumentList` then shows the customer under the number + a
 Customer heading filter); detail / PDF ownership is "the document's partner is
