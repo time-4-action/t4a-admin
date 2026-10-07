@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 
-set IMAGE=time4action/t4a-admin
+set IMAGE=ghcr.io/time-4-action/t4a-admin
 
 :: Always generate a date tag
 for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set DATETAG=%%i

@@ -1,7 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
 
-set IMAGE=time4action/t4a-admin
+set IMAGE=ghcr.io/time-4-action/t4a-admin
+
+:: Needs a prior `docker login ghcr.io` with a token that has write:packages.
+:: Normally CI pushes; this is for manual builds only.
 
 :: Find the latest date-tagged image (yyyyMMdd-HHmmss format, sorted descending)
 for /f %%i in ('powershell -NoProfile -Command "docker images %IMAGE% --format '{{.Tag}}' | Where-Object { $_ -match '^\d{8}-\d{6}$' } | Sort-Object -Descending | Select-Object -First 1"') do set DATETAG=%%i

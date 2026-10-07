@@ -22,12 +22,12 @@ No linter is configured.
 docker compose up --build   # Build and run on port 3005
 scripts\build.bat            # Build image (tag: yyyymmdd-hhmmss)
 scripts\build.bat --latest   # Build image (tag: latest)
-scripts\push.bat --latest    # Push image to time4action/t4a-admin
+scripts\push.bat --latest    # Push image to ghcr.io/time-4-action/t4a-admin (needs docker login ghcr.io)
 ```
 
 **CI/CD** (`.github/workflows/deploy.yml`, see `docs/deployment.md`): every pull
 request runs typecheck + tests + build; a push to `main` also builds the image
-in Actions (`:<sha>` + `:latest`), rolls it out over SSH with a `/healthz` +
+in Actions and pushes it to GHCR (`ghcr.io/time-4-action/t4a-admin:<sha>` + `:latest`), rolls it out over SSH with a `/healthz` +
 `APP_VERSION` check and automatic rollback, then checks the public URL. The
 `.bat` scripts remain for manual builds. `/healthz` is public (excluded in the
 `middleware.ts` matcher) and must stay free of Mongo/Auth0.
