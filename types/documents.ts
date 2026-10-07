@@ -157,6 +157,9 @@ export type DocSummary = {
   // idempotency marker) and the free-form extra columns.
   buyerOrder?: string;
   extraColumns?: { name: string; value: string }[];
+  // Portal agents only: which of their accounts the document belongs to (set by
+  // /api/portal/documents when the user has more than one account).
+  account?: { mkId: string; name: string; own: boolean };
 };
 
 // Full document detail.

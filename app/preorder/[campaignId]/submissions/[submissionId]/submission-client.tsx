@@ -398,7 +398,7 @@ export default function SubmissionClient({
                 <h2 className="text-[13px] font-semibold text-foreground">Requested preorder</h2>
                 <span className="text-[11px] text-muted-foreground">
                   what the customer submitted{submission.submittedAt ? ` · ${fmtDateTime(submission.submittedAt)}` : ""}
-                  {submission.submitSource === "admin" ? ` · filled by ${submission.submittedBy ?? "admin"}` : ""}
+                  {submission.submitSource === "admin" ? ` · filled by ${submission.submittedBy ?? "admin"}` : submission.submittedBy ? ` · placed by ${submission.submittedBy}` : ""}
                 </span>
               {snap && (
                 <p

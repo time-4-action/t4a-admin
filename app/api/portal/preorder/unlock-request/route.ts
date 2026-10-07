@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionPartner } from "@/lib/portal";
+import { resolvePortalAccount } from "@/lib/portal";
 import {
   connectDB,
   PreorderSubmission,
@@ -14,10 +14,10 @@ export const dynamic = "force-dynamic";
 // submitted preorder so they can edit it, with an optional note explaining why.
 // Body: { campaignId, note }.
 export async function POST(request: Request) {
-  const partner = await getSessionPartner();
-  if (!partner) return NextResponse.json({ error: "no-account" }, { status: 404 });
-
-  const body = (await request.json().catch(() => ({}))) as { campaignId?: string; note?: string };
+  const body = (await request.json().catch(() => ({}))) as { account?: string; campaignId?: string; note?: string };
+  const resolved = await resolvePortalAccount(body.account);
+  if (!resolved) return NextResponse.json({ error: "no-account" }, { status: 404 });
+  const { partner } = resolved;
   const campaignId = (body.campaignId || "").trim();
   if (!toObjectId(campaignId)) return NextResponse.json({ error: "invalid campaign" }, { status: 400 });
 

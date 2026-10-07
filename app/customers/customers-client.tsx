@@ -4,9 +4,9 @@
 // with each customer's preorder activity across every campaign (unlocked / submitted)
 // and a one-click "View portal" as them. Loads more as you scroll.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Loader2, RefreshCw, Search, X, Users, Building2, User, AlertTriangle } from "lucide-react";
+import { Loader2, RefreshCw, Search, X, Users, Building2, User, AlertTriangle, Briefcase } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SkeletonLine, stagger } from "@/components/ui/skeleton";
@@ -16,6 +16,7 @@ import { SubmissionStageBadge } from "@/app/preorder/preorder-badges";
 import { CustomerKindBadge } from "@/app/preorder/[campaignId]/markets/tables";
 import type { CustomerKind, MkCustomerView } from "@/lib/mk-customers";
 import type { CustomerActivity } from "@/lib/preorder-customers";
+import type { PortalAgentView } from "@/types/portal-agent";
 import { cn } from "@/lib/utils";
 
 const PAGE = 100;
@@ -38,7 +39,22 @@ export function CustomersClient() {
   const [error, setError] = useState<string | null>(null);
   const [sync, setSync] = useState<SyncInfo | null>(null);
   const [directoryTotal, setDirectoryTotal] = useState<number | null>(null);
+  const [agents, setAgents] = useState<PortalAgentView[]>([]);
   const reqSeq = useRef(0);
+
+  // Portal agents: badge agents ("Agent · n clients") and their clients ("Client of …").
+  useEffect(() => {
+    fetch("/api/admin/portal/agents", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { agents: [] }))
+      .then((j: { agents?: PortalAgentView[] }) => setAgents(j.agents ?? []))
+      .catch(() => setAgents([]));
+  }, []);
+  const agentById = useMemo(() => new Map(agents.map((a) => [a.partnerMkId, a])), [agents]);
+  const agentsOfClient = useMemo(() => {
+    const m = new Map<string, PortalAgentView[]>();
+    for (const a of agents) for (const c of a.clients) m.set(c.partnerMkId, [...(m.get(c.partnerMkId) ?? []), a]);
+    return m;
+  }, [agents]);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const fetchPage = useCallback(
@@ -135,8 +151,8 @@ export function CustomersClient() {
     if (j.sync) setSync(j.sync);
   }
 
-  const grid = "grid-cols-[minmax(0,1.5fr)_minmax(0,1.4fr)_120px_minmax(0,1fr)_minmax(0,1.6fr)_150px]";
-  const gridMd = "md:grid-cols-[minmax(0,1.5fr)_minmax(0,1.4fr)_120px_minmax(0,1fr)_minmax(0,1.6fr)_150px]";
+  const grid = "grid-cols-[minmax(0,1.5fr)_minmax(0,1.4fr)_120px_minmax(0,1fr)_minmax(0,1.6fr)_230px]";
+  const gridMd = "md:grid-cols-[minmax(0,1.5fr)_minmax(0,1.4fr)_120px_minmax(0,1fr)_minmax(0,1.6fr)_230px]";
 
   return (
     <div className="flex flex-col h-full">
@@ -231,11 +247,35 @@ export function CustomersClient() {
             ) : (
               rows.map((c) => {
                 const a = activity[c.partnerMkId];
+                const asAgent = agentById.get(c.partnerMkId);
+                const servedBy = agentsOfClient.get(c.partnerMkId) ?? [];
                 return (
                   <div key={c.partnerMkId} className={cn("grid grid-cols-1 md:gap-3 gap-y-1 items-center px-4 py-2 hover:bg-muted/20", gridMd)}>
                     <div className="min-w-0">
                       <div className="text-[13px] font-medium text-foreground truncate">{c.name}</div>
                       <div className="text-[11px] text-muted-foreground truncate">{[c.city, c.countCode].filter(Boolean).join(" · ") || c.partnerMkId}</div>
+                      {(asAgent || servedBy.length > 0) && (
+                        <div className="mt-0.5 flex flex-wrap gap-1">
+                          {asAgent && (
+                            <Link
+                              href={`/customers/agents?agent=${encodeURIComponent(c.partnerMkId)}`}
+                              className="inline-flex items-center gap-1 rounded-full bg-teal-500/10 text-teal-700 dark:text-teal-300 px-1.5 py-px text-[10px] font-medium hover:bg-teal-500/20"
+                              title="Edit this agent's clients"
+                            >
+                              <Briefcase className="w-2.5 h-2.5" /> Agent · {asAgent.clients.length} client{asAgent.clients.length === 1 ? "" : "s"}
+                            </Link>
+                          )}
+                          {servedBy.length > 0 && (
+                            <Link
+                              href={`/customers/agents?agent=${encodeURIComponent(servedBy[0].partnerMkId)}`}
+                              className="inline-flex items-center gap-1 rounded-full bg-muted text-muted-foreground px-1.5 py-px text-[10px] hover:text-foreground max-w-full"
+                              title={servedBy.map((s) => s.partnerName).join(", ")}
+                            >
+                              <span className="truncate">Client of {servedBy[0].partnerName}{servedBy.length > 1 ? ` +${servedBy.length - 1}` : ""}</span>
+                            </Link>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="min-w-0 text-[12px] text-muted-foreground">
                       <div className="truncate">{c.email ?? "—"}</div>
@@ -262,7 +302,16 @@ export function CustomersClient() {
                         <span className="text-[11px] text-muted-foreground/60">no preorders</span>
                       )}
                     </div>
-                    <div className="flex md:justify-end">
+                    <div className="flex md:justify-end items-center gap-2">
+                      {!asAgent && (
+                        <Link
+                          href={`/customers/agents?new=${encodeURIComponent(c.partnerMkId)}&name=${encodeURIComponent(c.name)}`}
+                          className="text-[11px] text-muted-foreground hover:text-foreground hover:underline whitespace-nowrap"
+                          title="Let this customer see and order for other customers"
+                        >
+                          Make agent
+                        </Link>
+                      )}
                       <ViewAsCustomerButton partnerMkId={c.partnerMkId} />
                     </div>
                   </div>

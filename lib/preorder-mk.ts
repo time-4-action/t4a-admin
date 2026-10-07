@@ -45,10 +45,21 @@ import {
 import { fmtVatRate, taxCodeForRate } from "@/lib/pricing";
 import { getVatSettings } from "@/lib/vat-settings";
 
-export type SubmitActor = { source: "customer" } | { source: "admin"; email: string | null };
+// `agent` — a portal agent submitted for this customer (one of their clients): the
+// submission is still the customer's own, the agent is only recorded.
+export type SubmitActor =
+  | { source: "customer"; agent?: { partnerMkId: string; name: string; email: string | null } }
+  | { source: "admin"; email: string | null };
 
 export function actorLabel(actor: SubmitActor): string {
-  return actor.source === "customer" ? "customer" : actor.email ? `admin:${actor.email}` : "admin";
+  if (actor.source === "customer") return actor.agent ? `agent:${actor.agent.email ?? actor.agent.name}` : "customer";
+  return actor.email ? `admin:${actor.email}` : "admin";
+}
+
+// What `submittedBy` records: the admin's email, or the agent who acted for the customer.
+export function actorSubmittedBy(actor: SubmitActor): string | null {
+  if (actor.source === "admin") return actor.email;
+  return actor.agent ? `${actor.agent.name}${actor.agent.email ? ` <${actor.agent.email}>` : ""} (agent)` : null;
 }
 
 // Everything the service needs from Metakocka, injectable for tests.

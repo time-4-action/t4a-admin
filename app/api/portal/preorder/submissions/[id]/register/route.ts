@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { Types } from "mongoose";
-import { getSessionPartner } from "@/lib/portal";
+import { resolvePortalAccount } from "@/lib/portal";
 import { connectDB, PreorderSubmission, toObjectId, toPortalSubmissionView } from "@/lib/preorder";
 import { registerSalesOrder } from "@/lib/preorder-mk";
 import { repriceSubmission } from "@/lib/preorder-submit";
@@ -15,10 +15,12 @@ type RouteParams = { params: Promise<{ id: string }> };
 // repeatedly: the service looks the order up by its idempotency key before creating.
 // Allowed even after the campaign closed (the request was made while open). The
 // response carries no MK identifiers or error text.
-export async function POST(_req: Request, { params }: RouteParams) {
+export async function POST(req: Request, { params }: RouteParams) {
   const { id } = await params;
-  const partner = await getSessionPartner();
-  if (!partner) return NextResponse.json({ error: "no-account" }, { status: 404 });
+  // `?account=` — a portal agent retrying for one of their clients.
+  const resolved = await resolvePortalAccount(new URL(req.url).searchParams.get("account"));
+  if (!resolved) return NextResponse.json({ error: "no-account" }, { status: 404 });
+  const { partner } = resolved;
   if (!toObjectId(id)) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   await connectDB();

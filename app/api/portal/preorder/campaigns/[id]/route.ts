@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionPartner } from "@/lib/portal";
+import { resolvePortalAccount } from "@/lib/portal";
 import {
   connectDB,
   PreorderCampaign,
@@ -32,11 +32,13 @@ type RouteParams = { params: Promise<{ id: string }> };
 // own draft/submission. Once submitted, `frozen` carries the agreed lines and prices
 // (the snapshot) so later sheet changes never repaint their record. `allocation` (the
 // live Metakocka order) is included ONLY after an admin published it. Partner from
-// session — never from the client.
-export async function GET(_req: Request, { params }: RouteParams) {
+// session — never from the client; a portal agent's `?account=` only picks one of
+// THEIR accounts (lib/portal.ts resolvePortalAccount).
+export async function GET(req: Request, { params }: RouteParams) {
   const { id } = await params;
-  const partner = await getSessionPartner();
-  if (!partner) return NextResponse.json({ error: "no-account" }, { status: 404 });
+  const resolved = await resolvePortalAccount(new URL(req.url).searchParams.get("account"));
+  if (!resolved) return NextResponse.json({ error: "no-account" }, { status: 404 });
+  const { partner } = resolved;
   if (!toObjectId(id)) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   await connectDB();

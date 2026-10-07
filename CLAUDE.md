@@ -90,6 +90,7 @@ MongoDB connection is cached on `global._mongooseConn` to survive Next.js hot-re
 | `PreorderSubmission` | `preordersubmissions` | One partner's response per campaign (unique `(campaignId, partnerMkId)`): lines, totals, frozen `snapshot`, MK order reference `mkSalesOrder` + sync state `mkOrder`, publication flags, detached-order history. Indexes on `partnerMkId + mkOrder.state`, `mkSalesOrder.mkId`, `mkOrder.buyerOrder`. |
 | `PreorderAccess` | `preorderaccesses` | The invite grant (`(campaignId, partnerMkId)` unique) — the campaign access boundary. |
 | `MkCustomer` | `mkcustomers` | Directory of Metakocka partners (address, tax id, resolved country, manual country, stale flag) feeding Markets & Customers; `MkCustomerSyncState` (singleton) tracks the full sync. |
+| `PortalAgent` | `portalagents` | A portal **agent** (unique `partnerMkId` = the agent's own Metakocka partner) + the `clients[]` partners they may see and order for. See Portal agents in the B2B Customer Portal module. |
 | `VatSettings` | `vatsettings` | Singleton (`key: "vat"`): the global VAT rate per country + optional fallback rate, edited at `/preorder/vat-rates`. See Pricing & VAT in the Preorder module. |
 
 ### Dev-User Filtering
@@ -620,13 +621,43 @@ too while viewing as a user) and both navs render.
 | `/api/admin/documents/partners` | GET (`?q=`) |
 | `/api/admin/documents/pdf` | GET (`?kind=&mkId=`) |
 
+**Portal agents (one login, several accounts).** An agent is a customer
+(normal portal login, email → their own Metakocka partner) who additionally
+sees the documents and preorders of assigned **client** partners
+(`models/portal-agent.ts`, `lib/portal-agents.ts`, pure rules in
+`types/portal-agent.ts`). Keyed by the agent's partner id, so admin "View as
+customer" on an agent shows the agent view. **Managed in Customers → Agents**
+(`/customers/agents`, `app/customers/agents/`; API `/api/admin/portal/agents`
+GET/POST and `/[partnerMkId]` GET/PUT/DELETE, gated by the `/api/admin/portal`
+→ customers rule); the Customers list badges agents / "Client of …" and offers
+"Make agent". The client picker is `components/customer-directory-picker.tsx`.
+In the portal (`lib/portal.ts`): `getPortalAccess()` = own partner + `accounts`
+(own first, then clients) + `scope` (`"all"` or one account id, remembered in
+the httpOnly `t4a_portal_scope` cookie via `POST /api/portal/accounts`;
+`resolvePortalScope` re-validates it every request — a stale / foreign id falls
+back to `"all"`, a plain customer is always scoped to themselves). The nav
+switcher (`components/portal-account-switcher.tsx`) and `AccountsStrip`
+(`app/portal/accounts-strip.tsx`) change it. Document lists follow the scope
+(`/api/portal/documents?account=all|<id>` merges every account's list, items
+carry `account`, `DocumentList` then shows the customer under the number + a
+Customer heading filter); detail / PDF ownership is "the document's partner is
+**one of the accounts**" (`accountOf`). **Preorders take an explicit account**
+(`?account=` on the fill page + campaign GET + register, `account` in the
+submission / unlock-request body; `resolvePortalAccount`) so two tabs on two
+clients never cross; the preorders list returns one row per (campaign,
+account). An agent's submission for a client is the client's own (customer
+rules, min order) with the agent recorded in `submittedBy` (`SubmitActor.agent`).
+Opening an invite link as an agent asks which account to unlock it for
+(`/api/portal/preorder/join` answers `{choose, accounts}` without `account`).
+
 **Notes:** a document's "Additional instructions" (MK `notes_header`) is the
 customer-facing text and is what `DocDetail.notes` carries. MK's "Additional
 text on document" (`notes`) is internal and is never mapped.
 
 **Security:** `MK_SECRET_KEY`/`MK_COMPANY_ID` stay server-side; the portal APIs
-derive the partner from the **session email** (never client input) and re-check
-`doc.partner.mkId` on every detail/PDF fetch; cost/purchase-price expansion flags
+derive the partner from the **session email** (never client input — an agent's
+`account` / scope is only a choice among the accounts derived server-side) and
+re-check `doc.partner.mkId` against those accounts on every detail/PDF fetch; cost/purchase-price expansion flags
 are never sent. Shared types live in `types/documents.ts` (hand-mirror the MK
 responses, like `types/warranty.ts`). Role name is configurable via
 `NEXT_PUBLIC_DOCUMENTS_ADMIN_ROLE_NAME` (default `"documents-admin"`, in
@@ -683,9 +714,11 @@ default `https://b2b.time-4-action.com`) — every "Copy link" uses it, never
 `PreorderAccess` grant (created by opening the invite link while logged in as a
 matched Metakocka partner, `POST /api/portal/preorder/join`) or an existing
 submission (`partnerHasCampaignAccess` in `lib/preorder.ts`). Markets, countries,
-customer rules and directory membership never grant access; every portal route
-resolves the partner from the **session email** (`getSessionPartner`) and never
-from client input.
+customer rules, directory membership and agent assignments never grant access
+(an agent fills a client's campaign only once the client holds a grant); every
+portal route resolves the partner from the **session email** and never from
+client input — an agent's `account` only selects one of their accounts
+(`resolvePortalAccount`).
 
 | Page | Path | Notes |
 |---|---|---|

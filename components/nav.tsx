@@ -46,6 +46,7 @@ import {
   ClipboardList,
   Building2,
   ShoppingCart,
+  Briefcase,
 } from "lucide-react";
 
 type NavLinkDef = {
@@ -151,6 +152,7 @@ const sections: NavSection[] = [
     section: "customers",
     links: [
       { href: "/customers",        label: "All customers",    icon: Users, matchPrefix: true },
+      { href: "/customers/agents", label: "Agents",           icon: Briefcase },
       { href: "/customers/access", label: "Customers Access", icon: ShieldCheck, superAdminOnly: true },
     ],
   },
