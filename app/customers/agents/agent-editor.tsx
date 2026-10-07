@@ -984,27 +984,15 @@ function ClientsTable({
         </span>
       </div>
 
-      {selected.size > 0 && (
-        <div className="flex items-center gap-3 px-4 py-2 border-b border-teal-500/20 bg-teal-500/[0.06] text-[12px]">
-          <span className="font-medium text-foreground tabular-nums">{selected.size} selected</span>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-[11px] text-destructive hover:text-destructive gap-1.5"
-            onClick={() => {
-              onRemove(Array.from(selected));
-              setSelected(new Set());
-            }}
-          >
-            <Trash2 className="w-3 h-3" /> Remove from agent
-          </Button>
-          <button type="button" onClick={() => setSelected(new Set())} className="text-[12px] text-muted-foreground hover:text-foreground cursor-pointer">
-            Clear selection
-          </button>
-        </div>
-      )}
-
-      <div className={cn(grid, "px-4 h-10 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border/60 bg-muted/25")}>
+      {/* Column headings. With a selection the same row (same height) carries the
+          selection actions instead, so nothing below it moves. */}
+      <div
+        className={cn(
+          grid,
+          "px-4 h-10 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border-b transition-colors",
+          selected.size > 0 ? "border-teal-500/25 bg-teal-500/[0.07]" : "border-border/60 bg-muted/25",
+        )}
+      >
         <input
           ref={headerBox}
           type="checkbox"
@@ -1021,6 +1009,25 @@ function ClientsTable({
           }
           className={checkbox}
         />
+        {selected.size > 0 ? (
+          <div className="col-span-2 md:col-span-6 flex items-center gap-3 normal-case tracking-normal text-[12px] font-normal">
+            <span className="font-semibold text-foreground tabular-nums">{selected.size} selected</span>
+            <button
+              type="button"
+              onClick={() => {
+                onRemove(Array.from(selected));
+                setSelected(new Set());
+              }}
+              className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-destructive/30 bg-background text-[12px] font-medium text-destructive hover:bg-destructive/10 cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Remove from agent
+            </button>
+            <button type="button" onClick={() => setSelected(new Set())} className="text-muted-foreground hover:text-foreground cursor-pointer">
+              Clear selection
+            </button>
+          </div>
+        ) : (
+          <>
         <span>Customer</span>
         <span className="hidden md:block">Contact</span>
         <span className="hidden md:block">
@@ -1056,6 +1063,8 @@ function ClientsTable({
           />
         </span>
         <span />
+          </>
+        )}
       </div>
 
       {rows.length === 0 ? (
