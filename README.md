@@ -1,6 +1,6 @@
-# t4a-admin
+# PATRIK Business Platform
 
-Admin dashboard for managing users, access types, and AI usage costs. Built with Next.js 16, Auth0, and MongoDB.
+Admin dashboard and B2B customer portal of the PATRIK Business Platform, for managing users, access types, and AI usage costs. Built with Next.js 16, Auth0, and MongoDB.
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
@@ -100,7 +100,6 @@ Users with the `dev` role are hidden from all lists and their usage is aggregate
 | `AUTH0_MGMT_CLIENT_SECRET` | Yes | M2M app client secret |
 | `AUTH0_DB_CONNECTION` | Yes | Auth0 database connection name |
 | `MONGODB_URI` | Yes | MongoDB connection string |
-| `NEXT_PUBLIC_APP_NAME` | No | Browser tab title (default: "Admin") |
 | `NEXT_PUBLIC_AI_ROLE_NAME` | No | AI access role name (default: "AI User") |
 | `NEXT_PUBLIC_DEV_ROLE_NAME` | No | Dev role to hide (default: "dev") |
 | `NEXT_PUBLIC_EUR_USD_RATE` | No | EUR/USD conversion rate (default: 0.92) |

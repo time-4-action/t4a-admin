@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { PLATFORM_NAME } from "@/lib/brand";
 import { canSee, isSuperAdmin, type SectionKey } from "@/lib/access";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { viewingAsName, type ViewingAs } from "@/components/viewing-as";
@@ -337,7 +338,7 @@ export default function Nav({ user, roles = [], viewingAs }: { user?: NavUser; r
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/favicon.ico" alt="logo" className="h-6 w-6 object-contain rounded-lg shrink-0" />
               <span className="text-[13px] font-semibold text-foreground truncate">
-                {process.env.NEXT_PUBLIC_APP_NAME ?? "Admin"}
+                {PLATFORM_NAME}
               </span>
             </div>
           )}
@@ -512,7 +513,7 @@ export default function Nav({ user, roles = [], viewingAs }: { user?: NavUser; r
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/favicon.ico" alt="logo" className="h-5 w-5 object-contain rounded-md" />
           <span className="text-[13px] font-semibold text-foreground">
-            {process.env.NEXT_PUBLIC_APP_NAME ?? "Admin"}
+            {PLATFORM_NAME}
           </span>
         </div>
       </div>

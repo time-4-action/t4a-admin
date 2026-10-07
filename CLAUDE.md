@@ -51,6 +51,11 @@ When creating a PR with `gh pr create`, pass `--base dev` explicitly so it does 
 
 This is a **Next.js 16 App Router** admin dashboard for managing users, access types (Auth0 roles), and AI usage costs. It is deployed as a standalone Docker container on port 3005.
 
+**Product name: "PATRIK Business Platform"** — one constant, `PLATFORM_NAME` in
+`lib/brand.ts`, used by the admin nav, the portal nav + landing, every browser
+tab title and the xlsx exports. It is not env-configurable (the old
+`NEXT_PUBLIC_APP_NAME` is gone); never hardcode the name elsewhere.
+
 ### Authentication & Authorization
 
 All routes except `/forbidden` and `/unauthorized` are protected by `middleware.ts`, which delegates to `lib/proxy.ts`. The middleware:
@@ -523,7 +528,7 @@ the partner-id source differs.
 - **Customers** (`app/portal/*`) log in **passwordless** (Auth0 OTP) and hold
   **no role**. Their email is matched to a Metakocka partner via
   `/get_partner`; unmatched → `/portal/no-account`. The shell is the stripped-down
-  **"Time 4 Action B2B"** nav (`components/portal-nav.tsx`), chosen by pathname in
+  **"PATRIK Business Platform"** nav (`components/portal-nav.tsx`), chosen by pathname in
   `components/app-shell.tsx` (the root layout no longer renders `<Nav>` directly).
 - **Admins** (`app/documents/*`) get a new `documents` section
   (`SECTION_ROLES.documents = ["admin", "documents-admin"]`) — a partner picker →
@@ -1109,7 +1114,6 @@ MONGODB_URI
 
 Optional:
 ```
-NEXT_PUBLIC_APP_NAME         # Browser tab title (default: "Admin")
 NEXT_PUBLIC_AI_ROLE_NAME     # Name of the AI-access role (default: "AI User")
 NEXT_PUBLIC_DEV_ROLE_NAME    # Name of the dev role to hide (default: "dev")
 NEXT_PUBLIC_WARRANTY_ADMIN_ROLE_NAME  # Role whose members are warranty assignees (default: "warranty-admin")

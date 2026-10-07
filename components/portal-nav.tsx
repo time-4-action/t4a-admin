@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { viewingAsName, type ViewingAs } from "@/components/viewing-as";
 import { ReceiptText, FileMinus, ClipboardList, Building2, LogOut, Menu, X, ShoppingCart } from "lucide-react";
+import { PLATFORM_NAME } from "@/lib/brand";
 
 // The B2B customer portal shell. Shown to any authenticated non-admin (they hold
 // no role; their documents are matched by email inside the portal). Deliberately
@@ -22,7 +23,7 @@ const links = [
   { href: "/portal/account", label: "My Account", icon: Building2 },
 ];
 
-const BRAND = "Time 4 Action B2B";
+const BRAND = PLATFORM_NAME;
 
 function initials(user?: PortalUser): string {
   const base = (user?.name || user?.email || "?").trim();

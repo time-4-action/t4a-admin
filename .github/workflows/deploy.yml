@@ -77,7 +77,6 @@ jobs:
           # GIT_SHA is baked in as APP_VERSION, which the server checks.
           build-args: |
             GIT_SHA=${{ github.sha }}
-            NEXT_PUBLIC_APP_NAME=${{ vars.NEXT_PUBLIC_APP_NAME }}
             NEXT_PUBLIC_COMPANY_COLOR=${{ vars.NEXT_PUBLIC_COMPANY_COLOR }}
             NEXT_PUBLIC_AI_ROLE_NAME=${{ vars.NEXT_PUBLIC_AI_ROLE_NAME }}
             NEXT_PUBLIC_DEV_ROLE_NAME=${{ vars.NEXT_PUBLIC_DEV_ROLE_NAME }}

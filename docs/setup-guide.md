@@ -78,7 +78,6 @@ AUTH0_DB_CONNECTION=Username-Password-Authentication
 MONGODB_URI=mongodb+srv://...
 
 # Optional
-NEXT_PUBLIC_APP_NAME=Admin
 NEXT_PUBLIC_AI_ROLE_NAME=AI User
 NEXT_PUBLIC_DEV_ROLE_NAME=dev
 NEXT_PUBLIC_EUR_USD_RATE=0.92
@@ -106,7 +105,6 @@ This builds a standalone Next.js container and exposes it on port **3005**.
 
 ```bash
 docker build \
-  --build-arg NEXT_PUBLIC_APP_NAME="Admin" \
   --build-arg NEXT_PUBLIC_AI_ROLE_NAME="AI User" \
   --build-arg NEXT_PUBLIC_EUR_USD_RATE=0.92 \
   -t time4action/t4a-admin:latest .

@@ -8,6 +8,7 @@
 // here: the parsed rates go back to the page, which merges and autosaves them.
 import "server-only";
 import ExcelJS from "exceljs";
+import { PLATFORM_NAME } from "@/lib/brand";
 import { loadXlsx } from "@/lib/xlsx-load";
 import { normalizeVatRate, type VatRateMap } from "@/lib/pricing";
 
@@ -16,7 +17,7 @@ const HEADERS = ["Country", "Code", "VAT %"] as const;
 
 export async function buildVatWorkbook(countries: Record<string, string>, rates: VatRateMap, fallbackRate: number | null): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "T4A Admin";
+  wb.creator = PLATFORM_NAME;
   const ws = wb.addWorksheet("VAT rates", { views: [{ state: "frozen", ySplit: 1 }] });
   ws.columns = [
     { header: HEADERS[0], key: "country", width: 34 },

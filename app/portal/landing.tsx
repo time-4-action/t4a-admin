@@ -9,6 +9,7 @@ import {
   Mail,
   UserPlus,
 } from "lucide-react";
+import { PLATFORM_NAME } from "@/lib/brand";
 
 // The public face of the B2B portal — what a logged-out visitor sees at /portal
 // (and at the bare domain). Kept deliberately basic: what is inside, which email
@@ -19,7 +20,7 @@ import {
 // steps up at lg / xl so a 1920×1080 screen is used instead of a small block
 // floating in the middle. Phones and tablets keep the compact scale.
 
-const BRAND = "Time 4 Action B2B";
+const BRAND = PLATFORM_NAME;
 const CONTACTS = ["grega@time-4-action.com"];
 const WHATSAPP = "+386 51 618 733";
 const WHATSAPP_HREF = "https://wa.me/38651618733";
@@ -99,7 +100,7 @@ export function PortalLanding({ returnTo }: { returnTo?: string }) {
               className="text-[15px] md:text-[17px] xl:text-[18px] text-muted-foreground mt-5 leading-relaxed max-w-xl reveal"
               style={{ animationDelay: "80ms" }}
             >
-              Everything between your company and Time 4 Action, read straight from our order system — no waiting
+              Everything between your company and PATRIK, read straight from our order system — no waiting
               for an email.
             </p>
 
