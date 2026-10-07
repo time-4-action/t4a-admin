@@ -9,7 +9,6 @@ import { isDevRole, isAiRole } from "@/lib/ai-role";
 import { UserDetailStats, UserUsageTable, UserDetailSidebar, UserConversations } from "./user-detail-client";
 import { DetailCrumbBar } from "@/components/detail-crumb-bar";
 import { Bot, ShieldAlert, ShieldCheck } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 function RoleBadge({ name }: { name: string }) {
   const ai = isAiRole(name);

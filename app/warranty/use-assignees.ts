@@ -38,12 +38,3 @@ export function useWarrantyAssignees(): State {
 
   return { admins, names: admins.map((a) => a.name), loading, error };
 }
-
-/**
- * The selectable assignee names, guaranteeing the claim's current value is
- * present even if that user no longer holds the role (legacy / removed admin).
- */
-export function assigneeOptions(names: string[], current?: string | null): string[] {
-  if (current && !names.includes(current)) return [current, ...names];
-  return names;
-}

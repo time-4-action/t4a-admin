@@ -33,14 +33,6 @@ export function isPortalDocKind(kind: DocKind | null | undefined): kind is DocKi
   return !!kind && PORTAL_DOC_KINDS.includes(kind);
 }
 
-// The partner the portal shows. Normally the session email's partner; for an admin
-// who is "viewing the portal as" someone (lib/portal-impersonation.ts — a signed
-// cookie honoured only with an eligible admin role) it is that customer, or the
-// partner the impersonated Auth0 user's email resolves to.
-export async function getSessionPartner(): Promise<MkPartner | null> {
-  return (await getPortalViewer()).partner;
-}
-
 // Set while an admin views the portal as someone else: who that is + who they really are.
 export type PortalImpersonating =
   | { kind: "customer"; partnerMkId: string; partnerName: string; adminEmail: string | null; returnTo: string }

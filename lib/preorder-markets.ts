@@ -14,15 +14,6 @@ import type { CommercialConfig, CustomerRule, PreorderMarket } from "@/types/pre
 
 export type MarketsError = { status: number; error: string; conflicts?: { iso: string; markets: string[] }[] };
 
-// Countries shared by several markets — informational (priority resolves them).
-export function findCountryConflicts(markets: PreorderMarket[]): { iso: string; markets: string[] }[] {
-  const seen = new Map<string, string[]>();
-  for (const m of markets) for (const iso of m.countries) seen.set(iso, [...(seen.get(iso) ?? []), m.name]);
-  return Array.from(seen.entries())
-    .filter(([, names]) => names.length > 1)
-    .map(([iso, names]) => ({ iso, markets: names }));
-}
-
 function sheetIds(doc: IPreorderCampaign): Set<string> {
   const ids = new Set<string>();
   for (const t of doc.tabs) {

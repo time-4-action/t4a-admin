@@ -1,5 +1,5 @@
 {
-  "name": "admin-web",
+  "name": "t4a-admin",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -21,7 +21,6 @@
     "clsx": "^2.1.1",
     "exceljs": "^4.4.0",
     "flag-icons": "^7.5.0",
-    "geist": "^1.7.2",
     "i18n-iso-countries": "^7.14.0",
     "jszip": "^3.10.2",
     "lucide-react": "^0.577.0",
@@ -42,7 +41,6 @@
     "@types/sanitize-html": "^2.16.2",
     "mongodb-memory-server": "^11.3.0",
     "tailwindcss": "^4",
-    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7"
   }

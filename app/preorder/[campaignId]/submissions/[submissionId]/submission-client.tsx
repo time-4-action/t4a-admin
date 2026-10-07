@@ -41,7 +41,7 @@ import {
   PreorderGridSkeleton,
   OrderSummaryPanelSkeleton,
 } from "@/app/preorder/preorder-shared";
-import { MkOrderStateBadge, SourceBadge, SubmissionStageBadge, VisibilityBadge, MarketChip } from "@/app/preorder/preorder-badges";
+import { MkOrderStateBadge, SubmissionStageBadge, VisibilityBadge, MarketChip } from "@/app/preorder/preorder-badges";
 import {
   LINE_STATUS_LABELS,
   CUSTOMER_KIND_LABELS,

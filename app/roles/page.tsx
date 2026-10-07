@@ -146,19 +146,6 @@ export default function RolesPage() {
     });
   }
 
-  function toggleEditServer(server: ResourceServer) {
-    const allOn = server.scopes.every(s => editSelected.has(permKey(server.identifier, s.value)));
-    setEditSelected(prev => {
-      const next = new Set(prev);
-      if (allOn) {
-        server.scopes.forEach(s => next.delete(permKey(server.identifier, s.value)));
-      } else {
-        server.scopes.forEach(s => next.add(permKey(server.identifier, s.value)));
-      }
-      return next;
-    });
-  }
-
   async function savePermissions() {
     if (!editTarget) return;
     setEditSaving(true);

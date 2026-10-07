@@ -40,7 +40,7 @@ import { fmtMoney } from "@/app/preorder/preorder-shared";
 import { computeConfirmedTotals, flattenRows } from "@/types/preorder";
 import { vatIsMissing, vatLabel, toCents, fromCents, splitGross, addVat } from "@/lib/pricing";
 import { cn } from "@/lib/utils";
-import { Skeleton, SkeletonLine, stagger } from "@/components/ui/skeleton";
+import { Skeleton, stagger } from "@/components/ui/skeleton";
 import {
   TabBar,
   SheetContextBar,

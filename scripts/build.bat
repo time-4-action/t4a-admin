@@ -20,15 +20,11 @@ powershell -NoProfile -Command ^
   "  $parts = $_ -split '=', 2;" ^
   "  if ($parts.Count -eq 2) { $env[$parts[0].Trim()] = $parts[1].Trim() }" ^
   "};" ^
-  "$color     = $env['NEXT_PUBLIC_COMPANY_COLOR'];" ^
-  "$deepgram  = $env['NEXT_PUBLIC_DEEPGRAM_API_KEY'];" ^
   "$aiRole    = $env['NEXT_PUBLIC_AI_ROLE_NAME'];" ^
   "$devRole   = $env['NEXT_PUBLIC_DEV_ROLE_NAME'];" ^
   "$eurUsd    = $env['NEXT_PUBLIC_EUR_USD_RATE'];" ^
   "Write-Host '[build] Building %IMAGE%:%DATETAG%...';" ^
   "docker build" ^
-  "  --build-arg NEXT_PUBLIC_COMPANY_COLOR=$color" ^
-  "  --build-arg NEXT_PUBLIC_DEEPGRAM_API_KEY=$deepgram" ^
   "  --build-arg NEXT_PUBLIC_AI_ROLE_NAME=$aiRole" ^
   "  --build-arg NEXT_PUBLIC_DEV_ROLE_NAME=$devRole" ^
   "  --build-arg NEXT_PUBLIC_EUR_USD_RATE=$eurUsd" ^

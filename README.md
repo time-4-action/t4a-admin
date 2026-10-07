@@ -1,109 +1,65 @@
 # PATRIK Business Platform
 
-Admin dashboard and B2B customer portal of the PATRIK Business Platform, for managing users, access types, and AI usage costs. Built with Next.js 16, Auth0, and MongoDB.
+Admin dashboard and B2B customer portal for time-4-action, built with Next.js 16
+(App Router), Auth0 and MongoDB, and deployed as a standalone Docker container.
 
-![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
-![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)
-![Auth0](https://img.shields.io/badge/Auth0-EB5424?logo=auth0&logoColor=white)
-![MongoDB](https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
+## What it does
 
----
+**Admin** (Auth0 `admin` role, plus per-section roles):
 
-## Overview
+- **Users & Access** — Auth0 users, access types (roles), permissions, assignments
+- **AI** — usage, costs and per-user spending limits
+- **Warranty** — claims from the warranty service
+- **Partners** — partner-portal activity and catalogue sync
+- **Automation** — the Metakocka warehouse / products sync service
+- **Builder** — snippet builders for the marketing website sections
+- **Documents & Customers** — any customer's Metakocka documents, portal agents
+- **Preorder** — campaign sheets, markets, customer pricing, VAT, Metakocka orders
 
-A centralized admin panel for the [time-4-action](https://time-4-action.com) platform. It connects to the same Auth0 tenant and MongoDB instance as the main AI chat application, providing a single pane of glass for:
+**Customer portal** (`/portal`, no role needed): customers sign in with their
+B2B email and see their own invoices, credit notes, orders and preorders.
 
-- **User Management** &mdash; create, edit, delete users; send password resets
-- **Access Control** &mdash; assign and revoke Auth0 roles with drag-and-drop or batch operations
-- **Spending Limits** &mdash; set per-user daily/weekly/monthly/total cost caps
-- **Usage Analytics** &mdash; track AI token usage, costs, and conversations with interactive charts
-- **Permission Management** &mdash; configure fine-grained API permissions per access type
-
-## Quick Start
+## Development
 
 ```bash
-# Install dependencies
 npm install
-
-# Configure environment (see docs/setup-guide.md for all variables)
-cp .env.example .env.local   # then fill in Auth0 + MongoDB credentials
-
-# Start development server
-npm run dev
+npm run dev          # http://localhost:3000
+npm test             # vitest
+npm run typecheck    # tsc --noEmit
 ```
 
-Open [http://localhost:3000](http://localhost:3000) &mdash; requires Auth0 login with the `admin` role.
+Configuration lives in `.env.local` (never committed). The required and
+optional variables are listed in [CLAUDE.md](CLAUDE.md#environment-variables);
+the Auth0 tenant setup is in [docs/setup-guide.md](docs/setup-guide.md).
 
-## Production
+## Deployment
+
+Every pull request runs typecheck, tests and a build. A push to `main` builds
+the image, pushes it to GHCR and rolls it out — see
+[docs/deployment.md](docs/deployment.md).
 
 ```bash
-# Docker
-docker compose up --build     # builds and runs on port 3005
-
-# Or build manually
-npm run build
-npm start
+docker compose up --build   # local production build on port 3005
 ```
 
-## Project Structure
+## Repository layout
 
-```
-├── app/
-│   ├── api/admin/            # REST API (users, roles, stats, usage)
-│   ├── dashboard/            # KPI cards + charts
-│   ├── users/                # User list, detail, create
-│   ├── roles/                # Access types, permissions, assignments
-│   ├── usage/                # Cost & token reports
-│   └── settings/             # App configuration
-├── components/               # UI components (shadcn/ui + custom dialogs)
-├── lib/                      # Auth, DB, utilities
-├── models/                   # Mongoose schemas
-└── docs/                     # Documentation
-```
+| Path | Contents |
+|---|---|
+| `app/` | Pages and API routes (`app/api/*`) |
+| `components/` | Shared UI (`components/ui` = shadcn/ui primitives) |
+| `lib/` | Server and client services (Auth0, MongoDB, Metakocka, pricing, …) |
+| `models/` | Mongoose schemas |
+| `types/` | Shared types |
+| `tests/` | vitest suites |
+| `public/patrik-components.js` | The website section renderer used by the Builder |
+| `mk-docs/` | Metakocka REST API reference |
+| `api-docs/` | Partner portal API reference |
+| `docs/` | Setup and deployment guides, Auth0 email template |
+| `deploy/` | Production compose file for the server |
 
-## Key Features
-
-### User Management
-Full CRUD for Auth0 users with integrated MongoDB usage data. User detail pages show per-model token breakdowns, spending limits, and conversation counts.
-
-### Access Types (Roles)
-Auth0 roles are surfaced as "access types" with a searchable permission editor. The assign page supports single-user drag-and-drop and multi-user batch operations with confirmation dialogs for sensitive roles.
-
-### Spending Limits
-Per-user cost caps with configurable periods (daily, weekly, monthly, total). Limits set here are enforced by the chat application in real time.
-
-### Usage Analytics
-Dashboard with KPI cards (total spend, active users, conversations today) and interactive bar/pie charts breaking down costs by user and model. All costs stored in USD with client-side EUR toggle.
-
-### Dev User Filtering
-Users with the `dev` role are hidden from all lists and their usage is aggregated under a single "Development" entry in cost reports.
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [Setup Guide](docs/setup-guide.md) | Full installation and configuration walkthrough |
-| [Architecture](docs/architecture.md) | Technical architecture, data model, and API reference |
-| [Auth0 Roles](docs/auth0-roles.md) | Authentication flow and role-based access control |
-
-## Environment Variables
-
-| Variable | Required | Description |
-|----------|:--------:|-------------|
-| `AUTH0_SECRET` | Yes | Random 32-byte session secret |
-| `AUTH0_ISSUER_BASE_URL` | Yes | Auth0 tenant URL |
-| `AUTH0_CLIENT_ID` | Yes | Web app client ID |
-| `AUTH0_CLIENT_SECRET` | Yes | Web app client secret |
-| `AUTH0_MGMT_CLIENT_ID` | Yes | M2M app client ID |
-| `AUTH0_MGMT_CLIENT_SECRET` | Yes | M2M app client secret |
-| `AUTH0_DB_CONNECTION` | Yes | Auth0 database connection name |
-| `MONGODB_URI` | Yes | MongoDB connection string |
-| `NEXT_PUBLIC_AI_ROLE_NAME` | No | AI access role name (default: "AI User") |
-| `NEXT_PUBLIC_DEV_ROLE_NAME` | No | Dev role to hide (default: "dev") |
-| `NEXT_PUBLIC_EUR_USD_RATE` | No | EUR/USD conversion rate (default: 0.92) |
+[CLAUDE.md](CLAUDE.md) is the detailed architecture reference for every module.
 
 ## License
 
-Private &mdash; All rights reserved.
+Private — all rights reserved.

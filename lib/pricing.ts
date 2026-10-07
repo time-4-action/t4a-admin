@@ -38,7 +38,7 @@
 // and totals are the Σ of the lines, which is how an invoice (and Metakocka) adds up;
 // splitting the order total once could differ by a cent.
 
-import type { PreorderCampaign, PreorderRow, PreorderSubmissionTotals, PreorderTab, PreorderTier } from "@/types/preorder";
+import type { PreorderRow, PreorderSubmissionTotals, PreorderTab, PreorderTier } from "@/types/preorder";
 
 export type CustomerKind = "business" | "person";
 export type PriceBasis = "partner" | "rrp";
