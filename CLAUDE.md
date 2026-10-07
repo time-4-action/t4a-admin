@@ -629,10 +629,12 @@ sees the documents and preorders of assigned **client** partners
 customer" on an agent shows the agent view. **Managed in Customers → Agents**
 (`/customers/agents` list → one page per agent `/customers/agents/[partnerMkId]`,
 `/customers/agents/new?partner=`; `agent-editor.tsx`), built for 100+ clients:
-filterable client table (search, Country / Type / Added heading filters,
-multi-select remove), changes **staged** until "Save changes" (new rows marked,
-removed rows kept with Undo, unsaved-changes guard), "also with <other agent>"
-per client, and an add panel — directory search with Add / "Add all shown", or
+summary strip, filterable client table (search, Country / Type / Added heading
+filters, row-click / checkbox multi-select, trash to remove), **autosave**
+(debounced PUT of the whole list, one save in flight, the latest state wins;
+header shows Saving / Saved / Not saved + Retry; removals get an Undo toast; a
+new agent is created the moment their own account is picked), "also with
+<other agent>" per client, and an add panel — directory search with Add / "Add all shown", or
 **Paste a list** (codes / ids / emails / exact names → `POST
 /api/admin/portal/agents/resolve` → `resolveCustomerLines`: exact, case-blind,
 ambiguous lines are reported for a pick, never guessed). API

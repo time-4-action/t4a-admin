@@ -1,11 +1,12 @@
 "use client";
 
 // The agent page (Customers → Agents → one agent, or "New agent"). Built for
-// agents with 100+ clients: a searchable, filterable client table with
-// multi-select, changes staged and reviewed in place (new rows marked, removed
-// rows kept with Undo) until "Save changes", and an add panel that takes either
-// a directory search (add several without closing anything) or a pasted list of
-// customer codes / emails / names.
+// agents with 100+ clients: a summary strip, a searchable / filterable client
+// table with multi-select, and an add panel that takes either a directory search
+// (add several without closing anything) or a pasted list of customer codes /
+// emails / names. Every change AUTOSAVES (debounced, one save in flight at a
+// time, the latest state always wins); removals offer Undo. A new agent is
+// created the moment their own account is picked.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -13,14 +14,16 @@ import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   ArrowLeft,
+  Briefcase,
   Check,
   ClipboardPaste,
+  CloudOff,
   Loader2,
   Mail,
   Plus,
+  RotateCcw,
   Search,
   Trash2,
-  Undo2,
   Users,
   X,
 } from "lucide-react";
@@ -40,18 +43,30 @@ type Resolved =
   | { line: string; status: "matched"; customer: MkCustomerView; via: string }
   | { line: string; status: "ambiguous"; candidates: MkCustomerView[] }
   | { line: string; status: "unmatched" };
+type SaveState = "idle" | "pending" | "saving" | "saved" | "error";
 
 const PAGE = 100;
+const SAVE_DELAY_MS = 700;
+const UNDO_MS = 8000;
 
 function fmtDate(v: string | null): string {
   if (!v) return "";
   const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? "" : new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(d);
+  if (Number.isNaN(d.getTime())) return "";
+  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+  if (days < 1 && new Date().toDateString() === d.toDateString()) return "Today";
+  if (days < 2) return "Yesterday";
+  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(d);
 }
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   return ((parts[0]?.[0] ?? "?") + (parts[1]?.[0] ?? "")).toUpperCase();
+}
+
+function shortActor(v: string | null): string {
+  if (!v) return "";
+  return v.includes("@") ? v.split("@")[0] : v;
 }
 
 export function AgentEditor({
@@ -71,155 +86,246 @@ export function AgentEditor({
   // Every existing agent (a customer can be an agent once; agents as clients get a note).
   agentIds: string[];
 }) {
+  if (!agent) return <NewAgent seed={seed ?? null} agentIds={agentIds} />;
+  return <ExistingAgent agent={agent} directory={initialDirectory} alsoWith={alsoWith} agentIds={agentIds} />;
+}
+
+// ── new agent: pick their own account, which creates the agent ────────────────
+
+function NewAgent({ seed, agentIds }: { seed: MkCustomerView | null; agentIds: string[] }) {
   const router = useRouter();
-  const isNew = !agent;
-  const [directory, setDirectory] = useState(initialDirectory);
-  const remember = useCallback((cs: MkCustomerView[]) => setDirectory((d) => ({ ...d, ...Object.fromEntries(cs.map((c) => [c.partnerMkId, c])) })), []);
-
-  // The agent's own account (pickable only while new).
-  const [self, setSelf] = useState<MkCustomerView | null>(agent ? (initialDirectory[agent.partnerMkId] ?? null) : (seed ?? null));
-  const selfId = agent?.partnerMkId ?? self?.partnerMkId ?? null;
-  const selfName = agent?.partnerName ?? self?.name ?? "";
-
-  // Saved state vs staged changes.
-  const [baseline, setBaseline] = useState<ClientEntry[]>(agent?.clients ?? []);
-  const [added, setAdded] = useState<Map<string, ClientEntry>>(new Map());
-  const [removed, setRemoved] = useState<Set<string>>(new Set());
-  const [noteBaseline, setNoteBaseline] = useState(agent?.note ?? "");
-  const [note, setNote] = useState(agent?.note ?? "");
-  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [savedFlash, setSavedFlash] = useState(false);
-
-  const baselineIds = useMemo(() => new Set(baseline.map((c) => c.partnerMkId)), [baseline]);
-  const working = useMemo(
-    () => [...baseline.filter((c) => !removed.has(c.partnerMkId)), ...added.values()],
-    [baseline, removed, added],
-  );
-  const workingIds = useMemo(() => new Set(working.map((c) => c.partnerMkId)), [working]);
-  const changeCount = added.size + removed.size + (note.trim() !== noteBaseline.trim() ? 1 : 0);
-  const dirty = isNew ? !!self : changeCount > 0;
   const agentIdSet = useMemo(() => new Set(agentIds), [agentIds]);
 
-  // Leaving with unsaved changes asks first.
+  const create = useCallback(
+    async (c: MkCustomerView) => {
+      setBusy(c.partnerMkId);
+      setError(null);
+      try {
+        const r = await fetch("/api/admin/portal/agents", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ partnerMkId: c.partnerMkId, partnerName: c.name, clients: [], note: "" }),
+        });
+        const j = (await r.json().catch(() => ({}))) as { agent?: PortalAgentView; error?: string };
+        if (!r.ok || !j.agent) throw new Error(j.error ?? `Could not create the agent (${r.status})`);
+        router.replace(`/customers/agents/${encodeURIComponent(j.agent.partnerMkId)}`);
+        router.refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not create the agent");
+        setBusy(null);
+      }
+    },
+    [router],
+  );
+
+  return (
+    <div className="flex flex-col h-full">
+      <header className="border-b border-border shrink-0 bg-background/80 backdrop-blur-sm sticky top-0 z-20">
+        <div className="h-14 flex items-center gap-3 px-4 md:px-8">
+          <Link href="/customers/agents" className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Back to agents">
+            <ArrowLeft className="w-4 h-4" />
+          </Link>
+          <h1 className="font-display text-lg font-medium tracking-tight text-foreground truncate">New agent</h1>
+        </div>
+      </header>
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="mx-auto max-w-xl px-4 py-10 md:py-16 space-y-6">
+          <div className="space-y-2">
+            <span className="flex size-11 items-center justify-center rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400">
+              <Briefcase className="size-5" />
+            </span>
+            <h2 className="font-display text-2xl font-medium tracking-tight text-foreground">Who is the agent?</h2>
+            <p className="text-[13px] text-muted-foreground leading-relaxed">
+              Pick the customer the agent signs in as. They keep their own invoices and orders, and you add the clients they
+              may see on the next screen.
+            </p>
+          </div>
+          {seed && !agentIdSet.has(seed.partnerMkId) && (
+            <div className="rounded-2xl border border-teal-500/30 bg-teal-500/5 p-4 flex items-center gap-3">
+              <span className="size-10 rounded-xl bg-foreground text-background flex items-center justify-center text-[13px] font-semibold shrink-0">{initials(seed.name)}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[14px] font-medium text-foreground truncate">{seed.name}</p>
+                <p className="text-[12px] text-muted-foreground truncate">{[seed.email, seed.city, seed.countCode].filter(Boolean).join(", ")}</p>
+              </div>
+              <Button size="sm" onClick={() => create(seed)} disabled={!!busy}>
+                {busy === seed.partnerMkId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Make agent
+              </Button>
+            </div>
+          )}
+          <div className="rounded-2xl border border-border bg-surface p-4">
+            <DirectorySearch
+              autoFocus={!seed}
+              placeholder={seed ? "Or search another customer" : "Search name, email, VAT id or code"}
+              render={(c) =>
+                agentIdSet.has(c.partnerMkId) ? (
+                  <Link href={`/customers/agents/${encodeURIComponent(c.partnerMkId)}`} className="text-[11px] text-muted-foreground hover:text-foreground hover:underline shrink-0">
+                    Already an agent
+                  </Link>
+                ) : (
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => create(c)} disabled={!!busy}>
+                    {busy === c.partnerMkId ? <Loader2 className="w-3 h-3 animate-spin" /> : null} Make agent
+                  </Button>
+                )
+              }
+            />
+          </div>
+          {error && (
+            <p className="flex items-center gap-2 text-[12px] text-destructive">
+              <AlertTriangle className="w-3.5 h-3.5" /> {error}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── existing agent: autosaving editor ─────────────────────────────────────────
+
+function ExistingAgent({
+  agent,
+  directory: initialDirectory,
+  alsoWith,
+  agentIds,
+}: {
+  agent: PortalAgentView;
+  directory: Record<string, MkCustomerView>;
+  alsoWith: Record<string, AgentRef[]>;
+  agentIds: string[];
+}) {
+  const router = useRouter();
+  const selfId = agent.partnerMkId;
+  const [directory, setDirectory] = useState(initialDirectory);
+  const [clients, setClients] = useState<ClientEntry[]>(agent.clients);
+  const [note, setNote] = useState(agent.note ?? "");
+  const [justAdded, setJustAdded] = useState<Set<string>>(new Set());
+  const [undo, setUndo] = useState<{ entries: ClientEntry[]; at: number } | null>(null);
+  const agentIdSet = useMemo(() => new Set(agentIds), [agentIds]);
+  const clientIds = useMemo(() => new Set(clients.map((c) => c.partnerMkId)), [clients]);
+
+  // ── autosave ──
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [savedAt, setSavedAt] = useState<Date | null>(agent.updatedAt ? new Date(agent.updatedAt) : null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const latest = useRef({ clients, note });
+  latest.current = { clients, note };
+  const inFlight = useRef(false);
+  const again = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flush = useCallback(async () => {
+    if (inFlight.current) {
+      again.current = true;
+      return;
+    }
+    inFlight.current = true;
+    setSaveState("saving");
+    const { clients: cs, note: n } = latest.current;
+    try {
+      const r = await fetch(`/api/admin/portal/agents/${encodeURIComponent(selfId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clients: cs.map((c) => ({ partnerMkId: c.partnerMkId, partnerName: c.partnerName })), note: n }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { agent?: PortalAgentView; error?: string };
+      if (!r.ok || !j.agent) throw new Error(j.error ?? `Save failed (${r.status})`);
+      // Stamp the "added" date / person the server recorded on rows that lack it.
+      const stamps = new Map(j.agent.clients.map((c) => [c.partnerMkId, c]));
+      setClients((prev) =>
+        prev.map((c) => {
+          const s = stamps.get(c.partnerMkId);
+          return s && !c.addedAt ? { ...c, addedAt: s.addedAt, addedBy: s.addedBy } : c;
+        }),
+      );
+      setSavedAt(new Date());
+      setSaveError(null);
+      setSaveState(again.current ? "pending" : "saved");
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Save failed");
+      setSaveState("error");
+    } finally {
+      inFlight.current = false;
+      if (again.current) {
+        again.current = false;
+        void flush();
+      }
+    }
+  }, [selfId]);
+
+  const scheduleSave = useCallback(
+    (delay = SAVE_DELAY_MS) => {
+      setSaveState("pending");
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => void flush(), delay);
+    },
+    [flush],
+  );
+  useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
+
+  // Leaving while a save is pending or failed asks first.
+  const unsaved = saveState === "pending" || saveState === "saving" || saveState === "error";
   useEffect(() => {
-    if (!dirty) return;
-    const onLeave = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-    };
+    if (!unsaved) return;
+    const onLeave = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("beforeunload", onLeave);
     return () => window.removeEventListener("beforeunload", onLeave);
-  }, [dirty]);
+  }, [unsaved]);
+
+  // ── edits ──
+  const remember = useCallback((cs: MkCustomerView[]) => setDirectory((d) => ({ ...d, ...Object.fromEntries(cs.map((c) => [c.partnerMkId, c])) })), []);
 
   function addClients(cs: MkCustomerView[]) {
-    remember(cs);
-    setRemoved((prev) => {
-      const next = new Set(prev);
-      for (const c of cs) next.delete(c.partnerMkId);
-      return next;
-    });
-    setAdded((prev) => {
-      const next = new Map(prev);
-      for (const c of cs) {
-        if (c.partnerMkId === selfId || baselineIds.has(c.partnerMkId)) continue;
-        next.set(c.partnerMkId, { partnerMkId: c.partnerMkId, partnerName: c.name, addedAt: null, addedBy: null });
-      }
-      return next;
-    });
+    const fresh = cs.filter((c) => c.partnerMkId !== selfId && !clientIds.has(c.partnerMkId));
+    if (fresh.length === 0) return;
+    remember(fresh);
+    setClients((prev) => [...prev, ...fresh.map((c) => ({ partnerMkId: c.partnerMkId, partnerName: c.name, addedAt: null, addedBy: null }))]);
+    setJustAdded((prev) => new Set([...prev, ...fresh.map((c) => c.partnerMkId)]));
+    scheduleSave();
   }
 
   function removeClients(ids: string[]) {
-    setAdded((prev) => {
-      const next = new Map(prev);
-      for (const id of ids) next.delete(id);
-      return next;
-    });
-    setRemoved((prev) => {
-      const next = new Set(prev);
-      for (const id of ids) if (baselineIds.has(id)) next.add(id);
-      return next;
-    });
+    const drop = new Set(ids);
+    const entries = clients.filter((c) => drop.has(c.partnerMkId));
+    if (entries.length === 0) return;
+    setClients((prev) => prev.filter((c) => !drop.has(c.partnerMkId)));
+    setUndo({ entries, at: Date.now() });
+    scheduleSave();
   }
 
-  function undoRemove(id: string) {
-    setRemoved((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
+  function undoRemove() {
+    if (!undo) return;
+    const back = undo.entries.filter((e) => !clientIds.has(e.partnerMkId));
+    setClients((prev) => [...prev, ...back]);
+    setUndo(null);
+    scheduleSave(0);
   }
 
-  function discard() {
-    setAdded(new Map());
-    setRemoved(new Set());
-    setNote(noteBaseline);
-    setError(null);
-  }
-
-  async function save() {
-    if (!selfId) {
-      setError("Choose the agent's own customer account first.");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      const clients = working.map((c) => ({ partnerMkId: c.partnerMkId, partnerName: c.partnerName }));
-      const r = isNew
-        ? await fetch("/api/admin/portal/agents", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ partnerMkId: selfId, partnerName: selfName, clients, note }),
-          })
-        : await fetch(`/api/admin/portal/agents/${encodeURIComponent(selfId)}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ clients, note }),
-          });
-      const j = (await r.json().catch(() => ({}))) as { agent?: PortalAgentView; error?: string };
-      if (!r.ok || !j.agent) throw new Error(j.error ?? `Save failed (${r.status})`);
-      if (isNew) {
-        router.replace(`/customers/agents/${encodeURIComponent(j.agent.partnerMkId)}`);
-        router.refresh();
-        return;
-      }
-      setBaseline(j.agent.clients);
-      setAdded(new Map());
-      setRemoved(new Set());
-      setNoteBaseline(j.agent.note ?? "");
-      setNote(j.agent.note ?? "");
-      setSavedFlash(true);
-      setTimeout(() => setSavedFlash(false), 2500);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
-    } finally {
-      setSaving(false);
-    }
-  }
+  useEffect(() => {
+    if (!undo) return;
+    const t = setTimeout(() => setUndo(null), UNDO_MS);
+    return () => clearTimeout(t);
+  }, [undo]);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [removing, setRemoving] = useState(false);
   async function removeAgent() {
-    if (!agent) return;
-    setSaving(true);
-    setError(null);
+    setRemoving(true);
     try {
-      const r = await fetch(`/api/admin/portal/agents/${encodeURIComponent(agent.partnerMkId)}`, { method: "DELETE" });
+      if (timer.current) clearTimeout(timer.current);
+      const r = await fetch(`/api/admin/portal/agents/${encodeURIComponent(selfId)}`, { method: "DELETE" });
       if (!r.ok) throw new Error(`Remove failed (${r.status})`);
       router.push("/customers/agents");
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Remove failed");
-      setSaving(false);
+      setSaveError(e instanceof Error ? e.message : "Remove failed");
+      setSaveState("error");
+      setRemoving(false);
     }
   }
 
-  const summary = [
-    added.size ? `${added.size} to add` : null,
-    removed.size ? `${removed.size} to remove` : null,
-    note.trim() !== noteBaseline.trim() ? "note changed" : null,
-  ]
-    .filter(Boolean)
-    .join(", ");
+  const self = directory[selfId] ?? null;
 
   return (
     <div className="flex flex-col h-full">
@@ -229,61 +335,42 @@ export function AgentEditor({
             <ArrowLeft className="w-4 h-4" />
           </Link>
           <div className="min-w-0 flex-1">
-            <h1 className="font-display text-lg font-medium tracking-tight text-foreground truncate leading-tight">{selfName || "New agent"}</h1>
+            <h1 className="font-display text-lg font-medium tracking-tight text-foreground truncate leading-tight">{agent.partnerName}</h1>
             <p className="text-[11px] text-muted-foreground truncate leading-tight">
-              {isNew ? "New agent" : `Agent with ${working.length} client${working.length === 1 ? "" : "s"}`}
-              {!isNew && summary ? <span className="text-amber-600 dark:text-amber-400">{`: unsaved, ${summary}`}</span> : null}
-              {savedFlash && <span className="text-emerald-600 dark:text-emerald-400">: changes saved</span>}
+              Agent with {clients.length} client{clients.length === 1 ? "" : "s"}
             </p>
           </div>
-          {agent && <ViewAsCustomerButton partnerMkId={agent.partnerMkId} to="/portal/invoices" className="hidden sm:inline-flex" />}
-          {!isNew && dirty && (
-            <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={discard} disabled={saving}>
-              Discard
-            </Button>
-          )}
-          <Button size="sm" className="h-8 text-xs gap-1.5 relative" onClick={save} disabled={saving || !dirty}>
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-            {isNew ? "Create agent" : "Save changes"}
-            {!isNew && dirty && <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-amber-500 ring-2 ring-background" aria-hidden />}
-          </Button>
+          <SaveStatus state={saveState} savedAt={savedAt} error={saveError} onRetry={() => void flush()} />
+          <ViewAsCustomerButton partnerMkId={selfId} to="/portal/invoices" className="hidden sm:inline-flex" />
         </div>
       </header>
 
-      {error && (
-        <div className="px-4 md:px-8 py-2 text-[12px] text-rose-700 dark:text-rose-300 bg-rose-500/5 border-b border-rose-500/20 flex items-center gap-2">
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {error}
-        </div>
-      )}
-
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="p-4 md:p-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] items-start">
-          <ClientsTable
-            working={working}
-            baselineIds={baselineIds}
-            removed={removed}
-            removedRows={baseline.filter((c) => removed.has(c.partnerMkId))}
-            directory={directory}
-            alsoWith={alsoWith}
-            selfId={selfId}
-            agentIds={agentIdSet}
-            onRemove={removeClients}
-            onUndo={undoRemove}
-          />
-
-          <aside className="space-y-4 lg:sticky lg:top-4">
-            <AgentAccountCard isNew={isNew} self={self} name={selfName} onPick={setSelf} agentIds={agentIdSet} clientIds={workingIds} />
-            <AddClientsCard
+        <div className="p-4 md:p-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] items-start">
+          <div className="space-y-4 min-w-0">
+            <SummaryStrip clients={clients} directory={directory} alsoWith={alsoWith} selfId={selfId} />
+            <ClientsTable
+              clients={clients}
+              justAdded={justAdded}
+              directory={directory}
+              alsoWith={alsoWith}
               selfId={selfId}
-              workingIds={workingIds}
               agentIds={agentIdSet}
-              onAdd={addClients}
+              onRemove={removeClients}
             />
+          </div>
+
+          <aside className="space-y-4 xl:sticky xl:top-4">
+            <AgentAccountCard isNew={false} self={self} name={agent.partnerName} onPick={() => undefined} agentIds={agentIdSet} clientIds={clientIds} />
+            <AddClientsCard selfId={selfId} workingIds={clientIds} agentIds={agentIdSet} onAdd={addClients} />
             <section className="rounded-2xl border border-border bg-surface p-4 space-y-2">
               <h2 className="text-[13px] font-semibold text-foreground">Internal note</h2>
               <textarea
                 value={note}
-                onChange={(e) => setNote(e.target.value)}
+                onChange={(e) => {
+                  setNote(e.target.value);
+                  scheduleSave(1000);
+                }}
                 rows={3}
                 placeholder="Only admins see this: region, agreement, who to contact"
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-[12px] focus:border-ring focus:outline-none"
@@ -295,31 +382,127 @@ export function AgentEditor({
                 In the portal the agent switches between all accounts and a single client. They see invoices, sales orders and
                 credit notes of every client, and can fill preorders for a client once that preorder is unlocked for the client.
               </p>
-              <p>Removing a client takes effect as soon as you save.</p>
+              <p>Changes save automatically and apply to the agent right away.</p>
             </section>
-            {agent && (
-              <section className="rounded-2xl border border-rose-500/25 p-4 space-y-2">
-                <h2 className="text-[13px] font-semibold text-foreground">Remove agent</h2>
-                <p className="text-[12px] text-muted-foreground">They keep their own account and lose access to all {baseline.length} clients.</p>
-                {confirmDelete ? (
-                  <div className="flex items-center gap-2">
-                    <Button size="sm" variant="destructive" onClick={removeAgent} disabled={saving}>
-                      Remove agent
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
-                      Keep
-                    </Button>
-                  </div>
-                ) : (
-                  <Button size="sm" variant="outline" className="text-destructive" onClick={() => setConfirmDelete(true)} disabled={saving}>
-                    <Trash2 className="w-3.5 h-3.5" /> Remove agent…
+            <section className="rounded-2xl border border-rose-500/25 p-4 space-y-2">
+              <h2 className="text-[13px] font-semibold text-foreground">Remove agent</h2>
+              <p className="text-[12px] text-muted-foreground">They keep their own account and lose access to all {clients.length} clients.</p>
+              {confirmDelete ? (
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="destructive" onClick={removeAgent} disabled={removing}>
+                    {removing && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Remove agent
                   </Button>
-                )}
-              </section>
-            )}
+                  <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
+                    Keep
+                  </Button>
+                </div>
+              ) : (
+                <Button size="sm" variant="outline" className="text-destructive" onClick={() => setConfirmDelete(true)}>
+                  <Trash2 className="w-3.5 h-3.5" /> Remove agent…
+                </Button>
+              )}
+            </section>
           </aside>
         </div>
       </div>
+
+      {undo && (
+        <div role="status" className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 rounded-xl bg-foreground text-background pl-4 pr-2 py-2 shadow-xl text-[13px] animate-in fade-in-0 slide-in-from-bottom-2">
+          <span>
+            Removed {undo.entries.length === 1 ? undo.entries[0].partnerName : `${undo.entries.length} clients`}
+          </span>
+          <button type="button" onClick={undoRemove} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 font-medium hover:bg-background/15 cursor-pointer">
+            <RotateCcw className="w-3.5 h-3.5" /> Undo
+          </button>
+          <button type="button" onClick={() => setUndo(null)} aria-label="Dismiss" className="rounded-lg p-1 opacity-70 hover:opacity-100 hover:bg-background/15 cursor-pointer">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SaveStatus({ state, savedAt, error, onRetry }: { state: SaveState; savedAt: Date | null; error: string | null; onRetry: () => void }) {
+  if (state === "error") {
+    return (
+      <span className="inline-flex items-center gap-2 text-[12px] text-rose-700 dark:text-rose-300" title={error ?? undefined}>
+        <CloudOff className="w-3.5 h-3.5" /> Not saved
+        <button type="button" onClick={onRetry} className="font-medium underline underline-offset-2 hover:no-underline cursor-pointer">
+          Retry
+        </button>
+      </span>
+    );
+  }
+  if (state === "pending" || state === "saving") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving
+      </span>
+    );
+  }
+  const time = savedAt ? new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(savedAt) : null;
+  return (
+    <span className="hidden sm:inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
+      <Check className={cn("w-3.5 h-3.5", state === "saved" && "text-emerald-600 dark:text-emerald-400")} />
+      {state === "saved" ? "Saved" : "All changes saved"}
+      {time && state !== "saved" ? <span className="opacity-70">at {time}</span> : null}
+    </span>
+  );
+}
+
+// ── summary strip ─────────────────────────────────────────────────────────────
+
+function SummaryStrip({
+  clients,
+  directory,
+  alsoWith,
+  selfId,
+}: {
+  clients: ClientEntry[];
+  directory: Record<string, MkCustomerView>;
+  alsoWith: Record<string, AgentRef[]>;
+  selfId: string;
+}) {
+  let companies = 0;
+  let people = 0;
+  const countries = new Map<string, number>();
+  let shared = 0;
+  for (const c of clients) {
+    const d = directory[c.partnerMkId];
+    if (d?.kind === "business") companies += 1;
+    else if (d) people += 1;
+    if (d?.countryIso) countries.set(d.countryIso, (countries.get(d.countryIso) ?? 0) + 1);
+    if ((alsoWith[c.partnerMkId] ?? []).some((a) => a.partnerMkId !== selfId)) shared += 1;
+  }
+  const top = Array.from(countries).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const tiles: { label: string; value: React.ReactNode; note?: React.ReactNode }[] = [
+    { label: "Clients", value: clients.length, note: "accounts the agent sees" },
+    { label: "Companies", value: companies, note: `${people} individual${people === 1 ? "" : "s"}` },
+    {
+      label: "Countries",
+      value: countries.size,
+      note: top.length ? (
+        <span className="inline-flex items-center gap-1.5">
+          {top.map(([iso]) => (
+            <Flag key={iso} iso={iso} />
+          ))}
+        </span>
+      ) : (
+        "none yet"
+      ),
+    },
+    { label: "Shared", value: shared, note: "also with another agent" },
+  ];
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 rounded-2xl border border-border bg-surface overflow-hidden divide-x divide-y md:divide-y-0 divide-border/60">
+      {tiles.map((t) => (
+        <div key={t.label} className="px-4 py-3 min-w-0">
+          <p className="text-[11px] text-muted-foreground">{t.label}</p>
+          <p className="font-display text-[22px] leading-tight font-medium text-foreground tabular-nums mt-0.5">{t.value}</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{t.note}</p>
+        </div>
+      ))}
     </div>
   );
 }
@@ -346,7 +529,7 @@ function AgentAccountCard({
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-[13px] font-semibold text-foreground">Agent&rsquo;s own account</h2>
         {isNew && self && (
-          <button type="button" onClick={() => onPick(null)} className="text-[11px] text-muted-foreground hover:text-foreground hover:underline">
+          <button type="button" onClick={() => onPick(null)} className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground hover:underline">
             Change
           </button>
         )}
@@ -385,7 +568,7 @@ function AgentAccountCard({
                   type="button"
                   disabled={taken}
                   onClick={() => onPick(c)}
-                  className="text-[11px] font-medium text-teal-700 dark:text-teal-300 hover:underline disabled:text-muted-foreground disabled:no-underline shrink-0"
+                  className="cursor-pointer text-[11px] font-medium text-teal-700 dark:text-teal-300 hover:underline disabled:text-muted-foreground disabled:no-underline shrink-0"
                 >
                   {taken ? "Already an agent" : clientIds.has(c.partnerMkId) ? "Pick (is a client)" : "Pick"}
                 </button>
@@ -430,7 +613,7 @@ function AddClientsCard({
               aria-selected={tab === k}
               onClick={() => setTab(k)}
               className={cn(
-                "inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors",
+                "cursor-pointer inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors",
                 tab === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
               )}
             >
@@ -446,7 +629,7 @@ function AddClientsCard({
             bulk={(results) => {
               const fresh = results.filter((c) => !workingIds.has(c.partnerMkId) && c.partnerMkId !== selfId);
               return fresh.length > 1 ? (
-                <button type="button" onClick={() => onAdd(fresh)} className="text-[11px] font-medium text-teal-700 dark:text-teal-300 hover:underline">
+                <button type="button" onClick={() => onAdd(fresh)} className="cursor-pointer text-[11px] font-medium text-teal-700 dark:text-teal-300 hover:underline">
                   Add all {fresh.length} shown
                 </button>
               ) : null;
@@ -463,7 +646,7 @@ function AddClientsCard({
                 <button
                   type="button"
                   onClick={() => onAdd([c])}
-                  className="inline-flex items-center gap-1 h-7 px-2 rounded-md border border-border text-[11px] font-medium text-foreground hover:bg-muted shrink-0"
+                  className="cursor-pointer inline-flex items-center gap-1 h-7 px-2 rounded-md border border-border text-[11px] font-medium text-foreground hover:bg-muted shrink-0"
                   title={agentIds.has(c.partnerMkId) ? "This customer is an agent too" : undefined}
                 >
                   <Plus className="w-3 h-3" /> Add
@@ -531,7 +714,7 @@ function DirectorySearch({
           <Loader2 className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />
         ) : (
           q && (
-            <button type="button" onClick={() => setQ("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Clear search">
+            <button type="button" onClick={() => setQ("")} className="cursor-pointer absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Clear search">
               <X className="w-3.5 h-3.5" />
             </button>
           )
@@ -616,6 +799,7 @@ function PasteList({ selfId, workingIds, onAdd }: { selfId: string | null; worki
                 {a.candidates.map((c) => (
                   <label key={c.partnerMkId} className="flex items-center gap-2 cursor-pointer">
                     <input
+                      className="cursor-pointer"
                       type="radio"
                       name={`amb-${a.line}`}
                       checked={picks[a.line]?.partnerMkId === c.partnerMkId}
@@ -677,30 +861,22 @@ function PasteList({ selfId, workingIds, onAdd }: { selfId: string | null; worki
 
 // ── the clients table ─────────────────────────────────────────────────────────
 
-type Row = ClientEntry & { state: "saved" | "added" | "removed" };
-
 function ClientsTable({
-  working,
-  baselineIds,
-  removed,
-  removedRows,
+  clients,
+  justAdded,
   directory,
   alsoWith,
   selfId,
   agentIds,
   onRemove,
-  onUndo,
 }: {
-  working: ClientEntry[];
-  baselineIds: Set<string>;
-  removed: Set<string>;
-  removedRows: ClientEntry[];
+  clients: ClientEntry[];
+  justAdded: Set<string>;
   directory: Record<string, MkCustomerView>;
   alsoWith: Record<string, AgentRef[]>;
-  selfId: string | null;
+  selfId: string;
   agentIds: Set<string>;
   onRemove: (ids: string[]) => void;
-  onUndo: (id: string) => void;
 }) {
   const [q, setQ] = useState("");
   const [kind, setKind] = useState("all");
@@ -710,14 +886,8 @@ function ClientsTable({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const headerBox = useRef<HTMLInputElement>(null);
 
-  const rows: Row[] = useMemo(
-    () =>
-      [
-        ...working.map((c) => ({ ...c, state: (baselineIds.has(c.partnerMkId) ? "saved" : "added") as Row["state"] })),
-        ...removedRows.map((c) => ({ ...c, state: "removed" as const })),
-      ].sort((a, b) => a.partnerName.localeCompare(b.partnerName)),
-    [working, removedRows, baselineIds],
-  );
+  const rows = useMemo(() => [...clients].sort((a, b) => a.partnerName.localeCompare(b.partnerName)), [clients]);
+  const sharedWith = useCallback((id: string) => (alsoWith[id] ?? []).filter((a) => a.partnerMkId !== selfId), [alsoWith, selfId]);
 
   const countryOptions = useMemo(() => {
     const m = new Map<string, { name: string; count: number }>();
@@ -738,20 +908,28 @@ function ClientsTable({
       if (needle && !`${r.partnerName} ${d?.email ?? ""} ${d?.city ?? ""} ${d?.countCode ?? ""} ${d?.taxId ?? ""}`.toLowerCase().includes(needle)) return false;
       if (kind !== "all" && d?.kind !== kind) return false;
       if (country !== "all" && (d?.countryIso ?? "none") !== country) return false;
-      if (show === "changes" && r.state === "saved") return false;
-      if (show === "shared" && !(alsoWith[r.partnerMkId]?.length)) return false;
+      if (show === "recent" && !justAdded.has(r.partnerMkId)) return false;
+      if (show === "shared" && sharedWith(r.partnerMkId).length === 0) return false;
       return true;
     });
-  }, [rows, directory, q, kind, country, show, alsoWith]);
+  }, [rows, directory, q, kind, country, show, justAdded, sharedWith]);
 
   useEffect(() => setLimit(PAGE), [q, kind, country, show]);
-  const visible = filtered.slice(0, limit);
-  const selectable = filtered.filter((r) => r.state !== "removed");
-  const selectedVisible = selectable.filter((r) => selected.has(r.partnerMkId));
-  const allChecked = selectable.length > 0 && selectedVisible.length === selectable.length;
+  // A removed client can no longer be selected.
   useEffect(() => {
-    if (headerBox.current) headerBox.current.indeterminate = selectedVisible.length > 0 && !allChecked;
-  }, [selectedVisible.length, allChecked]);
+    setSelected((prev) => {
+      const ids = new Set(clients.map((c) => c.partnerMkId));
+      const next = new Set([...prev].filter((id) => ids.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [clients]);
+
+  const visible = filtered.slice(0, limit);
+  const selectedShown = filtered.filter((r) => selected.has(r.partnerMkId));
+  const allChecked = filtered.length > 0 && selectedShown.length === filtered.length;
+  useEffect(() => {
+    if (headerBox.current) headerBox.current.indeterminate = selectedShown.length > 0 && !allChecked;
+  }, [selectedShown.length, allChecked]);
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -761,20 +939,19 @@ function ClientsTable({
       return next;
     });
 
-  const filtersOn = q || kind !== "all" || country !== "all" || show !== "all";
-  const grid = "grid grid-cols-[28px_minmax(0,1fr)_auto] md:grid-cols-[28px_minmax(0,1.6fr)_minmax(0,1.3fr)_minmax(0,1fr)_110px_minmax(0,0.9fr)_36px] items-center gap-x-3";
+  const filtersOn = !!q || kind !== "all" || country !== "all" || show !== "all";
+  const grid =
+    "grid grid-cols-[32px_minmax(0,1fr)_40px] md:grid-cols-[32px_minmax(0,1.8fr)_minmax(0,1.4fr)_minmax(0,1.2fr)_112px_minmax(0,0.9fr)_40px] items-center gap-x-4";
+  const checkbox = "size-4 rounded accent-teal-600 cursor-pointer disabled:cursor-not-allowed";
 
   return (
     <section className="rounded-2xl border border-border bg-background overflow-hidden min-w-0">
-      <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-border/60 bg-muted/30">
-        <h2 className="text-[13px] font-semibold text-foreground mr-1">
-          Clients <span className="font-normal text-muted-foreground tabular-nums">{working.length}</span>
-        </h2>
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter clients by name, email, city, code" className="h-8 pl-8 text-[12px]" />
+      <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-border/60">
+        <div className="relative flex-1 min-w-[200px] max-w-md">
+          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter clients by name, email, city or code" className="h-9 pl-9 text-[13px] bg-background" />
           {q && (
-            <button type="button" onClick={() => setQ("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Clear filter">
+            <button type="button" onClick={() => setQ("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer" aria-label="Clear filter">
               <X className="w-3.5 h-3.5" />
             </button>
           )}
@@ -789,21 +966,31 @@ function ClientsTable({
               setCountry("all");
               setShow("all");
             }}
-            className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+            className="text-[12px] text-muted-foreground hover:text-foreground hover:underline cursor-pointer"
           >
             Reset filters
           </button>
         )}
-        <span className="text-[11px] text-muted-foreground tabular-nums">{filtersOn ? `${filtered.length} of ${rows.length}` : `${rows.length} shown`}</span>
+        <span className="text-[12px] text-muted-foreground tabular-nums">
+          {filtersOn ? (
+            <>
+              <span className="font-semibold text-foreground">{filtered.length}</span> of {rows.length}
+            </>
+          ) : (
+            <>
+              <span className="font-semibold text-foreground">{rows.length}</span> client{rows.length === 1 ? "" : "s"}
+            </>
+          )}
+        </span>
       </div>
 
       {selected.size > 0 && (
-        <div className="flex items-center gap-3 px-4 py-2 border-b border-border/60 bg-teal-500/5 text-[12px]">
-          <span className="font-medium text-foreground">{selected.size} selected</span>
+        <div className="flex items-center gap-3 px-4 py-2 border-b border-teal-500/20 bg-teal-500/[0.06] text-[12px]">
+          <span className="font-medium text-foreground tabular-nums">{selected.size} selected</span>
           <Button
             size="sm"
             variant="outline"
-            className="h-7 text-[11px] text-destructive"
+            className="h-7 text-[11px] text-destructive hover:text-destructive gap-1.5"
             onClick={() => {
               onRemove(Array.from(selected));
               setSelected(new Set());
@@ -811,28 +998,28 @@ function ClientsTable({
           >
             <Trash2 className="w-3 h-3" /> Remove from agent
           </Button>
-          <button type="button" onClick={() => setSelected(new Set())} className="text-[11px] text-muted-foreground hover:text-foreground">
+          <button type="button" onClick={() => setSelected(new Set())} className="text-[12px] text-muted-foreground hover:text-foreground cursor-pointer">
             Clear selection
           </button>
         </div>
       )}
 
-      <div className={cn(grid, "px-4 h-9 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border/60 bg-muted/20")}>
+      <div className={cn(grid, "px-4 h-10 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border/60 bg-muted/25")}>
         <input
           ref={headerBox}
           type="checkbox"
           aria-label="Select all shown clients"
           checked={allChecked}
-          disabled={selectable.length === 0}
+          disabled={filtered.length === 0}
           onChange={() =>
             setSelected((prev) => {
               const next = new Set(prev);
-              if (allChecked) for (const r of selectable) next.delete(r.partnerMkId);
-              else for (const r of selectable) next.add(r.partnerMkId);
+              if (allChecked) for (const r of filtered) next.delete(r.partnerMkId);
+              else for (const r of filtered) next.add(r.partnerMkId);
               return next;
             })
           }
-          className="size-3.5 accent-teal-600"
+          className={checkbox}
         />
         <span>Customer</span>
         <span className="hidden md:block">Contact</span>
@@ -863,7 +1050,7 @@ function ClientsTable({
             onChange={setShow}
             options={[
               { value: "all", label: "All clients" },
-              { value: "changes", label: "Unsaved changes" },
+              { value: "recent", label: "Added just now" },
               { value: "shared", label: "Shared with another agent" },
             ]}
           />
@@ -872,104 +1059,139 @@ function ClientsTable({
       </div>
 
       {rows.length === 0 ? (
-        <div className="px-4 py-16 text-center">
-          <Users className="w-6 h-6 mx-auto mb-3 text-muted-foreground/50" />
-          <p className="text-[13px] font-medium text-foreground">No clients yet</p>
-          <p className="text-[12px] text-muted-foreground mt-1">Search the directory on the right, or paste a list of customer codes or emails.</p>
+        <div className="px-6 py-16 text-center">
+          <span className="mx-auto mb-3 flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+            <Users className="size-5" />
+          </span>
+          <p className="text-[14px] font-medium text-foreground">No clients yet</p>
+          <p className="text-[12px] text-muted-foreground mt-1 max-w-sm mx-auto">
+            Search the customer directory on the right, or paste a list of customer codes or emails to add many at once.
+          </p>
         </div>
       ) : filtered.length === 0 ? (
-        <p className="px-4 py-10 text-center text-[12px] text-muted-foreground">No client matches these filters.</p>
+        <p className="px-4 py-12 text-center text-[13px] text-muted-foreground">No client matches these filters.</p>
       ) : (
         <div className="divide-y divide-border/50">
           {visible.map((r) => {
             const d = directory[r.partnerMkId];
-            const others = (alsoWith[r.partnerMkId] ?? []).filter((a) => a.partnerMkId !== selfId);
-            const isRemoved = r.state === "removed";
+            const others = sharedWith(r.partnerMkId);
+            const isSelected = selected.has(r.partnerMkId);
+            const fresh = justAdded.has(r.partnerMkId);
             return (
               <div
                 key={r.partnerMkId}
+                onClick={(e) => {
+                  // The row toggles selection; links, buttons and the checkbox act on their own.
+                  if ((e.target as HTMLElement).closest("a,button,input")) return;
+                  toggle(r.partnerMkId);
+                }}
                 className={cn(
                   grid,
-                  "px-4 py-2.5",
-                  r.state === "added" && "bg-lime-500/[0.07]",
-                  isRemoved && "bg-rose-500/[0.04]",
-                  !isRemoved && "hover:bg-muted/20",
+                  "group px-4 py-3 cursor-pointer transition-colors",
+                  isSelected ? "bg-teal-500/[0.07] hover:bg-teal-500/[0.1]" : fresh ? "bg-lime-500/[0.06] hover:bg-lime-500/[0.1]" : "hover:bg-muted/40",
                 )}
               >
-                <input
-                  type="checkbox"
-                  aria-label={`Select ${r.partnerName}`}
-                  checked={selected.has(r.partnerMkId)}
-                  disabled={isRemoved}
-                  onChange={() => toggle(r.partnerMkId)}
-                  className="size-3.5 accent-teal-600"
-                />
-                <div className={cn("min-w-0", isRemoved && "opacity-60")}>
-                  <p className={cn("text-[13px] font-medium text-foreground truncate", isRemoved && "line-through")}>{r.partnerName}</p>
-                  <p className="text-[11px] text-muted-foreground truncate">
-                    {d?.countCode ?? r.partnerMkId}
-                    {agentIds.has(r.partnerMkId) && <span className="text-teal-700 dark:text-teal-300">, also an agent</span>}
-                    {others.length > 0 && (
-                      <span title={others.map((o) => o.partnerName).join(", ")}>
-                        {", also with "}
-                        <Link href={`/customers/agents/${encodeURIComponent(others[0].partnerMkId)}`} className="hover:underline">
-                          {others[0].partnerName}
-                        </Link>
-                        {others.length > 1 ? ` +${others.length - 1}` : ""}
-                      </span>
+                <input type="checkbox" aria-label={`Select ${r.partnerName}`} checked={isSelected} onChange={() => toggle(r.partnerMkId)} className={checkbox} />
+
+                {/* Customer */}
+                <div className="min-w-0 flex items-center gap-3">
+                  <span
+                    className={cn(
+                      "size-9 rounded-xl flex items-center justify-center text-[12px] font-semibold shrink-0",
+                      d?.kind === "business" ? "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200" : "bg-muted text-foreground",
                     )}
-                  </p>
+                  >
+                    {initials(r.partnerName)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium text-foreground truncate">{r.partnerName}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      <span className="tabular-nums">{d?.countCode ?? r.partnerMkId}</span>
+                      {agentIds.has(r.partnerMkId) && (
+                        <Link
+                          href={`/customers/agents/${encodeURIComponent(r.partnerMkId)}`}
+                          className="ml-2 inline-flex items-center gap-1 text-teal-700 dark:text-teal-300 hover:underline"
+                        >
+                          <Briefcase className="w-3 h-3" /> agent
+                        </Link>
+                      )}
+                      {others.length > 0 && (
+                        <span className="ml-2" title={others.map((o) => o.partnerName).join(", ")}>
+                          also with{" "}
+                          <Link href={`/customers/agents/${encodeURIComponent(others[0].partnerMkId)}`} className="text-foreground/80 hover:underline">
+                            {others[0].partnerName}
+                          </Link>
+                          {others.length > 1 ? ` +${others.length - 1}` : ""}
+                        </span>
+                      )}
+                    </p>
+                  </div>
                 </div>
-                <div className={cn("hidden md:block min-w-0 text-[12px] text-muted-foreground", isRemoved && "opacity-60")}>
-                  <p className="truncate">{d?.email ?? "No email"}</p>
-                </div>
-                <div className={cn("hidden md:flex items-center gap-1.5 min-w-0 text-[12px] text-foreground", isRemoved && "opacity-60")}>
-                  {d?.countryIso ? <Flag iso={d.countryIso} /> : null}
-                  <span className="truncate">{d?.city || d?.countryName || "Unknown"}</span>
-                </div>
-                <div className={cn("hidden md:block", isRemoved && "opacity-60")}>{d ? <CustomerKindBadge kind={d.kind} compact /> : <span className="text-[11px] text-muted-foreground">Not in directory</span>}</div>
-                <div className="hidden md:block min-w-0 text-[11px]">
-                  {r.state === "added" ? (
-                    <span className="inline-flex items-center rounded-full bg-lime-500/15 text-lime-800 dark:text-lime-300 px-2 py-px font-medium">New, not saved</span>
-                  ) : isRemoved ? (
-                    <span className="text-rose-700 dark:text-rose-300 font-medium">Removed on save</span>
+
+                {/* Contact */}
+                <div className="hidden md:block min-w-0 text-[12px]">
+                  {d?.email ? (
+                    <a href={`mailto:${d.email}`} className="inline-flex items-center gap-1.5 max-w-full text-muted-foreground hover:text-foreground">
+                      <Mail className="w-3.5 h-3.5 shrink-0 opacity-70" />
+                      <span className="truncate">{d.email}</span>
+                    </a>
                   ) : (
-                    <span className="text-muted-foreground truncate block" title={r.addedBy ?? undefined}>
-                      {fmtDate(r.addedAt)}
-                      {r.addedBy ? <span className="block truncate">{r.addedBy}</span> : null}
-                    </span>
+                    <span className="text-muted-foreground/60">No email</span>
+                  )}
+                  {d?.phone && <p className="text-[11px] text-muted-foreground truncate pl-5">{d.phone}</p>}
+                </div>
+
+                {/* Location */}
+                <div className="hidden md:flex items-center gap-2 min-w-0">
+                  {d?.countryIso ? <Flag iso={d.countryIso} className="text-[15px] shrink-0" /> : <span className="size-4 shrink-0" />}
+                  <div className="min-w-0">
+                    <p className="text-[12px] text-foreground truncate">{d?.city || d?.countryName || "Unknown"}</p>
+                    {d?.city && d.countryIso && <p className="text-[11px] text-muted-foreground truncate">{d.countryName}</p>}
+                  </div>
+                </div>
+
+                {/* Type */}
+                <div className="hidden md:block">
+                  {d ? <CustomerKindBadge kind={d.kind} compact /> : <span className="text-[11px] text-muted-foreground">Not in directory</span>}
+                </div>
+
+                {/* Added */}
+                <div className="hidden md:block min-w-0 text-[12px]">
+                  {fresh && !r.addedAt ? (
+                    <span className="inline-flex items-center rounded-full bg-lime-500/15 text-lime-800 dark:text-lime-300 px-2 py-0.5 text-[11px] font-medium">Just added</span>
+                  ) : (
+                    <>
+                      <p className="text-foreground/90">{fmtDate(r.addedAt) || "—"}</p>
+                      {r.addedBy && (
+                        <p className="text-[11px] text-muted-foreground truncate" title={r.addedBy}>
+                          by {shortActor(r.addedBy)}
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
-                {isRemoved ? (
-                  <button type="button" onClick={() => onUndo(r.partnerMkId)} title="Keep this client" aria-label={`Keep ${r.partnerName}`} className="justify-self-end p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted">
-                    <Undo2 className="w-3.5 h-3.5" />
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onRemove([r.partnerMkId])}
-                    title="Remove from agent"
-                    aria-label={`Remove ${r.partnerName}`}
-                    className="justify-self-end p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
+
+                <button
+                  type="button"
+                  onClick={() => onRemove([r.partnerMkId])}
+                  title="Remove from agent"
+                  aria-label={`Remove ${r.partnerName} from this agent`}
+                  className="justify-self-end flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-all cursor-pointer hover:text-destructive hover:bg-destructive/10 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:opacity-0 md:group-hover:opacity-100"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
             );
           })}
           {filtered.length > visible.length && (
             <div className="px-4 py-3 text-center">
-              <button type="button" onClick={() => setLimit((l) => l + PAGE)} className="text-[12px] text-teal-700 dark:text-teal-300 hover:underline">
+              <button type="button" onClick={() => setLimit((l) => l + PAGE)} className="text-[12px] text-teal-700 dark:text-teal-300 hover:underline cursor-pointer">
                 Show {Math.min(PAGE, filtered.length - visible.length)} more of {filtered.length - visible.length}
               </button>
             </div>
           )}
         </div>
       )}
-      <div className="sr-only" aria-live="polite">
-        {removed.size ? `${removed.size} client${removed.size === 1 ? "" : "s"} will be removed on save` : ""}
-      </div>
     </section>
   );
 }
