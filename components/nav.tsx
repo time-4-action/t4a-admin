@@ -3,10 +3,8 @@ import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { PLATFORM_NAME } from "@/lib/brand";
 import { canSee, isSuperAdmin, type SectionKey } from "@/lib/access";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { viewingAsName, type ViewingAs } from "@/components/viewing-as";
 import {
   LayoutDashboard,
   Users,
@@ -46,7 +44,6 @@ import {
   ClipboardList,
   Building2,
   ShoppingCart,
-  Briefcase,
 } from "lucide-react";
 
 type NavLinkDef = {
@@ -152,7 +149,6 @@ const sections: NavSection[] = [
     section: "customers",
     links: [
       { href: "/customers",        label: "All customers",    icon: Users, matchPrefix: true },
-      { href: "/customers/agents", label: "Agents",           icon: Briefcase },
       { href: "/customers/access", label: "Customers Access", icon: ShieldCheck, superAdminOnly: true },
     ],
   },
@@ -253,10 +249,7 @@ function isLinkActive(link: NavLinkDef, links: NavLinkDef[], pathname: string): 
 
 type NavUser = { name?: string | null; email?: string | null; picture?: string | null };
 
-// `roles` are the EFFECTIVE roles (app/layout.tsx): while a super-admin views the
-// app as another user they are that user's, so the sections listed are exactly
-// the ones that user can open; `viewingAs` then names them in the user block.
-export default function Nav({ user, roles = [], viewingAs }: { user?: NavUser; roles?: string[]; viewingAs?: ViewingAs | null }) {
+export default function Nav({ user, roles = [] }: { user?: NavUser; roles?: string[] }) {
   const [open, setOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
@@ -340,7 +333,7 @@ export default function Nav({ user, roles = [], viewingAs }: { user?: NavUser; r
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/favicon.ico" alt="logo" className="h-6 w-6 object-contain rounded-lg shrink-0" />
               <span className="text-[13px] font-semibold text-foreground truncate">
-                {PLATFORM_NAME}
+                {process.env.NEXT_PUBLIC_APP_NAME ?? "Admin"}
               </span>
             </div>
           )}
@@ -460,22 +453,13 @@ export default function Nav({ user, roles = [], viewingAs }: { user?: NavUser; r
             )}>
               {isOpen ? (
                 <>
-                  <UserAvatar user={viewingAs ? { name: viewingAsName(viewingAs) } : user} size={26} />
+                  <UserAvatar user={user} size={26} />
                   <div className="flex-1 min-w-0">
-                    {viewingAs ? (
-                      <>
-                        <p className="text-[12px] font-medium text-foreground truncate leading-tight">{viewingAsName(viewingAs)}</p>
-                        <p className="text-[10px] text-amber-600 dark:text-amber-400 truncate leading-tight">viewed by {user.email ?? user.name}</p>
-                      </>
-                    ) : (
-                      <>
-                        {user.name && (
-                          <p className="text-[12px] font-medium text-foreground truncate leading-tight">{user.name}</p>
-                        )}
-                        {user.email && (
-                          <p className="text-[10px] text-muted-foreground truncate leading-tight">{user.email}</p>
-                        )}
-                      </>
+                    {user.name && (
+                      <p className="text-[12px] font-medium text-foreground truncate leading-tight">{user.name}</p>
+                    )}
+                    {user.email && (
+                      <p className="text-[10px] text-muted-foreground truncate leading-tight">{user.email}</p>
                     )}
                   </div>
                   <a
@@ -515,7 +499,7 @@ export default function Nav({ user, roles = [], viewingAs }: { user?: NavUser; r
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/favicon.ico" alt="logo" className="h-5 w-5 object-contain rounded-md" />
           <span className="text-[13px] font-semibold text-foreground">
-            {PLATFORM_NAME}
+            {process.env.NEXT_PUBLIC_APP_NAME ?? "Admin"}
           </span>
         </div>
       </div>

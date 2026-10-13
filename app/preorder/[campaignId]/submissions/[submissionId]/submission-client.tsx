@@ -41,7 +41,7 @@ import {
   PreorderGridSkeleton,
   OrderSummaryPanelSkeleton,
 } from "@/app/preorder/preorder-shared";
-import { MkOrderStateBadge, SubmissionStageBadge, VisibilityBadge, MarketChip } from "@/app/preorder/preorder-badges";
+import { MkOrderStateBadge, SourceBadge, SubmissionStageBadge, VisibilityBadge, MarketChip } from "@/app/preorder/preorder-badges";
 import {
   LINE_STATUS_LABELS,
   CUSTOMER_KIND_LABELS,
@@ -398,7 +398,7 @@ export default function SubmissionClient({
                 <h2 className="text-[13px] font-semibold text-foreground">Requested preorder</h2>
                 <span className="text-[11px] text-muted-foreground">
                   what the customer submitted{submission.submittedAt ? ` · ${fmtDateTime(submission.submittedAt)}` : ""}
-                  {submission.submitSource === "admin" ? ` · filled by ${submission.submittedBy ?? "admin"}` : submission.submittedBy ? ` · placed by ${submission.submittedBy}` : ""}
+                  {submission.submitSource === "admin" ? ` · filled by ${submission.submittedBy ?? "admin"}` : ""}
                 </span>
               {snap && (
                 <p
@@ -430,7 +430,7 @@ export default function SubmissionClient({
               {/* What the customer saw while filling: how they are priced and the discount they reached. */}
               {sheet.pricing && activeTab && (
                 <div className="bg-muted/10">
-                  <SheetContextBar pricing={sheet.pricing} tab={activeTab} tabs={sheet.tabs} quantities={quantities} currency={currency} />
+                  <SheetContextBar pricing={sheet.pricing} tab={activeTab} quantities={quantities} currency={currency} />
                 </div>
               )}
               {isLegacy && (

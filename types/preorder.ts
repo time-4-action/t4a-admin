@@ -36,18 +36,7 @@ export type SubmissionStatus = "draft" | "submitted" | "confirmed" | "closed";
 export type LineStatus = "pending" | "confirmed" | "backorder" | "cancelled";
 
 export type RowSource = "catalogue" | "manual";
-// A short free-text label shown as a pill on the row ("NEW", "SALE", "Limited", …).
-// Only admins set tags (builder or SKU import); nothing is stamped automatically. Rows
-// from older imports may still carry "pre-order only". Display goes through tagLabel().
-export type RowTag = string | null;
-export const ROW_TAG_MAX = 24;
-
-// "pre-order only" predates free tags and has always been shown as "PRE".
-export function tagLabel(tag: RowTag | undefined): string | null {
-  const t = tag?.trim();
-  if (!t) return null;
-  return t === "pre-order only" ? "PRE" : t;
-}
+export type RowTag = "NEW" | "pre-order only" | null;
 
 // One product line in the admin-authored sheet. Prices are snapshotted at build time
 // (from the catalogue pricelist or manual entry) and displayed as-is for now.
@@ -58,27 +47,23 @@ export type PreorderRow = {
   ean?: string | null;
   name: string;
   variantLabel?: string | null; // "fin / model / size" column
-  tagColor?: string | null; // #rrggbb for the tag pill; null = default lime
   size?: string | null;
   tag?: RowTag;
-  rrp?: number | null; // RRP — the recommended retail price, GROSS. Reference only: shown, never charged
-  partnerPrice?: number | null; // partner price — NET, excl. VAT. What EVERYONE orders at (VAT added for individuals)
-  discountedPrice?: number | null; // manually discounted partner price (net) — beats partnerPrice when set
+  rrp?: number | null; // RRP — GROSS, VAT-inclusive (what an individual pays)
+  partnerPrice?: number | null; // partner price — NET, excl. VAT (what a company pays, zero-rated)
+  discountedPrice?: number | null; // discounted partner price (net)
   image?: string | null;
   order: number;
   // Not in the DEFAULT assortment: visible only where a market / customer rule
   // exposes it (see CommercialConfig.exposedIds). Undefined = normal row.
   restricted?: boolean;
-  // Fixed price: never gets a volume (tier) discount. The line still counts towards
-  // the order subtotal that unlocks the tiers. Undefined = normal row.
-  fixedPrice?: boolean;
   // MK tax code captured at resolve/reprice time so a submission can be pushed to
   // Metakocka without re-reading product prices.
   taxCode?: string | null;
   // Where the effective unit price came from. Set by the resolver only — never stored.
   priceSource?: "sheet" | "manual" | "book" | "fallback";
-  // No price at all (no partner / discounted price and no RRP to fall back on):
-  // shown, but cannot be ordered. Set by the resolver only — never stored.
+  // No price for THIS customer (an individual and the row has no RRP): shown, but
+  // cannot be ordered. Set by the resolver only — never stored.
   unpriced?: boolean;
 };
 
@@ -93,16 +78,16 @@ export type PreorderGroup = {
   rows: PreorderRow[];
 };
 
-// A volume-discount tier on a tab: reach `minAmount` of ordered value across the WHOLE
-// order (every tab together) and every line in this tab gets `discountPct` off. The
-// ladder (thresholds + percentages) is per tab, the amount that unlocks it is the full
-// order. Tiers never stack — the single highest threshold the order subtotal reaches
-// is the one that applies. Thresholds are compared against the net subtotal exactly as
-// the customer sees it — partner prices excl. VAT, in the campaign currency.
+// A volume-discount tier on a tab: reach `minAmount` of ordered value INSIDE that tab
+// and every line in it gets `discountPct` off. Tiers are per tab and never stack — the
+// single highest threshold the tab subtotal reaches is the one that applies. Thresholds
+// are compared against the subtotal exactly as the customer sees it, in their own price
+// basis: companies on partner prices excl. VAT, individuals on RRP incl. VAT (campaign
+// currency either way).
 export type PreorderTier = {
   id: string;
   name: string; // what the partner is told they reached, e.g. "Gold"
-  minAmount: number; // qualify at or above this ORDER subtotal
+  minAmount: number; // qualify at or above this tab subtotal
   discountPct: number; // 0–100, off every line in the tab
 };
 
@@ -145,10 +130,9 @@ export type PreorderCampaign = {
   rrpPricelist?: string | null;
   partnerPricelist?: string | null;
   tabs: PreorderTab[];
-  // How THIS customer is priced (kind, VAT; the basis is always the partner price —
-  // "rrp" only on a legacy snapshot). Set by the effective-campaign resolver and
-  // restored from a submission's snapshot — never stored on the campaign. Absent on
-  // the admin's raw sheet (builder), which prices without VAT.
+  // How THIS customer is priced (kind, basis, VAT). Set by the effective-campaign
+  // resolver and restored from a submission's snapshot — never stored on the campaign.
+  // Absent on the admin's raw sheet (builder), which prices on the partner basis.
   pricing?: PricingContext | null;
   createdBy?: string | null;
   createdAt?: string | null;
@@ -316,9 +300,9 @@ export type SubmissionLine = {
   lineStatus?: LineStatus;
 };
 
-// `amount` is the line sum at partner prices (net, excl. VAT; a legacy RRP-basis
-// snapshot: gross); `discount` is the Σ of the per-tab volume discounts earned; `net`
-// is `amount − discount` — the payable amount BEFORE VAT (the VAT-inclusive figure
+// `amount` is the line sum in the customer's price basis (company: partner net,
+// individual: RRP gross); `discount` is the Σ of the per-tab volume discounts earned;
+// `net` is what the customer actually pays in that basis — it is NOT the VAT-net (that
 // lives in the snapshot's `pricing.totals`). Both are absent on submissions saved before
 // volume discounts existed — read them through totalsNet()/totalsDiscount().
 export type PreorderSubmissionTotals = {
@@ -388,12 +372,11 @@ export type SnapshotLine = {
   groupId: string;
   groupName: string;
   qty: number;
-  unitPrice: number; // the USED unit price (net partner price; gross RRP on a legacy snapshot), before volume discounts
-  rrp?: number | null; // gross RRP as shown (reference)
+  unitPrice: number; // the USED unit price in the customer's basis, before volume discounts
+  rrp?: number | null; // gross RRP as shown
   partnerPrice?: number | null; // net partner price as shown
   taxCode?: string | null; // legacy MK tax code; lines now carry tax_factor
   priceSource: NonNullable<PreorderRow["priceSource"]>;
-  fixedPrice?: boolean; // the row was fixed-price at submit (no tier discount)
   // Frozen VAT arithmetic of the line (lib/pricing.ts priceLine). Absent on snapshots
   // taken before VAT support.
   tierPct?: number | null;
@@ -627,6 +610,19 @@ export const LINE_STATUS_LABELS: Record<LineStatus, string> = {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+export function parseCampaignStatus(v?: string | null): CampaignStatus | null {
+  switch ((v ?? "").toLowerCase()) {
+    case "draft":
+      return "draft";
+    case "open":
+      return "open";
+    case "closed":
+      return "closed";
+    default:
+      return null;
+  }
+}
+
 // The unit price a customer orders a row at, in their price basis (lib/pricing.ts).
 export function rowUnitPrice(row: Pick<PreorderRow, "discountedPrice" | "partnerPrice" | "rrp">, basis: PriceBasis = "partner"): number {
   return unitPriceFor(row, basis);
@@ -654,6 +650,10 @@ export function flattenRows(
 // ── Volume discount tiers & totals ───────────────────────────────────────────
 // The tier helpers (activeTiers / tierForAmount / nextTierAfter) and PreorderTabTotal
 // are re-exported from lib/pricing.ts above; the engine below wraps priceOrder().
+
+export function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
 
 type PricedCampaign = Pick<PreorderCampaign, "tabs" | "pricing">;
 
@@ -715,6 +715,11 @@ export function totalsDiscount(t?: PreorderSubmissionTotals | null): number {
   return t?.discount ?? 0;
 }
 
+// Does this campaign use volume discounts at all? Gates the tier UI everywhere.
+export function campaignHasTiers(campaign: Pick<PreorderCampaign, "tabs">): boolean {
+  return campaign.tabs.some((t) => (t.tiers ?? []).some((x) => Number.isFinite(x?.discountPct) && x.discountPct > 0 && Number.isFinite(x?.minAmount) && x.minAmount >= 0));
+}
+
 // ── Frozen submissions ────────────────────────────────────────────────────────
 // Rebuild a PreorderCampaign-shaped object from a commercial snapshot: only the
 // ordered rows, at the snapshot's prices, with the snapshot's tier ladders. Lets the
@@ -761,7 +766,6 @@ export function campaignFromSnapshot(
       discountedPrice: null,
       taxCode: line.taxCode ?? null,
       priceSource: line.priceSource,
-      ...(line.fixedPrice ? { fixedPrice: true } : {}),
       order: group.rows.length,
     });
   }

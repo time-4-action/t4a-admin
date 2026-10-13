@@ -4,10 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { viewingAsName, type ViewingAs } from "@/components/viewing-as";
 import { ReceiptText, FileMinus, ClipboardList, Building2, LogOut, Menu, X, ShoppingCart } from "lucide-react";
-import { PLATFORM_NAME } from "@/lib/brand";
-import { PortalAccountSwitcher } from "@/components/portal-account-switcher";
 
 // The B2B customer portal shell. Shown to any authenticated non-admin (they hold
 // no role; their documents are matched by email inside the portal). Deliberately
@@ -24,7 +21,7 @@ const links = [
   { href: "/portal/account", label: "My Account", icon: Building2 },
 ];
 
-const BRAND = PLATFORM_NAME;
+const BRAND = "Time 4 Action B2B";
 
 function initials(user?: PortalUser): string {
   const base = (user?.name || user?.email || "?").trim();
@@ -44,7 +41,7 @@ function Avatar({ user }: { user?: PortalUser }) {
   );
 }
 
-export default function PortalNav({ user, viewingAs }: { user?: PortalUser; viewingAs?: ViewingAs | null }) {
+export default function PortalNav({ user, viewingAs }: { user?: PortalUser; viewingAs?: { partnerMkId: string; partnerName: string } | null }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -84,9 +81,6 @@ export default function PortalNav({ user, viewingAs }: { user?: PortalUser; view
         )}
       </div>
 
-      {/* Agents only: which account(s) the portal shows */}
-      <PortalAccountSwitcher />
-
       {/* Links */}
       <div className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
         {links.map(({ href, label, icon: Icon }) => {
@@ -118,11 +112,11 @@ export default function PortalNav({ user, viewingAs }: { user?: PortalUser; view
         </div>
         {user && (
           <div className="flex items-center rounded-xl px-3 py-2 gap-2.5">
-            <Avatar user={viewingAs ? { name: viewingAsName(viewingAs) } : user} />
+            <Avatar user={viewingAs ? { name: viewingAs.partnerName } : user} />
             <div className="flex-1 min-w-0">
               {viewingAs ? (
                 <>
-                  <p className="text-[12px] font-medium text-foreground truncate leading-tight">{viewingAsName(viewingAs)}</p>
+                  <p className="text-[12px] font-medium text-foreground truncate leading-tight">{viewingAs.partnerName}</p>
                   <p className="text-[10px] text-amber-600 dark:text-amber-400 truncate leading-tight">viewed by {user.email ?? user.name}</p>
                 </>
               ) : (

@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
-import { PLATFORM_NAME } from "@/lib/brand";
 
-// The customer portal carries the same platform name as the admin (lib/brand.ts).
+// The customer portal is its own product in the browser tab — never the admin's name.
 export const metadata: Metadata = {
-  title: { default: PLATFORM_NAME, template: `%s · ${PLATFORM_NAME}` },
+  title: { default: "Time 4 Action B2B", template: "%s · Time 4 Action B2B" },
 };
 
 export default function PortalLayout({ children }: { children: React.ReactNode }) {

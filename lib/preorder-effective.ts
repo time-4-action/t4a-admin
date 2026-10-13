@@ -11,8 +11,7 @@
 // Pipeline: find the customer rule → determine the market (manual assignment, else the
 // market that lists the partner's country) → scalar settings → assortment (hidden /
 // exposed ids, layer by layer) → prices (price book of the effective list) → tiers per
-// tab → pricing context (customer kind + country ⇒ VAT rate; everyone is on the
-// partner price basis). The output
+// tab → pricing context (customer kind ⇒ price basis, country ⇒ VAT rate). The output
 // is a PreorderCampaign (same shape) plus `effective` provenance, so the existing pricing
 // engine (computeTotals & co.) and the fill components work unchanged.
 // Campaign defaults are the safe fallback everywhere (unknown country, deleted market,
@@ -56,6 +55,19 @@ export function findMarketFor(
   kind: MarketKind | null | undefined,
 ): PreorderMarket | null {
   return campaign.markets.find((m) => marketMatches(m, iso ?? null, kind ?? null)) ?? null;
+}
+
+// Every market the partner would match, in priority order (for "also matches…").
+export function findMarketsFor(
+  campaign: Pick<PreorderCampaignAdmin, "markets">,
+  iso: string | null | undefined,
+  kind: MarketKind | null | undefined,
+): PreorderMarket[] {
+  return campaign.markets.filter((m) => marketMatches(m, iso ?? null, kind ?? null));
+}
+
+export function findMarketForCountry(campaign: Pick<PreorderCampaignAdmin, "markets">, iso: string | null | undefined): PreorderMarket | null {
+  return findMarketFor(campaign, iso, null);
 }
 
 export function findCustomerRule(
@@ -253,9 +265,8 @@ export function resolveEffectiveCampaign(
   const layers = effectiveConfigLayers(campaign, ctx);
   const warnings = [...layers.warnings];
 
-  // Pricing context: everyone orders at the net partner price; the customer's kind
-  // and country decide the VAT (company → zero-rated unless the layer charges
-  // companies, individual → the country's rate added on top).
+  // Pricing context: the customer's kind decides the price basis (company → partner
+  // net, individual → RRP gross) and, with the country, the VAT rate.
   const kind = ctx.kind ?? "business";
   if (!ctx.kind) warnings.push("kind-unknown");
   const vatPolicy = vatPolicyFor(layers);
@@ -288,7 +299,7 @@ export function resolveEffectiveCampaign(
   const pricing = { pricelist: effectivePricelist, fromBook: 0, fallback: 0, manual: 0, ctx: pricingCtx, vatPolicy: vatPolicy.policy };
   const tierSources: Record<string, ConfigSource> = {};
   const missingCodes: string[] = [];
-  const unpricedCodes: string[] = [];
+  const missingRrp: string[] = [];
 
   const tabs: PreorderTab[] = [];
   for (const tab of campaign.tabs) {
@@ -319,11 +330,10 @@ export function resolveEffectiveCampaign(
           out = { ...row, priceSource: manual ? "manual" : "sheet" };
           if (manual) pricing.manual += 1;
         }
-        // A row with no price at all (no partner price, no manual discount, not even
-        // an RRP to fall back on) has nothing to order at — still listed (so a saved
-        // quantity is not silently lost) but not orderable.
-        if (out.discountedPrice == null && out.partnerPrice == null && out.rrp == null) {
-          unpricedCodes.push(out.code);
+        // An individual orders at the RRP: a row without one has no price for them —
+        // still listed (so a saved quantity is not silently lost) but not orderable.
+        if (pricingCtx.basis === "rrp" && out.rrp == null) {
+          missingRrp.push(out.code);
           out = { ...out, unpriced: true };
         }
         rows.push(out);
@@ -339,9 +349,9 @@ export function resolveEffectiveCampaign(
     for (const code of missingCodes.slice(0, 20)) warnings.push(`price-missing:${code}`);
     if (missingCodes.length > 20) warnings.push(`price-missing:+${missingCodes.length - 20} more`);
   }
-  if (unpricedCodes.length) {
-    for (const code of unpricedCodes.slice(0, 20)) warnings.push(`unpriced:${code}`);
-    if (unpricedCodes.length > 20) warnings.push(`unpriced:+${unpricedCodes.length - 20} more`);
+  if (missingRrp.length) {
+    for (const code of missingRrp.slice(0, 20)) warnings.push(`rrp-missing:${code}`);
+    if (missingRrp.length > 20) warnings.push(`rrp-missing:+${missingRrp.length - 20} more`);
   }
 
   const sources: EffectiveSources = {

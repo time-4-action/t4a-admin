@@ -3,13 +3,11 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "flag-icons/css/flag-icons.min.css";
 import "./globals.css";
 import AppShell from "@/components/app-shell";
-import type { ViewingAs } from "@/components/viewing-as";
 import { CurrencyProvider } from "@/lib/currency-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { auth0 } from "@/lib/auth";
-import { effectiveRoles, readImpersonation } from "@/lib/portal-impersonation";
-import { hasAnyAccess, rolesFromIdToken } from "@/lib/access";
-import { PLATFORM_NAME } from "@/lib/brand";
+import { readImpersonation } from "@/lib/portal-impersonation";
+import { rolesFromIdToken } from "@/lib/access";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -22,7 +20,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: PLATFORM_NAME,
+  title: process.env.NEXT_PUBLIC_APP_NAME ?? "Admin",
 };
 
 // Inline before-paint script: applies the .dark class on <html> based on the
@@ -34,16 +32,10 @@ const noFlashThemeScript = `(function(){try{var t=localStorage.getItem('theme')|
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const session = await auth0.getSession();
   const user = session?.user;
-  // An admin viewing the portal as a customer, or the app as another user (signed
-  // cookie + eligible role). Viewing as a user swaps in THAT user's roles, so the
-  // nav shows exactly the sections they hold.
+  const roles = rolesFromIdToken(session?.tokenSet?.idToken);
+  // An admin viewing the portal as a customer (signed cookie + eligible role).
   const imp = session ? await readImpersonation() : null;
-  const roles = effectiveRoles(rolesFromIdToken(session?.tokenSet?.idToken), imp);
-  const viewingAs: ViewingAs | null = !imp
-    ? null
-    : imp.kind === "user"
-      ? { kind: "user", userId: imp.userId, email: imp.email, name: imp.name, roles: imp.roles, admin: hasAnyAccess(imp.roles) }
-      : { kind: "customer", partnerMkId: imp.partnerMkId, partnerName: imp.partnerName };
+  const viewingAs = imp ? { partnerMkId: imp.partnerMkId, partnerName: imp.partnerName } : null;
 
   return (
     <html lang="en" suppressHydrationWarning>

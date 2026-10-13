@@ -54,7 +54,7 @@ export function buildCommercialSnapshot(
       code: row.code,
       name: row.name,
       variantLabel: row.variantLabel ?? null,
-      image: row.image ?? group.images?.[0] ?? null, // a variant without its own picture shows the group cover
+      image: row.image ?? null,
       tabId: tab.id,
       tabName: tab.name,
       groupId: group.id,
@@ -65,7 +65,6 @@ export function buildCommercialSnapshot(
       partnerPrice: row.partnerPrice ?? null,
       taxCode: row.taxCode ?? null,
       priceSource: row.priceSource ?? "sheet",
-      ...(row.fixedPrice ? { fixedPrice: true } : {}),
       tierPct: lp?.tierPct ?? null,
       unitNet: lp?.unitNet ?? null,
       unitVat: lp?.unitVat ?? null,
@@ -166,11 +165,7 @@ export function allocationFromDocument(
   for (const l of order.lines) {
     if (l.isText || !l.code) continue;
     const qty = num(l.amount) ?? 0;
-    // MK lines carry the list price + a discount % (the tier we registered, or one
-    // staff typed in); the customer-facing unit is the discounted one.
-    const list = num(l.priceWithTax) ?? num(l.price);
-    const disc = num(l.discount) ?? 0;
-    const price = list != null ? Math.round(list * (1 - disc / 100) * 100) / 100 : null;
+    const price = num(l.priceWithTax) ?? num(l.price);
     const prev = allocated.get(l.code);
     const shipped = num(l.shipped);
     allocated.set(l.code, {

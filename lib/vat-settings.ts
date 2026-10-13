@@ -24,9 +24,7 @@ export async function getVatSettings(): Promise<VatSettingsView> {
 }
 
 // Full replace (PUT semantics): a country left out of `rates` loses its rate;
-// invalid entries are dropped, not "fixed". `taxCodes` (the Metakocka code per rate,
-// no longer edited in the UI — MK_ZERO_TAX_CODE / tax_factor cover the lines) is
-// only replaced when the caller sends it.
+// invalid entries are dropped, not "fixed".
 export async function saveVatSettings(
   input: { rates: unknown; fallbackRate: unknown; taxCodes?: unknown },
   updatedBy: string | null,
@@ -34,6 +32,7 @@ export async function saveVatSettings(
   await connectDB();
   const rates = normalizeVatRateMap(input.rates);
   const fallbackRate = normalizeVatRate(input.fallbackRate);
+  const taxCodes = normalizeTaxCodes(input.taxCodes ?? []);
   await VatSettings.findOneAndUpdate(
     { key: "vat" },
     {
@@ -42,7 +41,7 @@ export async function saveVatSettings(
           .sort()
           .map((iso) => ({ iso, rate: rates[iso] })),
         fallbackRate,
-        ...(input.taxCodes !== undefined ? { taxCodes: normalizeTaxCodes(input.taxCodes) } : {}),
+        taxCodes,
         updatedBy,
       },
     },

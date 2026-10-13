@@ -7,7 +7,7 @@ import { isAiRole, isDevRole } from "@/lib/ai-role";
 import { cn } from "@/lib/utils";
 import { Skeleton, SkeletonAvatar, SkeletonLine, stagger } from "@/components/ui/skeleton";
 import {
-  Check, Search, Bot, ShieldCheck, ShieldAlert, ArrowLeft,
+  Check, Search, Bot, ShieldCheck, ShieldAlert, AlertTriangle, ArrowLeft,
   UserCheck, Users, Plus, Minus, Loader2,
 } from "lucide-react";
 import {
@@ -237,6 +237,7 @@ export default function AssignAccessPage() {
   // Confirmation dialog
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmToggles, setConfirmToggles] = useState<Record<string, boolean>>({});
+  const [pendingSave, setPendingSave] = useState(false);
 
   // ── Load data ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -359,6 +360,7 @@ export default function AssignAccessPage() {
       sensitiveNewRoles.forEach(r => { init[r.id] = false; });
       setConfirmToggles(init);
       setConfirmOpen(true);
+      setPendingSave(true);
     } else {
       doSave();
     }
@@ -382,6 +384,7 @@ export default function AssignAccessPage() {
     }));
     setSaving(false);
     setSaved(true);
+    setPendingSave(false);
   }
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -627,12 +630,12 @@ export default function AssignAccessPage() {
       </div>
 
       {/* ── Confirmation dialog ────────────────────────────────────────────── */}
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <Dialog open={confirmOpen} onOpenChange={(o) => { setConfirmOpen(o); if (!o) setPendingSave(false); }}>
         <DialogContent className="max-w-sm">
           <DialogTitle className="sr-only">Confirm Access Changes</DialogTitle>
 
           <div className="flex items-center gap-2 mb-1">
-            <button onClick={() => setConfirmOpen(false)}
+            <button onClick={() => { setConfirmOpen(false); setPendingSave(false); }}
               className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground shrink-0"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -704,7 +707,7 @@ export default function AssignAccessPage() {
               {allConfirmed ? "All confirmed. Ready to save." : `${Object.values(confirmToggles).filter(Boolean).length}/${Object.keys(confirmToggles).length} confirmed`}
             </p>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => setConfirmOpen(false)}>Back</Button>
+              <Button variant="outline" size="sm" onClick={() => { setConfirmOpen(false); setPendingSave(false); }}>Back</Button>
               <Button
                 size="sm"
                 onClick={doSave}

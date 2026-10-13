@@ -45,21 +45,10 @@ import {
 import { fmtVatRate, taxCodeForRate } from "@/lib/pricing";
 import { getVatSettings } from "@/lib/vat-settings";
 
-// `agent` — a portal agent submitted for this customer (one of their clients): the
-// submission is still the customer's own, the agent is only recorded.
-export type SubmitActor =
-  | { source: "customer"; agent?: { partnerMkId: string; name: string; email: string | null } }
-  | { source: "admin"; email: string | null };
+export type SubmitActor = { source: "customer" } | { source: "admin"; email: string | null };
 
 export function actorLabel(actor: SubmitActor): string {
-  if (actor.source === "customer") return actor.agent ? `agent:${actor.agent.email ?? actor.agent.name}` : "customer";
-  return actor.email ? `admin:${actor.email}` : "admin";
-}
-
-// What `submittedBy` records: the admin's email, or the agent who acted for the customer.
-export function actorSubmittedBy(actor: SubmitActor): string | null {
-  if (actor.source === "admin") return actor.email;
-  return actor.agent ? `${actor.agent.name}${actor.agent.email ? ` <${actor.agent.email}>` : ""} (agent)` : null;
+  return actor.source === "customer" ? "customer" : actor.email ? `admin:${actor.email}` : "admin";
 }
 
 // Everything the service needs from Metakocka, injectable for tests.
@@ -161,15 +150,12 @@ async function markFailed(id: Types.ObjectId, error: string, buyerOrder: string)
 }
 
 // Build the put_document payload from the FROZEN snapshot: the order contains exactly
-// what the customer submitted, at the prices they saw. Each line goes out as the LIST
-// unit price the customer was shown (`unitPrice`, before the tier) plus the earned
-// volume tier as the line's `discount` % — MK then shows price and discount
-// separately, like a hand-entered order, instead of one opaque net figure (the
-// document carries no price list and no document-level discount). The VAT treatment
-// is the snapshot's too: lines go as the NET partner price + tax_factor (0 for a
-// zero-rated company, the country's rate for an individual — MK adds the VAT on top).
-// A legacy snapshot frozen on the RRP basis still goes as GROSS RRP + tax_factor (MK
-// backs the VAT out), exactly as it was submitted.
+// what the customer submitted, at the prices they saw, with each tab's earned volume
+// discount baked into the unit price (the document carries no price list and no
+// document-level discount, so the price must already be final). The VAT treatment is
+// the snapshot's too: a company's lines go as NET price + tax_factor (0 when zero-rated,
+// the rate when the layer charges companies), an individual's as the GROSS RRP + the
+// country's tax_factor (MK backs out the VAT).
 async function buildOrderInput(
   doc: IPreorderSubmission,
   port: MkOrderPort,
@@ -207,13 +193,10 @@ async function buildOrderInput(
     if (l.unitGross == null || l.unitNet == null) {
       return { ok: false, error: `Line ${l.code} carries no frozen VAT figures — unlock and resubmit.` };
     }
-    // List price = the frozen pre-tier unit (net partner price; gross RRP only on a
-    // legacy snapshot); the tier rides as `discount`.
-    const discount = l.tierPct && l.tierPct > 0 ? l.tierPct : undefined;
     lines.push(
       pricing.basis === "rrp"
-        ? { code: l.code, amount: l.qty, priceWithTax: l.unitPrice, ...(discount ? { discount } : {}), taxFactor: factor, tax }
-        : { code: l.code, amount: l.qty, price: l.unitPrice, ...(discount ? { discount } : {}), taxFactor: factor, tax },
+        ? { code: l.code, amount: l.qty, priceWithTax: l.unitGross, taxFactor: factor, tax }
+        : { code: l.code, amount: l.qty, price: l.unitNet, taxFactor: factor, tax },
     );
   }
 
@@ -222,14 +205,11 @@ async function buildOrderInput(
 
   const tierNotes = tabTotals
     .filter((t) => t.discount > 0)
-    .map(
-      (t) =>
-        `${t.tabName}: ${t.tier?.name || "volume discount"} -${t.discountPct}%${t.fixedQty > 0 ? ` (${t.fixedQty} fixed-price items not discounted)` : ""}`,
-    );
+    .map((t) => `${t.tabName}: ${t.tier?.name || "volume discount"} -${t.discountPct}%`);
   const vatNote =
     pricing.basis === "rrp"
       ? `VAT: ${CUSTOMER_KIND_LABELS[pricing.kind]}, RRP incl. ${fmtVatRate(pricing.vatRate)} VAT (${pricing.countryIso ?? "?"}, ${VAT_SOURCE_LABELS[pricing.vatSource].toLowerCase()})`
-      : `VAT: ${CUSTOMER_KIND_LABELS[pricing.kind]}, partner prices excl. VAT, ${fmtVatRate(pricing.vatRate)} ${pricing.vatRate > 0 ? `added (${pricing.countryIso ?? "?"}, ${VAT_SOURCE_LABELS[pricing.vatSource].toLowerCase()})` : `(${VAT_SOURCE_LABELS[pricing.vatSource].toLowerCase()})`}`;
+      : `VAT: ${CUSTOMER_KIND_LABELS[pricing.kind]}, partner prices excl. VAT, ${fmtVatRate(pricing.vatRate)} ${pricing.vatRate > 0 ? "added" : `(${VAT_SOURCE_LABELS[pricing.vatSource].toLowerCase()})`}`;
   const notes =
     [doc.terms?.comment?.trim(), tierNotes.length ? `Volume discounts — ${tierNotes.join("; ")}` : "", vatNote].filter(Boolean).join("\n") ||
     undefined;

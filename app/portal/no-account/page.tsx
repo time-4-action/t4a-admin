@@ -1,14 +1,14 @@
-import { getPortalIdentityEmail } from "@/lib/portal";
+import { auth0 } from "@/lib/auth";
 import { MailQuestion } from "lucide-react";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Shown when a logged-in user's email does not match a Metakocka partner. They
-// are authenticated but have no documents to show. (A super-admin viewing the
-// portal as another user lands here with THAT user's email.)
+// are authenticated but have no documents to show.
 export default async function NoAccountPage() {
-  const email = await getPortalIdentityEmail();
+  const session = await auth0.getSession();
+  const email = session?.user?.email;
 
   return (
     <div className="flex h-full items-center justify-center px-4">

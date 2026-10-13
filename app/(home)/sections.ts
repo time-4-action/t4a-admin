@@ -13,6 +13,7 @@ import {
   Mail,
   Folder,
   Sparkles,
+  KeyRound,
   Cog,
   Handshake,
   Boxes,
