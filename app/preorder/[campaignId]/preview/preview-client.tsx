@@ -357,7 +357,7 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
               {!activeTab ? (
                 <div className="text-center text-[13px] text-muted-foreground py-16">This sheet has no tabs yet.</div>
               ) : mode === "grid" ? (
-                <PreorderGridTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={campaign.pricing} bare searchable />
+                <PreorderGridTab tab={activeTab} tabs={campaign.tabs} quantities={quantities} onQty={setQty} currency={currency} pricing={campaign.pricing} bare searchable />
               ) : (
                 <div className="p-4">
                   <PreorderGuidedTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={campaign.pricing} />

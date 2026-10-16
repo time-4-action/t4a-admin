@@ -813,10 +813,10 @@ export default function FillClient({ campaignId, account = "" }: { campaignId: s
                   bare
                 />
               ) : (
-                <PreorderGridTab tab={activeTab} quantities={quantities} currency={currency} readOnly onlyFilled pricing={sheet.pricing} bare />
+                <PreorderGridTab tab={activeTab} tabs={sheet.tabs} quantities={quantities} currency={currency} readOnly onlyFilled pricing={sheet.pricing} bare />
               )
             ) : mode === "grid" ? (
-              <PreorderGridTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={sheet.pricing} bare searchable />
+              <PreorderGridTab tab={activeTab} tabs={sheet.tabs} quantities={quantities} onQty={setQty} currency={currency} pricing={sheet.pricing} bare searchable />
             ) : (
               <div className="p-4">
                 <PreorderGuidedTab tab={activeTab} quantities={quantities} onQty={setQty} currency={currency} pricing={sheet.pricing} />
@@ -1056,8 +1056,8 @@ function RegistrationBanner({
         <div className="flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
           <div className="min-w-0 flex-1">
-            <p className="font-medium">Your preorder is saved, but we couldn&rsquo;t register it with our order system yet.</p>
-            <p className="text-[12px] mt-0.5 text-amber-800/80 dark:text-amber-300/80">Nothing is lost — you can retry now, or we will register it for you shortly.</p>
+            <p className="font-medium">Your preorder has been submitted.</p>
+            <p className="text-[12px] mt-0.5 text-amber-800/80 dark:text-amber-300/80">We will review and confirm it. Once it is confirmed, you will see it here on the platform.</p>
           </div>
           {registration.canRetry && (
             <Button size="sm" variant="outline" onClick={onRetry} disabled={busy} className="shrink-0">
