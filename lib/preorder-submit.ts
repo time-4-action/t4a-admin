@@ -18,6 +18,7 @@ import { connectDB, PreorderCampaign, PreorderSubmission, loadEffectiveCampaignF
 import { getMkCustomer, effectiveCountryIso, customerKind } from "@/lib/mk-customers";
 import { getPartnerById } from "@/lib/metakocka";
 import { getVatSettings } from "@/lib/vat-settings";
+import { deliveryDateIso } from "@/lib/delivery-date";
 import { actorSubmittedBy, registerSalesOrder, type SubmitActor, type RegisterResult } from "@/lib/preorder-mk";
 import type { MkOrderPort } from "@/lib/preorder-mk";
 import { buildCommercialSnapshot } from "@/lib/preorder-snapshot";
@@ -125,7 +126,7 @@ export async function saveOrSubmitPreorder(input: SubmitInput): Promise<SubmitRe
     shippingAddress: input.terms?.shippingAddress,
     country: input.terms?.country,
     phone: input.terms?.phone,
-    deliveryDate: input.terms?.deliveryDate ?? null,
+    deliveryDate: deliveryDateIso(input.terms?.deliveryDate),
     comment: input.terms?.comment,
   };
   const termsDoc = {
