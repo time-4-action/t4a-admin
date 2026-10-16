@@ -58,7 +58,7 @@ import {
   type PricingContext,
   type PriceBasis,
 } from "@/types/preorder";
-import { fmtVatRate, vatIsMissing, type OrderVatTotals } from "@/lib/pricing";
+import { fmtVatRate, fromCents, pctOfCents, toCents, vatIsMissing, type OrderVatTotals } from "@/lib/pricing";
 
 export function fmtMoney(amount: number, currency = "EUR"): string {
   try {
@@ -233,6 +233,7 @@ export function PreorderGridTab({
   pricing,
   bare = false,
   searchable = false,
+  tabs,
 }: {
   tab: PreorderTab;
   quantities: QtyMap;
@@ -247,7 +248,13 @@ export function PreorderGridTab({
   pricing?: PricingContext | null; // the customer's price basis (campaign.pricing); partner when absent
   bare?: boolean; // no border / radius — the caller frames it
   searchable?: boolean; // a search box above the table (name / SKU / group)
+  tabs?: PreorderTab[]; // the whole sheet: when given, row totals show the reached volume discount
 }) {
+  // The tier is measured on the whole order, so it needs every tab, not just this one.
+  const discountPct = useMemo(
+    () => (tabs ? computeTabTotals({ tabs, pricing: pricing ?? null }, quantities).find((t) => t.tabId === tab.id)?.discountPct ?? 0 : 0),
+    [tabs, pricing, quantities, tab.id],
+  );
   const th = "text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-2";
   const basis: PriceBasis = pricing?.basis ?? "partner";
   const [search, setSearch] = useState("");
@@ -317,6 +324,7 @@ export function PreorderGridTab({
               renderQty={renderQty}
               hasExtra={!!extraHeader}
               basis={basis}
+              discountPct={discountPct}
             />
           ))}
           {groups.every((g) => g.rows.length === 0) && (
@@ -356,6 +364,7 @@ function GroupRows({
   renderQty,
   hasExtra,
   basis,
+  discountPct = 0,
 }: {
   solo?: boolean;
   separate?: boolean;
@@ -370,6 +379,7 @@ function GroupRows({
   renderQty?: (rowId: string, qty: number) => ReactNode;
   hasExtra: boolean;
   basis: PriceBasis;
+  discountPct?: number; // the reached volume discount; fixed-price rows never get it
 }) {
   if (rows.length === 0) return null;
   const span = 6 + (hasExtra ? 1 : 0);
@@ -392,6 +402,8 @@ function GroupRows({
         const qty = quantities[r.id] || 0;
         const unit = rowUnitPrice(r, basis);
         const total = qty * unit;
+        const pct = r.fixedPrice ? 0 : discountPct;
+        const discounted = pct > 0 ? fromCents(qty * (toCents(unit) - pctOfCents(toCents(unit), pct))) : total;
         const partnerShown = r.discountedPrice ?? r.partnerPrice ?? null;
         const priceCell = (v: number | null, active: boolean) => (
           <td className={cn("px-2 py-1.5 text-right tabular-nums", active ? "text-foreground font-medium" : "text-muted-foreground")}>
@@ -456,7 +468,20 @@ function GroupRows({
                 </div>
               )}
             </td>
-            <td className="px-2 pr-4 py-1.5 text-right tabular-nums font-medium">{total > 0 ? fmtMoney(total, currency) : "—"}</td>
+            <td className="px-2 pr-4 py-1.5 text-right tabular-nums font-medium">
+              {total > 0 ? (
+                discounted < total ? (
+                  <span className="inline-flex flex-col items-end leading-tight">
+                    <span className="text-[10px] font-normal text-muted-foreground line-through">{fmtMoney(total, currency)}</span>
+                    <span className="text-lime-700 dark:text-lime-400">{fmtMoney(discounted, currency)}</span>
+                  </span>
+                ) : (
+                  fmtMoney(total, currency)
+                )
+              ) : (
+                "—"
+              )}
+            </td>
             {renderExtraCell && <td className="px-2 py-1.5">{renderExtraCell(r.id)}</td>}
           </tr>
         );
