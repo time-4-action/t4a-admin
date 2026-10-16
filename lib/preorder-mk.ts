@@ -43,6 +43,7 @@ import {
   type MkOrderState,
 } from "@/types/preorder";
 import { fmtVatRate, taxCodeForRate } from "@/lib/pricing";
+import { mkDeliveryDeadline } from "@/lib/delivery-date";
 import { getVatSettings } from "@/lib/vat-settings";
 
 // `agent` — a portal agent submitted for this customer (one of their clients): the
@@ -234,7 +235,7 @@ async function buildOrderInput(
     [doc.terms?.comment?.trim(), tierNotes.length ? `Volume discounts — ${tierNotes.join("; ")}` : "", vatNote].filter(Boolean).join("\n") ||
     undefined;
   const season = campaignDoc.season?.trim() || campaignDoc.title;
-  const deliveryDeadline = doc.terms?.deliveryDate ? new Date(doc.terms.deliveryDate).toISOString().slice(0, 10) : undefined;
+  const deliveryDeadline = mkDeliveryDeadline(doc.terms?.deliveryDate);
 
   return {
     ok: true,

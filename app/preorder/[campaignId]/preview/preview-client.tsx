@@ -52,6 +52,7 @@ import {
 } from "@/app/preorder/preorder-shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DeliveryDateInput } from "@/components/ui/delivery-date-input";
 import { CampaignHeader } from "@/app/preorder/[campaignId]/campaign-nav";
 import { MarketChip, SourceBadge, WarningList } from "@/app/preorder/preorder-badges";
 import { Flag } from "@/components/flag";
@@ -412,10 +413,9 @@ export default function PreviewClient({ campaignId }: { campaignId: string }) {
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Delivery &amp; note</div>
                 <div>
                   <label className="text-[11px] font-medium text-muted-foreground">Requested delivery <span className="font-normal">(optional)</span></label>
-                  <Input
-                    type="date"
-                    value={terms.deliveryDate ? terms.deliveryDate.slice(0, 10) : ""}
-                    onChange={(e) => setTerms((t) => ({ ...t, deliveryDate: e.target.value ? new Date(e.target.value).toISOString() : null }))}
+                  <DeliveryDateInput
+                    value={terms.deliveryDate}
+                    onChange={(iso) => setTerms((t) => ({ ...t, deliveryDate: iso }))}
                     className="mt-1 h-8 text-[12px]"
                   />
                 </div>

@@ -1057,7 +1057,7 @@ export type SalesOrderInput = {
   buyerOrder?: string;
   extraColumns?: { name: string; value: string }[];
   changeLogNote?: string; // document_change_log_notes (≤ 50 chars)
-  deliveryDeadline?: string; // yyyy-mm-dd
+  deliveryDeadline?: string; // dd.mm.yyyy (MK rejects a bare yyyy-mm-dd, like doc_date)
   // Each line references an existing product by code with an EXPLICIT unit price locked
   // at order time (we don't put a price list on the document) and its VAT factor:
   //  • consumer lines carry the GROSS price (priceWithTax = RRP) and the country's
