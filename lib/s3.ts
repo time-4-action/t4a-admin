@@ -21,7 +21,7 @@ export function s3Configured(): boolean {
 function getClient(): S3Client {
   client ??= new S3Client({
     endpoint: process.env.S3_ENDPOINT,
-    region: process.env.S3_REGION ?? "fsn1",
+    region: process.env.S3_REGION ?? "hel1",
     forcePathStyle: true, // Hetzner
     requestChecksumCalculation: "WHEN_REQUIRED", // Hetzner doesn't support CRC32 checksums
     responseChecksumValidation: "WHEN_REQUIRED",
