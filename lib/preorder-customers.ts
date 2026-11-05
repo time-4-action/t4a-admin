@@ -11,11 +11,12 @@ import { PreorderAccess } from "@/models/preorder-access";
 import { PreorderSubmission } from "@/models/preorder-submission";
 import type { IPreorderCampaign } from "@/models/preorder-campaign";
 import { MkCustomer, type IMkCustomer } from "@/models/mk-customer";
-import { connectDB, toCampaignAdminView, partnerContextFor } from "@/lib/preorder";
+import { PreorderCampaign } from "@/models/preorder-campaign";
+import { connectDB, toCampaignAdminView, partnerContextFor, totalsView } from "@/lib/preorder";
 import { resolveProvenanceOnly } from "@/lib/preorder-effective";
 import { countMkCustomersByCountry, effectiveCountryIso, listMkCustomers, toMkCustomerView, type CustomerKind, type MkCustomerView } from "@/lib/mk-customers";
 import { allCountryNames, countryName } from "@/lib/countries";
-import { submissionStage, type MarketColor, type SubmissionStage } from "@/types/preorder";
+import { submissionStage, type MarketColor, type SubmissionStage, type SubmissionStatus } from "@/types/preorder";
 
 export type CustomerRow = MkCustomerView & {
   market: { id: string; name: string; color: MarketColor; source: "country" | "manual" } | null;
@@ -32,10 +33,81 @@ export type CustomerRow = MkCustomerView & {
 
 // Per-customer preorder activity across EVERY campaign (Preorder → Customers).
 export type CustomerActivity = {
-  campaigns: { id: string; title: string; season: string | null; status: string; unlocked: boolean; stage: SubmissionStage | null }[];
+  campaigns: {
+    id: string;
+    title: string;
+    season: string | null;
+    status: string; // the CAMPAIGN's status
+    currency: string | null;
+    unlocked: boolean;
+    stage: SubmissionStage | null;
+    submissionStatus: SubmissionStatus | null; // null = unlocked, nothing started
+    totalNet: number | null; // the submission's net total (null without a submission)
+  }[];
   unlocked: number;
   submitted: number;
 };
+
+// Which campaigns each customer unlocked / started / submitted, across EVERY
+// campaign (Preorder → Customers and the agent API). Mongo only.
+export async function customerPreorderActivity(ids: string[]): Promise<Record<string, CustomerActivity>> {
+  const activity: Record<string, CustomerActivity> = {};
+  if (ids.length === 0) return activity;
+  await connectDB();
+  const [access, subs] = await Promise.all([
+    PreorderAccess.find({ partnerMkId: { $in: ids } }).select("campaignId partnerMkId").lean().exec(),
+    PreorderSubmission.find({ partnerMkId: { $in: ids } })
+      .select("campaignId partnerMkId status mkOrder mkSalesOrder resultPublishedToCustomer totals")
+      .lean()
+      .exec(),
+  ]);
+  const campaignIds = Array.from(new Set([...access, ...subs].map((x) => String(x.campaignId))));
+  const campaigns = campaignIds.length
+    ? await PreorderCampaign.find({ _id: { $in: campaignIds.map((id) => new Types.ObjectId(id)) } }).select("title season status currency").lean().exec()
+    : [];
+  const campaignById = new Map(campaigns.map((c) => [String(c._id), c]));
+
+  const entry = (pid: string, cid: string) => {
+    const a = (activity[pid] ??= { campaigns: [], unlocked: 0, submitted: 0 });
+    let row = a.campaigns.find((c) => c.id === cid);
+    if (!row) {
+      const c = campaignById.get(cid);
+      row = {
+        id: cid,
+        title: c?.title ?? "Deleted campaign",
+        season: c?.season ?? null,
+        status: c?.status ?? "closed",
+        currency: c?.currency ?? null,
+        unlocked: false,
+        stage: null,
+        submissionStatus: null,
+        totalNet: null,
+      };
+      a.campaigns.push(row);
+    }
+    return { a, row };
+  };
+  for (const g of access) {
+    const { a, row } = entry(g.partnerMkId, String(g.campaignId));
+    if (!row.unlocked) {
+      row.unlocked = true;
+      a.unlocked += 1;
+    }
+  }
+  for (const s of subs) {
+    const { a, row } = entry(s.partnerMkId, String(s.campaignId));
+    row.stage = submissionStage({
+      status: s.status,
+      mkOrder: s.mkOrder?.state ? { state: s.mkOrder.state, buyerOrder: s.mkOrder.buyerOrder ?? "", attempts: s.mkOrder.attempts ?? 0 } : null,
+      mkSalesOrder: s.mkSalesOrder?.mkId ? { mkId: s.mkSalesOrder.mkId, countCode: s.mkSalesOrder.countCode } : null,
+      resultPublishedToCustomer: !!s.resultPublishedToCustomer,
+    });
+    row.submissionStatus = s.status;
+    row.totalNet = totalsView(s.totals).net ?? null;
+    if (s.status !== "draft") a.submitted += 1;
+  }
+  return activity;
+}
 
 export type CustomersQuery = {
   q?: string;

@@ -136,3 +136,12 @@ export function isPortalPath(pathname: string): boolean {
     pathname.startsWith("/api/portal/")
   );
 }
+
+// The read-only machine API for the T4A agent (app/api/agent/*). The middleware
+// lets EXACTLY these paths through without an Auth0 session — each route checks
+// `Authorization: Bearer $AGENT_READ_TOKEN` itself (lib/agent-api.ts). Exact
+// segment match: `/api/agents`, `/api/agent-x` or `/api/agentx` are NOT agent
+// paths and stay behind the normal session gate.
+export function isAgentApiPath(pathname: string): boolean {
+  return pathname === "/api/agent" || pathname.startsWith("/api/agent/");
+}

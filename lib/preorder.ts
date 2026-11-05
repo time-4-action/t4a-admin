@@ -99,7 +99,7 @@ export function toAccessSummary(doc: IPreorderAccess, countryIso?: string | null
 // Totals as the wire sees them. `net` is DERIVED, never read back from the document:
 // submissions saved before volume discounts existed carry the schema default (0), which
 // would otherwise read as a free order.
-function totalsView(
+export function totalsView(
   t?: { qty?: number; amount?: number; discount?: number; net?: number } | null,
 ): PreorderSubmissionTotals {
   const qty = t?.qty ?? 0;
