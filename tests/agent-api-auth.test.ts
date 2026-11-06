@@ -190,6 +190,7 @@ describe("the agent API surface: reads are GET-only, writes are POST-only", () =
     "portal-agents/[partnerMkId]/clients",
     "preorders/access",
     "preorders/campaigns/[id]/status",
+    "preorders/campaigns/[id]/terms",
     "preorders/submissions/[id]/action",
   ];
 

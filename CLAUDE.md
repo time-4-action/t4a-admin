@@ -1210,6 +1210,7 @@ the lib refuses), 502 `{error}` (Metakocka / mk-automation failed).
 |---|---|---|
 | `/api/agent/preorders/campaigns/[id]/status` | `{actor, status: draft\|open\|closed, deadline?: ISO\|null}` | `{campaign}` (summary as in GET). Actor only logged (the UI records none on campaigns) |
 | `/api/agent/preorders/submissions/[id]/action` | `{actor, action, note?, reprice?}`; `action` ∈ `create-mk-order` (also retries; `reprice?`), `publish-result`, `unpublish-result`, `unlock` (`note` = detach reason; MK order detached, never deleted), `dismiss-unlock-request` | The submission exactly as `GET /api/agent/preorders/submissions/[id]` |
+| `/api/agent/preorders/campaigns/[id]/terms` | `{actor, layer: campaign\|market\|customer, marketId?, partnerMkId?, tiers?: [{tabId, tiers: [{name?, minAmount, discountPct}] \| null}], set?: {partnerPricelist?, currency?, deadline?, minOrderAmount?, note?}, inherit?: [field], removeRule?}` | `{campaign, tabs, markets, customerRules, pricelistRefreshed}`. Volume-discount ladders + commercial terms on one layer (`lib/agent-preorder-terms.ts`: `sanitizeTiers`, `upsertMarket`, `upsertCustomerRule`, `deleteCustomerRule`, `refreshPriceBooks` for a newly used price list). Campaign layer: ladders only. `tiers: null` / `inherit` = back to the parent layer. Submitted preorders keep their frozen snapshot (reprice via `create-mk-order`) |
 | `/api/agent/preorders/access` | `{actor, campaignId, partnerMkId, grant: boolean}` | `{campaignId, partnerMkId, access}`; revoke 409 once the customer has a preorder |
 | `/api/agent/automation/run` | `{actor, type: warehouse\|products\|customers\|pricelists, dryRun?}` (`dryRun` customers / pricelists only) | mk-automation's JSON (202); 409 already running; 502 upstream |
 | `/api/agent/customers/sync` | `{actor}` | 202 `{started, sync}`; 409 `{error, sync}` already running |
@@ -1218,8 +1219,11 @@ the lib refuses), 502 `{error}` (Metakocka / mk-automation failed).
 
 Deliberately **not** exposed to the agent: deleting campaigns / submissions /
 portal agents, deleting an MK order on unlock, Auth0 users / roles / access
-types, impersonation, VAT settings, pricing sheets / markets / customer rules /
-price books, AI spending limits, builder presets, partner-portal sources.
+types, impersonation, VAT settings and VAT overrides, pricing-sheet rows and
+products, creating / deleting / reordering markets and their countries,
+assortment (hidden / exposed rows), AI spending limits, builder presets,
+partner-portal sources. (Discount ladders and the commercial terms of the
+campaign / market / customer layers ARE exposed: `terms` above.)
 
 ### Environment Variables
 
