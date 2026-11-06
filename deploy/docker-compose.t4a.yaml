@@ -1,0 +1,40 @@
+# Production compose for /srv/admin on t4a (Hetzner; time-4-action/t4a-infra, servers/t4a).
+# Save it there as docker-compose.yaml, next to .env.local. CI exports
+# APP_IMAGE=ghcr.io/time-4-action/t4a-admin:<sha> (DEPLOY_DIR=/srv/admin on the `production` environment);
+# without it this runs :latest. The server never builds; copy changes to this file by hand.
+#
+# Traefik (/srv/edge) routes admin.time-4-action.com and b2b.time-4-action.com (the B2B customer portal,
+# /portal) here, behind Cloudflare. MongoDB is t4a's shared one (/srv/mongo): MONGODB_URI in .env.local is
+# mongodb://admin:...@mongo:27017/t4a.
+services:
+  t4a-admin:
+    image: ${APP_IMAGE:-ghcr.io/time-4-action/t4a-admin:latest}
+    # Loopback only, for CI's health check (127.0.0.1:3005/healthz). Docker-published ports skip ufw, so
+    # never 0.0.0.0.
+    ports:
+      - "127.0.0.1:3005:3005"
+    env_file:
+      - .env.local
+    environment:
+      PORT: 3005
+      AUTH0_BASE_URL: ${AUTH0_BASE_URL:-https://admin.time-4-action.com}
+    mem_limit: 1g
+    networks:
+      - edge
+      - mongo
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=edge
+      - traefik.http.routers.admin.rule=Host(`admin.time-4-action.com`) || Host(`b2b.time-4-action.com`)
+      - traefik.http.services.admin.loadbalancer.server.port=3005
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    restart: unless-stopped
+
+networks:
+  edge:
+    external: true
+  mongo:
+    external: true

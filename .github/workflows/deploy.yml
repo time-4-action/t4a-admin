@@ -106,7 +106,8 @@ jobs:
           envs: GHCR_USER,GHCR_TOKEN
           script: |
             set -u
-            cd /data/stack/apps/time-4-action/admin || exit 1
+            # DEPLOY_DIR: a variable of the `production` environment (t4a: /srv/admin, docs/deployment.md).
+            cd ${{ vars.DEPLOY_DIR || '/data/stack/apps/time-4-action/admin' }} || exit 1
             SHA=${{ github.sha }}
             NEW=${{ env.IMAGE }}:$SHA
             SVC=t4a-admin
