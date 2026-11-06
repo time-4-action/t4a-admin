@@ -10,6 +10,7 @@ import {
 } from "@/lib/preorder";
 import type { CampaignStatus, PreorderTab } from "@/types/preorder";
 import { normalizeVatOverrides } from "@/lib/pricing";
+import { applyCampaignStatus } from "@/lib/preorder-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,10 +52,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   if (typeof body.currency === "string" && body.currency.trim()) {
     doc.currency = body.currency.trim();
   }
-  if (body.status && ["draft", "open", "closed"].includes(body.status)) {
-    doc.status = body.status;
-  }
-  if ("deadline" in body) doc.deadline = body.deadline ? new Date(body.deadline) : null;
+  applyCampaignStatus(doc, body);
   if ("rrpPricelist" in body) doc.rrpPricelist = body.rrpPricelist?.trim() || null;
   if ("partnerPricelist" in body) doc.partnerPricelist = body.partnerPricelist?.trim() || null;
   if (Array.isArray(body.tabs)) {

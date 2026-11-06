@@ -81,6 +81,11 @@ MONGODB_URI=mongodb+srv://...
 # Generate with: openssl rand -hex 32  (unset = the agent API answers 503)
 AGENT_READ_TOKEN=
 
+# Write token for the T4A agent: the ONLY token POST /api/agent/* accepts (it also
+# works for the GET routes). Every agent write is approved by a person in the agent
+# app first. Generate separately: openssl rand -hex 32  (unset = writes answer 503)
+AGENT_WRITE_TOKEN=
+
 # Optional
 NEXT_PUBLIC_AI_ROLE_NAME=AI User
 NEXT_PUBLIC_DEV_ROLE_NAME=dev

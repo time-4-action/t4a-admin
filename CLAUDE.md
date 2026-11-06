@@ -1144,20 +1144,27 @@ without them the route answers 503.
 | `/stats` | GET | Dashboard KPIs: total cost, active users, conversations today, cost by user/model |
 | `/usage` | GET | Full token-level usage table per user per model |
 
-### Agent API (`app/api/agent/`, read-only, machine auth)
+### Agent API (`app/api/agent/`, machine auth)
 
-A read-only JSON surface for the **T4A AI agent** (t4a-agent, a server-side app
-with no Auth0 session) so it can read internal admin data. **GET only** (no other
-method is exported; Next answers 405). Auth: `Authorization: Bearer
-$AGENT_READ_TOKEN`, compared in constant time (`lib/agent-api.ts`; `agentRoute()`
-wraps every handler): token unset on the server → 503, missing / wrong → 401.
+A JSON surface for the **T4A AI agent** (t4a-agent, a server-side app with no
+Auth0 session) so it can read internal admin data and make a narrow set of
+changes. Read routes export **GET only**, write routes **POST only** (Next answers
+405 to anything else; no DELETE / PUT / PATCH anywhere — the test enforces both
+lists). Tokens are compared in constant time (`lib/agent-api.ts`):
+
+- **GET** (`agentRoute()`): `Authorization: Bearer $AGENT_READ_TOKEN` **or**
+  `$AGENT_WRITE_TOKEN`; neither configured → 503, missing / wrong → 401.
+- **POST** (`agentWriteRoute()`): **only** `$AGENT_WRITE_TOKEN` (the read token →
+  401); unset → 503.
+
 Every response is `Cache-Control: no-store`.
 
 The middleware lets **exactly** `/api/agent` and `/api/agent/…` through, before
 the Auth0 middleware (`isAgentApiPath` in `lib/access.ts`, first check in
 `lib/proxy.ts`); `/api/agents`, `/api/agent-x` stay session-gated (tested in
 `tests/agent-api-auth.test.ts`). So **every route under `app/api/agent/` must be
-wrapped in `agentRoute()`** and stay read-only — the test fails on a non-GET export.
+wrapped in `agentRoute()` (GET) or `agentWriteRoute()` (POST)**; the test pins the
+exact list of read and write routes and fails on any other method export.
 
 Never returned: campaign `shareToken`, tokens / keys (proxied partner-portal and
 mk-automation JSON also goes through `scrubSecrets`), impersonation state,
@@ -1179,6 +1186,39 @@ builder notes / version history. Read models reuse the UI's mappers
 | `/api/agent/automation` | mk-automation `/api/v1/status` + `/api/v1/runs?limit=20`; 502 on failure |
 | `/api/agent/partners`, `/api/agent/partners/[sub]` | Partners list (+ portal `sync`), one partner (+ activity) |
 | `/api/agent/builder-presets?builder=` | Saved builds: `config` + parsed `ratings` (radar axes / range bands per product) |
+
+#### Agent writes (POST, `AGENT_WRITE_TOKEN`)
+
+Every write is approved by a person in the agent app before it is sent. Every body
+carries `actor: { sub, name, email }` (that person; 400 `{error, details}` if
+missing / invalid). The actor is recorded as **`"<name> (T4A agent)"`** wherever the
+admin UI records its acting user (`SubmitActor` `source: "t4a-agent"` → MK order
+`createdBy`, `resultPublishedBy`, detached-order `detachedBy`; portal agent
+`updatedBy` / client `addedBy`), and `agentWriteRoute()` logs one
+`[agent-write] POST <path> target=<id> actor=<sub> status=<n>` line per write.
+Each route calls the **same lib function as the admin UI's route** —
+`lib/preorder-admin.ts` (`applyCampaignStatus`, `patchSubmission`,
+`registerSubmissionOrder`, `publishSubmission`, `grant/revokeCampaignAccess`),
+`runMkAutomation` (`lib/mk-api.ts`), `startMkCustomerSync` /
+`updateMkCustomerManual` (`lib/mk-customers.ts`), `updateAgentClients` → `saveAgent`
+(`lib/portal-agents.ts`) — so validation, Metakocka side effects and state rules
+are identical. Errors: 400 `{error, details?}`, 404 `{error}`, 409 `{error}` (state
+the lib refuses), 502 `{error}` (Metakocka / mk-automation failed).
+
+| Route | Body | Result |
+|---|---|---|
+| `/api/agent/preorders/campaigns/[id]/status` | `{actor, status: draft\|open\|closed, deadline?: ISO\|null}` | `{campaign}` (summary as in GET). Actor only logged (the UI records none on campaigns) |
+| `/api/agent/preorders/submissions/[id]/action` | `{actor, action, note?, reprice?}`; `action` ∈ `create-mk-order` (also retries; `reprice?`), `publish-result`, `unpublish-result`, `unlock` (`note` = detach reason; MK order detached, never deleted), `dismiss-unlock-request` | The submission exactly as `GET /api/agent/preorders/submissions/[id]` |
+| `/api/agent/preorders/access` | `{actor, campaignId, partnerMkId, grant: boolean}` | `{campaignId, partnerMkId, access}`; revoke 409 once the customer has a preorder |
+| `/api/agent/automation/run` | `{actor, type: warehouse\|products\|customers\|pricelists, dryRun?}` (`dryRun` customers / pricelists only) | mk-automation's JSON (202); 409 already running; 502 upstream |
+| `/api/agent/customers/sync` | `{actor}` | 202 `{started, sync}`; 409 `{error, sync}` already running |
+| `/api/agent/customers/[partnerMkId]` | `{actor, countryIso: "SI"\|null}` | `{customer}`; sets `countryIsoManual` |
+| `/api/agent/portal-agents/[partnerMkId]/clients` | `{actor, add?: [mkId], remove?: [mkId], note?}` | `{agent}`; existing agents only (404); added ids must be in the directory (400 `details.unknown`) |
+
+Deliberately **not** exposed to the agent: deleting campaigns / submissions /
+portal agents, deleting an MK order on unlock, Auth0 users / roles / access
+types, impersonation, VAT settings, pricing sheets / markets / customer rules /
+price books, AI spending limits, builder presets, partner-portal sources.
 
 ### Environment Variables
 
@@ -1213,6 +1253,7 @@ MK_HOME_COUNTRY              # ISO-2 home country for domestic MK partners witho
 MK_PARTNER_SYNC_MODE         # Customer directory sync strategy: all (default) | sharded
 AUTH0_BASE_URL               # Production base URL (set by docker-compose)
 AGENT_READ_TOKEN             # Read-only bearer token for the T4A agent (/api/agent/*); `openssl rand -hex 32`. Unset = 503
+AGENT_WRITE_TOKEN            # Write bearer token for the T4A agent (the only token POST /api/agent/* accepts; also valid for GET). Unset = writes 503
 ```
 
 Partners module also requires `PARTNER_API_BASE` and `PARTNER_API_TOKEN` (both

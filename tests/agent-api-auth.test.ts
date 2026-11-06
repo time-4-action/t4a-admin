@@ -1,5 +1,5 @@
 // The agent API's gate: the middleware exclusion (lib/proxy.ts + isAgentApiPath),
-// the bearer-token check (lib/agent-api.ts) and the GET-only surface.
+// the bearer-token checks (lib/agent-api.ts) and the exact GET / POST surface.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
@@ -13,9 +13,10 @@ vi.mock("@/lib/auth", () => ({ auth0: auth0Mock }));
 
 import { proxy } from "@/lib/proxy";
 import { isAgentApiPath } from "@/lib/access";
-import { agentAuth, parsePaging, scrubSecrets, tokensEqual } from "@/lib/agent-api";
+import { agentAuth, agentWriteAuth, parseActor, parsePaging, scrubSecrets, tokensEqual } from "@/lib/agent-api";
 
 const TOKEN = "a".repeat(64);
+const WRITE_TOKEN = "b".repeat(64);
 
 describe("isAgentApiPath (exact segment match)", () => {
   it("matches /api/agent and everything below it", () => {
@@ -66,9 +67,15 @@ describe("middleware (lib/proxy.ts)", () => {
 
 describe("agentAuth (bearer token)", () => {
   const prev = process.env.AGENT_READ_TOKEN;
+  const prevWrite = process.env.AGENT_WRITE_TOKEN;
+  beforeEach(() => {
+    delete process.env.AGENT_WRITE_TOKEN;
+  });
   afterEach(() => {
     if (prev === undefined) delete process.env.AGENT_READ_TOKEN;
     else process.env.AGENT_READ_TOKEN = prev;
+    if (prevWrite === undefined) delete process.env.AGENT_WRITE_TOKEN;
+    else process.env.AGENT_WRITE_TOKEN = prevWrite;
   });
   const req = (auth?: string) => new Request("http://admin.test/api/agent/customers", { headers: auth ? { authorization: auth } : {} });
 
@@ -97,6 +104,35 @@ describe("agentAuth (bearer token)", () => {
     expect(agentAuth(req(`bearer  ${TOKEN}`))).toBeNull();
   });
 
+  it("GET also accepts the write token; either one alone is enough", () => {
+    process.env.AGENT_READ_TOKEN = TOKEN;
+    process.env.AGENT_WRITE_TOKEN = WRITE_TOKEN;
+    expect(agentAuth(req(`Bearer ${TOKEN}`))).toBeNull();
+    expect(agentAuth(req(`Bearer ${WRITE_TOKEN}`))).toBeNull();
+    expect(agentAuth(req("Bearer wrong"))?.status).toBe(401);
+    delete process.env.AGENT_READ_TOKEN;
+    expect(agentAuth(req(`Bearer ${WRITE_TOKEN}`))).toBeNull();
+    expect(agentAuth(req(`Bearer ${TOKEN}`))?.status).toBe(401);
+  });
+
+  it("POST (agentWriteAuth) accepts ONLY the write token: read token → 401, unset → 503", () => {
+    process.env.AGENT_READ_TOKEN = TOKEN;
+    expect(agentWriteAuth(req(`Bearer ${TOKEN}`))?.status).toBe(503);
+    process.env.AGENT_WRITE_TOKEN = WRITE_TOKEN;
+    expect(agentWriteAuth(req(`Bearer ${TOKEN}`))?.status).toBe(401);
+    for (const h of [undefined, "", WRITE_TOKEN, `Bearer ${WRITE_TOKEN}x`, "Bearer "]) {
+      expect(agentWriteAuth(req(h))?.status, String(h)).toBe(401);
+    }
+    expect(agentWriteAuth(req(`Bearer ${WRITE_TOKEN}`))).toBeNull();
+  });
+
+  it("parseActor requires sub, name and a valid email", () => {
+    expect(parseActor({ sub: "auth0|1", name: " Maja ", email: "maja@t4a.test" })).toEqual({ ok: true, actor: { sub: "auth0|1", name: "Maja", email: "maja@t4a.test" } });
+    for (const a of [undefined, null, "x", [], {}, { sub: "s", name: "n" }, { sub: "s", name: "", email: "e@x.y" }, { sub: "s", name: "n", email: "nope" }, { sub: 1, name: "n", email: "e@x.y" }]) {
+      expect(parseActor(a).ok, JSON.stringify(a)).toBe(false);
+    }
+  });
+
   it("tokensEqual compares exactly", () => {
     expect(tokensEqual("abc", "abc")).toBe(true);
     expect(tokensEqual("abc", "abd")).toBe(false);
@@ -118,7 +154,7 @@ describe("helpers", () => {
   });
 });
 
-describe("the agent API surface is GET-only", () => {
+describe("the agent API surface: reads are GET-only, writes are POST-only", () => {
   const root = path.resolve(__dirname, "../app/api/agent");
   const routeFiles: string[] = [];
   const walk = (dir: string) => {
@@ -129,40 +165,70 @@ describe("the agent API surface is GET-only", () => {
     }
   };
   walk(root);
+  const rel = (f: string) => path.relative(root, path.dirname(f)).split(path.sep).join("/");
 
-  it("has the expected routes", () => {
-    const rel = routeFiles.map((f) => path.relative(root, path.dirname(f)).split(path.sep).join("/")).sort();
-    expect(rel).toEqual([
-      "ai-usage",
-      "automation",
-      "builder-presets",
-      "customers",
-      "partners",
-      "partners/[sub]",
-      "portal-agents",
-      "preorders/campaigns",
-      "preorders/campaigns/[id]",
-      "preorders/submissions",
-      "preorders/submissions/[id]",
-    ]);
+  const READ_ROUTES = [
+    "ai-usage",
+    "automation",
+    "builder-presets",
+    "customers",
+    "partners",
+    "partners/[sub]",
+    "portal-agents",
+    "preorders/campaigns",
+    "preorders/campaigns/[id]",
+    "preorders/submissions",
+    "preorders/submissions/[id]",
+  ];
+  const WRITE_ROUTES = [
+    "automation/run",
+    "customers/[partnerMkId]",
+    "customers/sync",
+    "portal-agents/[partnerMkId]/clients",
+    "preorders/access",
+    "preorders/campaigns/[id]/status",
+    "preorders/submissions/[id]/action",
+  ];
+
+  it("has exactly the expected routes", () => {
+    expect(routeFiles.map(rel).sort()).toEqual([...READ_ROUTES, ...WRITE_ROUTES].sort());
   });
 
-  it("every route exports GET and no other method (Next answers 405 to the rest)", async () => {
+  it("read routes export GET only, write routes POST only (no DELETE / PUT / PATCH anywhere)", async () => {
     for (const f of routeFiles) {
       const mod = await import(f);
       const methods = Object.keys(mod).filter((k) => /^[A-Z]+$/.test(k));
-      expect(methods, f).toEqual(["GET"]);
+      expect(methods, f).toEqual(WRITE_ROUTES.includes(rel(f)) ? ["POST"] : ["GET"]);
     }
   });
 
   it("every route rejects a request without the token before doing any work", async () => {
     process.env.AGENT_READ_TOKEN = TOKEN;
+    process.env.AGENT_WRITE_TOKEN = WRITE_TOKEN;
     for (const f of routeFiles) {
       const mod = await import(f);
-      const res: Response = await mod.GET(new Request("http://admin.test/api/agent/x"), { params: Promise.resolve({ id: "x", sub: "x" }) });
+      const handler = mod.GET ?? mod.POST;
+      const init = mod.POST ? { method: "POST", body: "{}" } : {};
+      const res: Response = await handler(new Request("http://admin.test/api/agent/x", init), { params: Promise.resolve({ id: "x", sub: "x", partnerMkId: "x" }) });
       expect(res.status, f).toBe(401);
       expect(res.headers.get("cache-control"), f).toBe("no-store");
     }
     delete process.env.AGENT_READ_TOKEN;
+    delete process.env.AGENT_WRITE_TOKEN;
+  });
+
+  it("write routes refuse the read token (401)", async () => {
+    process.env.AGENT_READ_TOKEN = TOKEN;
+    process.env.AGENT_WRITE_TOKEN = WRITE_TOKEN;
+    for (const f of routeFiles.filter((x) => WRITE_ROUTES.includes(rel(x)))) {
+      const mod = await import(f);
+      const res: Response = await mod.POST(
+        new Request("http://admin.test/api/agent/x", { method: "POST", headers: { authorization: `Bearer ${TOKEN}` }, body: "{}" }),
+        { params: Promise.resolve({ id: "x", partnerMkId: "x" }) },
+      );
+      expect(res.status, f).toBe(401);
+    }
+    delete process.env.AGENT_READ_TOKEN;
+    delete process.env.AGENT_WRITE_TOKEN;
   });
 });

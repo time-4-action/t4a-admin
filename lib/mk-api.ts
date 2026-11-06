@@ -69,3 +69,26 @@ export async function callMkAutomation(
     clearTimeout(t);
   }
 }
+
+// ── run triggers ──────────────────────────────────────────────────────────────
+
+// The sync types mk-automation can be told to run now, and their trigger paths.
+export const MK_RUN_PATHS = {
+  warehouse: "/api/v1/warehouse/sync",
+  products: "/api/v1/products/sync",
+  customers: "/api/v1/customers/sync",
+  pricelists: "/api/v1/pricelists/sync",
+} as const;
+
+export type MkRunType = keyof typeof MK_RUN_PATHS;
+
+export function isMkRunType(type: unknown): type is MkRunType {
+  return typeof type === "string" && Object.prototype.hasOwnProperty.call(MK_RUN_PATHS, type);
+}
+
+// Trigger a sync now. The service responds 202 (started) or 409 (already running).
+// `dryRun` is forwarded (customer + pricelist syncs) to preview without writing.
+export function runMkAutomation(type: MkRunType, opts: { dryRun?: boolean } = {}): Promise<MkApiResponse> {
+  const path = MK_RUN_PATHS[type] + (opts.dryRun ? "?dryRun=true" : "");
+  return callMkAutomation(path, { method: "POST" });
+}
