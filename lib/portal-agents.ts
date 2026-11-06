@@ -10,7 +10,7 @@ import { connectDB } from "@/lib/mongodb";
 import { PortalAgent, type IPortalAgent } from "@/models/portal-agent";
 import { MkCustomer } from "@/models/mk-customer";
 import { getMkCustomersByIds, toMkCustomerView, type MkCustomerView } from "@/lib/mk-customers";
-import { normalizeAgentClients, type AgentClient, type PortalAgentView } from "@/types/portal-agent";
+import { MAX_AGENT_CLIENTS, normalizeAgentClients, type AgentClient, type PortalAgentView } from "@/types/portal-agent";
 
 function iso(d: Date | null | undefined): string | null {
   return d ? new Date(d).toISOString() : null;
@@ -91,6 +91,39 @@ export async function saveAgent(input: {
     .lean<IPortalAgent>()
     .exec();
   return toAgentView(doc!);
+}
+
+// Add / remove clients of an EXISTING agent (the rest of the list is kept) through
+// saveAgent, the Customers section's own save. Added clients must be in the
+// Metakocka customer directory (their name comes from there).
+export type AgentClientsChange = { add?: string[]; remove?: string[]; note?: string | null };
+
+export async function updateAgentClients(
+  partnerMkId: string,
+  change: AgentClientsChange,
+  actor: string | null,
+): Promise<{ ok: true; agent: PortalAgentView } | { ok: false; status: number; error: string; details?: unknown }> {
+  const existing = await getAgent(partnerMkId);
+  if (!existing) return { ok: false, status: 404, error: "not found" };
+  const remove = new Set((change.remove ?? []).map((id) => id.trim()));
+  const kept = existing.clients.filter((c) => !remove.has(c.partnerMkId));
+  const have = new Set(kept.map((c) => c.partnerMkId));
+  const toAdd = Array.from(new Set((change.add ?? []).map((id) => id.trim()).filter((id) => id && !have.has(id))));
+  if (toAdd.includes(partnerMkId)) return { ok: false, status: 400, error: "An agent cannot be their own client" };
+  const directory = await getMkCustomersByIds(toAdd);
+  const unknown = toAdd.filter((id) => !directory.has(id));
+  if (unknown.length) {
+    return { ok: false, status: 400, error: "Unknown customer(s): not in the Metakocka customer directory", details: { unknown } };
+  }
+  const clients = [
+    ...kept.map((c) => ({ partnerMkId: c.partnerMkId, partnerName: c.partnerName })),
+    ...toAdd.map((id) => ({ partnerMkId: id, partnerName: directory.get(id)!.name })),
+  ];
+  if (clients.length > MAX_AGENT_CLIENTS) {
+    return { ok: false, status: 400, error: "An agent can have at most " + MAX_AGENT_CLIENTS + " clients" };
+  }
+  const agent = await saveAgent({ partnerMkId, partnerName: existing.partnerName, clients, note: change.note, actor });
+  return { ok: true, agent };
 }
 
 export async function deleteAgent(partnerMkId: string): Promise<boolean> {

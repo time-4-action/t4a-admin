@@ -48,18 +48,23 @@ import { getVatSettings } from "@/lib/vat-settings";
 
 // `agent` — a portal agent submitted for this customer (one of their clients): the
 // submission is still the customer's own, the agent is only recorded.
+// `t4a-agent` — the T4A AI agent (app/api/agent/*) acting on behalf of the staff
+// member who asked for and approved the action in the agent app.
 export type SubmitActor =
   | { source: "customer"; agent?: { partnerMkId: string; name: string; email: string | null } }
-  | { source: "admin"; email: string | null };
+  | { source: "admin"; email: string | null }
+  | { source: "t4a-agent"; sub: string; name: string; email: string | null };
 
 export function actorLabel(actor: SubmitActor): string {
   if (actor.source === "customer") return actor.agent ? `agent:${actor.agent.email ?? actor.agent.name}` : "customer";
+  if (actor.source === "t4a-agent") return `${actor.name} (T4A agent)`;
   return actor.email ? `admin:${actor.email}` : "admin";
 }
 
 // What `submittedBy` records: the admin's email, or the agent who acted for the customer.
 export function actorSubmittedBy(actor: SubmitActor): string | null {
   if (actor.source === "admin") return actor.email;
+  if (actor.source === "t4a-agent") return `${actor.name} (T4A agent)`;
   return actor.agent ? `${actor.agent.name}${actor.agent.email ? ` <${actor.agent.email}>` : ""} (agent)` : null;
 }
 
