@@ -157,7 +157,7 @@ describe("helpers", () => {
   });
 });
 
-describe("the agent API surface: reads are GET-only, writes are POST-only", () => {
+describe("the agent API surface: reads are GET-only, writes are POST-only (the bridge both)", () => {
   const root = path.resolve(__dirname, "../app/api/agent");
   const routeFiles: string[] = [];
   const walk = (dir: string) => {
@@ -192,16 +192,19 @@ describe("the agent API surface: reads are GET-only, writes are POST-only", () =
     "preorders/campaigns/[id]/status",
     "preorders/submissions/[id]/action",
   ];
+  // The bridge to the admin pages' own APIs (lib/agent-bridge.ts): GET = the list,
+  // POST = one call (GET calls take the read token, changes the write token).
+  const BRIDGE_ROUTES = ["admin"];
 
   it("has exactly the expected routes", () => {
-    expect(routeFiles.map(rel).sort()).toEqual([...READ_ROUTES, ...WRITE_ROUTES].sort());
+    expect(routeFiles.map(rel).sort()).toEqual([...READ_ROUTES, ...WRITE_ROUTES, ...BRIDGE_ROUTES].sort());
   });
 
   it("read routes export GET only, write routes POST only (no DELETE / PUT / PATCH anywhere)", async () => {
     for (const f of routeFiles) {
       const mod = await import(f);
       const methods = Object.keys(mod).filter((k) => /^[A-Z]+$/.test(k));
-      expect(methods, f).toEqual(WRITE_ROUTES.includes(rel(f)) ? ["POST"] : ["GET"]);
+      expect(methods.sort(), f).toEqual(BRIDGE_ROUTES.includes(rel(f)) ? ["GET", "POST"] : WRITE_ROUTES.includes(rel(f)) ? ["POST"] : ["GET"]);
     }
   });
 

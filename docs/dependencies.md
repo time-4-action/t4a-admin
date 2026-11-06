@@ -36,7 +36,7 @@ Without these the app still runs; only the listed pages / actions fail.
 | **patrik-warranty-form** | `WARRANTY_API_BASE`, `INTERNAL_ADMIN_TOKEN` | Warranty (claims, settings, audit log) |
 | **t4a-mk-automation** (`mkauto.time-4-action.com`) | `MK_API_BASE`, `MK_API_TOKEN` | Automation (status, schedules, run now) |
 | **Hetzner Object Storage** (S3, same bucket as the warranty form) | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_PUBLIC_BASE`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Preorder row / group image uploads (route answers 503 without them) |
-| **t4a-agent** (the T4A AI agent; a caller, not a dependency) | `AGENT_READ_TOKEN` (read bearer token) and `AGENT_WRITE_TOKEN` (write bearer token; also valid for reads), each `openssl rand -hex 32`; the agent sends the same value | Agent API `/api/agent/*`: GET answers 503 without either token, POST answers 503 without `AGENT_WRITE_TOKEN` |
+| **t4a-agent** (the T4A AI agent; a caller, not a dependency) | `AGENT_READ_TOKEN` (read bearer token) and `AGENT_WRITE_TOKEN` (write bearer token; also valid for reads), each `openssl rand -hex 32`; the agent sends the same value | Agent API `/api/agent/*`: GET answers 503 without either token, POST answers 503 without `AGENT_WRITE_TOKEN`. `/api/agent/admin` is the bridge to the admin pages' own APIs (`lib/agent-bridge.ts`): it acts as the staff member named in `actor`, with their Auth0 roles from the Management API (`AUTH0_MGMT_CLIENT_*`) |
 | **Portal domain** | `PORTAL_BASE_URL` (defaults to `https://b2b.time-4-action.com`) | Preorder invite links |
 
 The Builder module needs no backend service; its renderer is bundled at
