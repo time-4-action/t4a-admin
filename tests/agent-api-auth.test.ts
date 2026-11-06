@@ -126,9 +126,12 @@ describe("agentAuth (bearer token)", () => {
     expect(agentWriteAuth(req(`Bearer ${WRITE_TOKEN}`))).toBeNull();
   });
 
-  it("parseActor requires sub, name and a valid email", () => {
+  it("parseActor requires sub and name; email is optional but validated when given", () => {
     expect(parseActor({ sub: "auth0|1", name: " Maja ", email: "maja@t4a.test" })).toEqual({ ok: true, actor: { sub: "auth0|1", name: "Maja", email: "maja@t4a.test" } });
-    for (const a of [undefined, null, "x", [], {}, { sub: "s", name: "n" }, { sub: "s", name: "", email: "e@x.y" }, { sub: "s", name: "n", email: "nope" }, { sub: 1, name: "n", email: "e@x.y" }]) {
+    for (const email of [undefined, null, "", "   "]) {
+      expect(parseActor({ sub: "auth0|1", name: "Maja", email }), String(email)).toEqual({ ok: true, actor: { sub: "auth0|1", name: "Maja", email: null } });
+    }
+    for (const a of [undefined, null, "x", [], {}, { name: "n" }, { sub: "s" }, { sub: "  ", name: "n" }, { sub: "s", name: "", email: "e@x.y" }, { sub: "s", name: "n", email: "nope" }, { sub: "s", name: "n", email: 5 }, { sub: 1, name: "n", email: "e@x.y" }]) {
       expect(parseActor(a).ok, JSON.stringify(a)).toBe(false);
     }
   });

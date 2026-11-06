@@ -1190,8 +1190,9 @@ builder notes / version history. Read models reuse the UI's mappers
 #### Agent writes (POST, `AGENT_WRITE_TOKEN`)
 
 Every write is approved by a person in the agent app before it is sent. Every body
-carries `actor: { sub, name, email }` (that person; 400 `{error, details}` if
-missing / invalid). The actor is recorded as **`"<name> (T4A agent)"`** wherever the
+carries `actor: { sub, name, email? }` (that person; `sub` and `name` required
+and non-empty, `email` optional — validated only when non-empty; 400
+`{error, details}` otherwise). The actor is recorded as **`"<name> (T4A agent)"`** wherever the
 admin UI records its acting user (`SubmitActor` `source: "t4a-agent"` → MK order
 `createdBy`, `resultPublishedBy`, detached-order `detachedBy`; portal agent
 `updatedBy` / client `addedBy`), and `agentWriteRoute()` logs one

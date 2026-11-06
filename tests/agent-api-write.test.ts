@@ -148,7 +148,7 @@ describe("write auth + actor (every POST route)", () => {
   it("400 without a valid actor, before doing any work", async () => {
     const campaign = await makeCampaign();
     for (const [name, mod] of routes) {
-      for (const body of [{}, { actor: null }, { actor: { sub: "x", name: "y" } }, { actor: { ...ACTOR, email: "not-an-email" } }, { actor: { ...ACTOR, sub: "  " } }, "not json", "[1]"]) {
+      for (const body of [{}, { actor: null }, { actor: { sub: "x" } }, { actor: { name: "y" } }, { actor: { ...ACTOR, name: "" } }, { actor: { ...ACTOR, email: "not-an-email" } }, { actor: { ...ACTOR, sub: "  " } }, "not json", "[1]"]) {
         const r = await post(mod, body, { id: String(campaign._id), partnerMkId: "p1" });
         expect(r.status, `${name} ${JSON.stringify(body)}`).toBe(400);
         expect(r.body.error, name).toEqual(expect.any(String));
@@ -167,6 +167,21 @@ describe("write auth + actor (every POST route)", () => {
       });
       expect(res.status).toBe(200);
     }
+  });
+});
+
+describe("actor without an email", () => {
+  it("is accepted (missing or empty) and recorded by name", async () => {
+    const campaign = await makeCampaign();
+    const sub = await submitted(campaign, true);
+    for (const actor of [{ sub: "auth0|staff-2", name: "Ana Kos" }, { sub: "auth0|staff-2", name: "Ana Kos", email: "" }]) {
+      const r = await post(campaignStatusRoute, { actor, status: "closed" }, { id: String(campaign._id) });
+      expect(r.status, JSON.stringify(actor)).toBe(200);
+    }
+    const p = await post(submissionActionRoute, { actor: { sub: "auth0|staff-2", name: "Ana Kos" }, action: "publish-result" }, { id: String(sub._id) });
+    expect(p.status).toBe(200);
+    expect((await PreorderSubmission.findById(sub._id).lean())!.resultPublishedBy).toBe("Ana Kos (T4A agent)");
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("actor=auth0|staff-2"));
   });
 });
 

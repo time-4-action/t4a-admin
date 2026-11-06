@@ -12,7 +12,7 @@ import "server-only";
 //          (503 when neither is configured, 401 when missing / wrong).
 //   - POST accepts ONLY `$AGENT_WRITE_TOKEN` (503 when it is not configured, 401
 //          when missing / wrong — the read token is wrong here). Every POST body
-//          carries `actor: {sub, name, email}`, the staff member who asked for and
+//          carries `actor: {sub, name, email?}`, the staff member who asked for and
 //          approved the change in the agent app; it is recorded as
 //          "<name> (T4A agent)" where the admin UI records its acting user, and one
 //          log line per write names the route, target and actor sub.
@@ -89,7 +89,8 @@ export function agentRoute<Ctx = unknown>(
 // ── writes ────────────────────────────────────────────────────────────────────
 
 // The person in the agent app who asked for (and approved) the write.
-export type AgentActor = { sub: string; name: string; email: string };
+// `email` is optional (the agent app may only know the Auth0 sub and name).
+export type AgentActor = { sub: string; name: string; email: string | null };
 
 // How the actor is recorded in the admin's own audit fields.
 export function agentActorLabel(actor: AgentActor): string {
@@ -99,7 +100,7 @@ export function agentActorLabel(actor: AgentActor): string {
 const EMAIL = /^[^\s@]+@[^\s@]+$/;
 
 export function parseActor(raw: unknown): { ok: true; actor: AgentActor } | { ok: false; details: string[] } {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, details: ["actor is required: {sub, name, email}"] };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, details: ["actor is required: {sub, name, email?}"] };
   const r = raw as Record<string, unknown>;
   const details: string[] = [];
   const str = (k: string, max: number) => {
@@ -110,8 +111,17 @@ export function parseActor(raw: unknown): { ok: true; actor: AgentActor } | { ok
   };
   const sub = str("sub", 200);
   const name = str("name", 200);
-  const email = str("email", 320);
-  if (email && !EMAIL.test(email)) details.push("actor.email is not an email address");
+  // Optional: missing, null or "" = unknown; validated only when non-empty.
+  let email: string | null = null;
+  if (r.email !== undefined && r.email !== null) {
+    if (typeof r.email !== "string") details.push("actor.email must be a string");
+    else {
+      const e = r.email.trim();
+      if (e.length > 320) details.push("actor.email is too long");
+      else if (e && !EMAIL.test(e)) details.push("actor.email is not an email address");
+      email = e || null;
+    }
+  }
   return details.length ? { ok: false, details } : { ok: true, actor: { sub, name, email } };
 }
 
