@@ -310,6 +310,7 @@ export type CustomerListQuery = {
   includeStale?: boolean;
   page?: number;
   pageSize?: number;
+  skip?: number; // an explicit offset (agent API); overrides `page`
 };
 
 export async function listMkCustomers(query: CustomerListQuery): Promise<{ items: IMkCustomer[]; total: number; page: number; pageSize: number }> {
@@ -334,7 +335,11 @@ export async function listMkCustomers(query: CustomerListQuery): Promise<{ items
     filter.$and = [...((filter.$and as unknown[]) ?? []), { $or: [{ name: re }, { emails: re }, { "address.city": re }, { countCode: re }, { taxId: re }, { partnerMkId: q }] }];
   }
   const [items, total] = await Promise.all([
-    MkCustomer.find(filter).sort({ name: 1 }).skip((page - 1) * pageSize).limit(pageSize).exec(),
+    MkCustomer.find(filter)
+      .sort({ name: 1, partnerMkId: 1 })
+      .skip(query.skip !== undefined ? Math.max(0, query.skip) : (page - 1) * pageSize)
+      .limit(pageSize)
+      .exec(),
     MkCustomer.countDocuments(filter).exec(),
   ]);
   return { items, total, page, pageSize };

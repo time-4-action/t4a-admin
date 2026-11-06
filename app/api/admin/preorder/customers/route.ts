@@ -1,11 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { Types } from "mongoose";
 import { listMkCustomers, toMkCustomerView } from "@/lib/mk-customers";
-import { PreorderAccess } from "@/models/preorder-access";
-import { PreorderSubmission } from "@/models/preorder-submission";
-import { PreorderCampaign } from "@/models/preorder-campaign";
-import { submissionStage } from "@/types/preorder";
-import type { CustomerActivity } from "@/lib/preorder-customers";
+import { customerPreorderActivity } from "@/lib/preorder-customers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,44 +23,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ items, total: res.total, page: res.page, pageSize: res.pageSize });
   }
 
-  const ids = items.map((c) => c.partnerMkId);
-  const [access, subs] = await Promise.all([
-    PreorderAccess.find({ partnerMkId: { $in: ids } }).select("campaignId partnerMkId").lean().exec(),
-    PreorderSubmission.find({ partnerMkId: { $in: ids } }).select("campaignId partnerMkId status mkOrder mkSalesOrder resultPublishedToCustomer").lean().exec(),
-  ]);
-  const campaignIds = Array.from(new Set([...access, ...subs].map((x) => String(x.campaignId))));
-  const campaigns = campaignIds.length
-    ? await PreorderCampaign.find({ _id: { $in: campaignIds.map((id) => new Types.ObjectId(id)) } }).select("title season status").lean().exec()
-    : [];
-  const campaignById = new Map(campaigns.map((c) => [String(c._id), c]));
-
-  const activity: Record<string, CustomerActivity> = {};
-  const entry = (pid: string, cid: string) => {
-    const a = (activity[pid] ??= { campaigns: [], unlocked: 0, submitted: 0 });
-    let row = a.campaigns.find((c) => c.id === cid);
-    if (!row) {
-      const c = campaignById.get(cid);
-      row = { id: cid, title: c?.title ?? "Deleted campaign", season: c?.season ?? null, status: c?.status ?? "closed", unlocked: false, stage: null };
-      a.campaigns.push(row);
-    }
-    return { a, row };
-  };
-  for (const g of access) {
-    const { a, row } = entry(g.partnerMkId, String(g.campaignId));
-    if (!row.unlocked) {
-      row.unlocked = true;
-      a.unlocked += 1;
-    }
-  }
-  for (const s of subs) {
-    const { a, row } = entry(s.partnerMkId, String(s.campaignId));
-    row.stage = submissionStage({
-      status: s.status,
-      mkOrder: s.mkOrder?.state ? { state: s.mkOrder.state, buyerOrder: s.mkOrder.buyerOrder ?? "", attempts: s.mkOrder.attempts ?? 0 } : null,
-      mkSalesOrder: s.mkSalesOrder?.mkId ? { mkId: s.mkSalesOrder.mkId, countCode: s.mkSalesOrder.countCode } : null,
-      resultPublishedToCustomer: !!s.resultPublishedToCustomer,
-    });
-    if (s.status !== "draft") a.submitted += 1;
-  }
+  const activity = await customerPreorderActivity(items.map((c) => c.partnerMkId));
   return NextResponse.json({ items, total: res.total, page: res.page, pageSize: res.pageSize, activity });
 }

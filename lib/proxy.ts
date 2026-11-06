@@ -6,11 +6,17 @@ import {
   sectionForPath,
   canSee,
   isPortalPath,
+  isAgentApiPath,
 } from "@/lib/access";
-import type { NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { IMPERSONATION_COOKIE, decodeImpersonation, effectiveRoles } from "@/lib/portal-impersonation-codec";
 
 export async function proxy(req: NextRequest) {
+  // The agent API authenticates machines with its own bearer token
+  // (lib/agent-api.ts) and has no Auth0 session: pass it straight to the route,
+  // before the Auth0 middleware (no session cookie is read or set for it).
+  if (isAgentApiPath(req.nextUrl.pathname)) return NextResponse.next();
+
   const res = await auth0.middleware(req);
 
   const isAuthRoute = req.nextUrl.pathname.startsWith("/auth");

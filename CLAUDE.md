@@ -1144,6 +1144,42 @@ without them the route answers 503.
 | `/stats` | GET | Dashboard KPIs: total cost, active users, conversations today, cost by user/model |
 | `/usage` | GET | Full token-level usage table per user per model |
 
+### Agent API (`app/api/agent/`, read-only, machine auth)
+
+A read-only JSON surface for the **T4A AI agent** (t4a-agent, a server-side app
+with no Auth0 session) so it can read internal admin data. **GET only** (no other
+method is exported; Next answers 405). Auth: `Authorization: Bearer
+$AGENT_READ_TOKEN`, compared in constant time (`lib/agent-api.ts`; `agentRoute()`
+wraps every handler): token unset on the server → 503, missing / wrong → 401.
+Every response is `Cache-Control: no-store`.
+
+The middleware lets **exactly** `/api/agent` and `/api/agent/…` through, before
+the Auth0 middleware (`isAgentApiPath` in `lib/access.ts`, first check in
+`lib/proxy.ts`); `/api/agents`, `/api/agent-x` stay session-gated (tested in
+`tests/agent-api-auth.test.ts`). So **every route under `app/api/agent/` must be
+wrapped in `agentRoute()`** and stay read-only — the test fails on a non-GET export.
+
+Never returned: campaign `shareToken`, tokens / keys (proxied partner-portal and
+mk-automation JSON also goes through `scrubSecrets`), impersonation state,
+builder notes / version history. Read models reuse the UI's mappers
+(`lib/agent-preorders.ts`, `lib/agent-directory.ts`, `lib/agent-ai-usage.ts`,
+`lib/agent-builder.ts`, `lib/partners.ts`, `customerPreorderActivity` in
+`lib/preorder-customers.ts`). Lists answer `{ total, items }` with `limit`
+(default 50, max 200) and `skip`.
+
+| Route | Notes |
+|---|---|
+| `/api/agent/preorders/campaigns?status=` | Campaign summaries + `counts` + `totalNet` (Σ net of submitted + confirmed) |
+| `/api/agent/preorders/campaigns/[id]` | `{campaign, tabs, markets, customerRules, vatOverrides, priceBooks}` |
+| `/api/agent/preorders/submissions?campaignId=&partnerMkId=&q=&status=&mkState=` | Newest first; `mkState` = pending / created / failed / legacy / none |
+| `/api/agent/preorders/submissions/[id]` | + `terms`, `lines` (snapshot prices), `pricing`. No live MK call |
+| `/api/agent/customers?q=&country=` | Directory + portal-agent links + preorder activity + `syncState` |
+| `/api/agent/portal-agents` | Agents and their clients |
+| `/api/agent/ai-usage?userId=` | Same figures as `/api/admin/stats` + `/usage`, dev users excluded |
+| `/api/agent/automation` | mk-automation `/api/v1/status` + `/api/v1/runs?limit=20`; 502 on failure |
+| `/api/agent/partners`, `/api/agent/partners/[sub]` | Partners list (+ portal `sync`), one partner (+ activity) |
+| `/api/agent/builder-presets?builder=` | Saved builds: `config` + parsed `ratings` (radar axes / range bands per product) |
+
 ### Environment Variables
 
 Required in `.env.local`:
@@ -1176,6 +1212,7 @@ PORTAL_BASE_URL              # Public origin of the B2B portal used in customer 
 MK_HOME_COUNTRY              # ISO-2 home country for domestic MK partners without an address country (default: SI)
 MK_PARTNER_SYNC_MODE         # Customer directory sync strategy: all (default) | sharded
 AUTH0_BASE_URL               # Production base URL (set by docker-compose)
+AGENT_READ_TOKEN             # Read-only bearer token for the T4A agent (/api/agent/*); `openssl rand -hex 32`. Unset = 503
 ```
 
 Partners module also requires `PARTNER_API_BASE` and `PARTNER_API_TOKEN` (both

@@ -77,6 +77,10 @@ AUTH0_DB_CONNECTION=Username-Password-Authentication
 # MongoDB (same instance as the chat app)
 MONGODB_URI=mongodb+srv://...
 
+# Read-only token for the T4A agent (t4a-agent) calling /api/agent/*.
+# Generate with: openssl rand -hex 32  (unset = the agent API answers 503)
+AGENT_READ_TOKEN=
+
 # Optional
 NEXT_PUBLIC_AI_ROLE_NAME=AI User
 NEXT_PUBLIC_DEV_ROLE_NAME=dev

@@ -9,7 +9,9 @@ let server: MongoMemoryServer | null = null;
 
 export async function startMongo(): Promise<void> {
   server = await MongoMemoryServer.create();
-  const conn = await mongoose.connect(server.getUri(), { dbName: "t4a-test" });
+  // Fail fast if the in-memory mongod goes away (e.g. killed under memory
+  // pressure): without this every remaining query waits the 30 s default.
+  const conn = await mongoose.connect(server.getUri(), { dbName: "t4a-test", serverSelectionTimeoutMS: 5_000 });
   // lib/mongodb.ts connectDB() short-circuits on this global.
   global._mongooseConn = conn;
   // Make sure unique indexes exist before the race tests run.
