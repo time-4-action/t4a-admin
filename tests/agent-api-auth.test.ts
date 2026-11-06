@@ -190,6 +190,7 @@ describe("the agent API surface: reads are GET-only, writes are POST-only (the b
     "portal-agents/[partnerMkId]/clients",
     "preorders/access",
     "preorders/campaigns/[id]/status",
+    "preorders/campaigns/[id]/terms",
     "preorders/submissions/[id]/action",
   ];
   // The bridge to the admin pages' own APIs (lib/agent-bridge.ts): GET = the list,
