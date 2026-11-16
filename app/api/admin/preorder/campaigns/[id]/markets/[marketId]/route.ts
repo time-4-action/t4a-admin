@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ensurePriceBooks } from "@/lib/preorder-pricebooks";
 import { connectDB, PreorderCampaign, toCampaignAdminView, toObjectId } from "@/lib/preorder";
 import { deleteMarket, upsertMarket } from "@/lib/preorder-markets";
 
@@ -18,7 +19,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   const body = await request.json().catch(() => ({}));
   const res = await upsertMarket(doc, body, marketId);
   if ("error" in res) return NextResponse.json(res, { status: res.status });
-  return NextResponse.json({ market: res, markets: toCampaignAdminView(doc).markets });
+  const priceBooksRefreshed = await ensurePriceBooks(doc);
+  return NextResponse.json({ market: res, markets: toCampaignAdminView(doc).markets, priceBooksRefreshed });
 }
 
 // DELETE — removes the market; customer rules pointing at it fall back to their country.

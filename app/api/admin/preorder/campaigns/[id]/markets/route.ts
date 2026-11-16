@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ensurePriceBooks } from "@/lib/preorder-pricebooks";
 import { connectDB, PreorderCampaign, toCampaignAdminView, toObjectId } from "@/lib/preorder";
 import { assignCountries, reorderMarkets, replaceMarkets, upsertMarket } from "@/lib/preorder-markets";
 
@@ -30,7 +31,8 @@ export async function PUT(request: Request, { params }: RouteParams) {
   const body = (await request.json().catch(() => ({}))) as { markets?: unknown };
   const res = await replaceMarkets(doc, body.markets);
   if (!Array.isArray(res)) return NextResponse.json(res, { status: res.status });
-  return NextResponse.json({ markets: res });
+  const priceBooksRefreshed = await ensurePriceBooks(doc);
+  return NextResponse.json({ markets: res, priceBooksRefreshed });
 }
 
 // POST /api/admin/preorder/campaigns/[id]/markets — create one market
@@ -61,5 +63,6 @@ export async function POST(request: Request, { params }: RouteParams) {
   }
   const res = await upsertMarket(doc, body);
   if ("error" in res) return NextResponse.json(res, { status: res.status });
-  return NextResponse.json({ market: res, markets: toCampaignAdminView(doc).markets }, { status: 201 });
+  const priceBooksRefreshed = await ensurePriceBooks(doc);
+  return NextResponse.json({ market: res, markets: toCampaignAdminView(doc).markets, priceBooksRefreshed }, { status: 201 });
 }

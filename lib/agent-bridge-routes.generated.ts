@@ -161,7 +161,7 @@ export const BRIDGE_ROUTES: BridgeRoute[] = [
     GET: "Partner search for the admin \"submit on behalf\" picker (by name / email / tax number).\nScoped under /api/admin/preorder/* so a preorder-admin (not a documents-admin) may call\nit. An empty query lists some partners so the picker isn't blank on load.",
   } },
   { pattern: "/api/admin/preorder/pricelists", mod: r22 as unknown as BridgeRoute["mod"], header: "", methods: {
-    GET: "GET /api/admin/preorder/pricelists — the Metakocka sales price lists, for the\ncampaign builder's RRP / partner-price selectors. Derived + cached in the MK\nclient (MK has no dedicated list-pricelists endpoint).",
+    GET: "GET /api/admin/preorder/pricelists — the Metakocka sales price lists, for the\ncampaign builder's RRP / partner-price selectors. Derived + cached in the MK\nclient (MK has no dedicated list-pricelists endpoint). `?refresh=1` re-scans now\n(a list just created in MK otherwise shows up within 30 minutes).",
   } },
   { pattern: "/api/admin/preorder/products/refresh", mod: r23 as unknown as BridgeRoute["mod"], header: "", methods: {
     POST: "POST { rows: [{ code, ean }] } → { info: { [currentCode]: ProductRefreshInfo }, notInMk }\nThe \"Refresh products\" migration (lib/preorder-refresh.ts applies it client-side).\nMetakocka is the source of truth: a row's code is looked up in MK, and when MK\ndoesn't have it (a stale catalogue SKU) by the row's EAN. MK gives code, name and\nEAN; the catalogue only the images. No prices are read.",

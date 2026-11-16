@@ -491,7 +491,11 @@ function EffectiveConfigCard({ effective, loading, campaignId, partnerMkId }: { 
             {m.market ? <MarketChip name={m.market.name} color={m.market.color} /> : <span className="text-foreground">none</span>}
             <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-muted-foreground">{m.marketSource === "manual" ? "assigned" : m.countryIso ? <><Flag iso={m.countryIso} /> {m.countryIso}</> : "no country"}</span>
           </div>
-          <Line label="Pricing" value={effective.partnerPricelist ?? "sheet prices"} source={m.sources.pricelist} />
+          {m.pricing.mode === "rrp" ? (
+            <Line label="Pricing" value={`RRP −${fmtVatRate(m.pricing.rrpDiscountPct ?? 0)} · partner price hidden`} source={m.sources.priceMode} />
+          ) : (
+            <Line label="Pricing" value={effective.partnerPricelist ?? "sheet prices"} source={m.sources.pricelist} />
+          )}
           <Line
             label="Assortment"
             value={`${effective.tabs.reduce((n, t) => n + t.groups.reduce((a, g) => a + g.rows.length, 0), 0)} products${m.assortment.hidden ? ` · ${m.assortment.hidden} hidden` : ""}${m.assortment.exposed ? ` · ${m.assortment.exposed} added` : ""}`}
@@ -506,7 +510,7 @@ function EffectiveConfigCard({ effective, loading, campaignId, partnerMkId }: { 
           <div className="flex items-start gap-2">
             <span className="text-muted-foreground w-20 shrink-0">Customer</span>
             <span className="text-foreground min-w-0 truncate">
-              {CUSTOMER_KIND_LABELS[m.pricing.ctx.kind]} · partner price excl. VAT{(m.pricing.ctx.vat.rate ?? 0) > 0 ? " + VAT" : ""}
+              {CUSTOMER_KIND_LABELS[m.pricing.ctx.kind]} · {m.pricing.mode === "rrp" ? "RRP − %" : "partner price"} excl. VAT{(m.pricing.ctx.vat.rate ?? 0) > 0 ? " + VAT" : ""}
             </span>
           </div>
           <div className="flex items-start gap-2">

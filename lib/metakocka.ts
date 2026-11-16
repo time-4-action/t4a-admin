@@ -708,47 +708,64 @@ function reportParams(): ReportParam[] {
 // MK exposes no "list price lists" endpoint. The closest source of truth is
 // json/product_list with return_pricelist: every product carries a pricelist[]
 // of the lists it participates in ({ count_code, title, currency_code,
-// sales_purchase }). Global lists (RRP, partner) sit on essentially every sales
-// product, so a bounded scan surfaces them reliably. Result is cached (lists
-// change rarely) and deduped by count_code; purchase-only lists are dropped.
-const PRICELIST_SCAN_LIMIT = 120;
+// sales_purchase }). Global lists (RRP, partner) sit on essentially every product,
+// but a special list (e.g. a team's RRP list) may sit on only a handful, so the WHOLE
+// sales catalogue is scanned in MK's 1000-record windows (bounded by
+// PRICELIST_SCAN_PAGES). Result is cached (lists change rarely; `force` re-scans) and
+// deduped by count_code; purchase-only lists are dropped. A failed scan keeps the
+// previous result.
+const PRICELIST_PAGE_SIZE = 1000;
+const PRICELIST_SCAN_PAGES = 30;
 const PRICELIST_TTL_MS = 30 * 60 * 1000;
 let pricelistCache: { at: number; value: MkPricelist[] } | null = null;
+let pricelistScan: Promise<MkPricelist[]> | null = null;
 
-export async function listSalesPricelists(): Promise<MkPricelist[]> {
-  if (pricelistCache && Date.now() - pricelistCache.at < PRICELIST_TTL_MS) {
+export async function listSalesPricelists(opts: { force?: boolean } = {}): Promise<MkPricelist[]> {
+  if (!opts.force && pricelistCache && Date.now() - pricelistCache.at < PRICELIST_TTL_MS) {
     return pricelistCache.value;
   }
-  const res = await callMetakocka("json/product_list", {
-    sales: "true",
-    return_pricelist: "true",
-    limit: String(PRICELIST_SCAN_LIMIT),
+  // One scan at a time: concurrent callers share it.
+  pricelistScan ??= scanSalesPricelists().finally(() => {
+    pricelistScan = null;
   });
-  if (!res.ok) return pricelistCache?.value ?? [];
+  return pricelistScan;
+}
 
-  // product_list is an array (many products) or a single object (when count_code
-  // is given) — normalize to an array.
-  const raw = res.data.product_list;
-  const products = Array.isArray(raw)
-    ? (raw as Record<string, unknown>[])
-    : raw && typeof raw === "object"
-      ? [raw as Record<string, unknown>]
-      : [];
-
+async function scanSalesPricelists(): Promise<MkPricelist[]> {
   const byCode = new Map<string, MkPricelist>();
-  for (const p of products) {
-    const pl = Array.isArray(p.pricelist) ? (p.pricelist as Record<string, unknown>[]) : [];
-    for (const entry of pl) {
-      // Skip purchase-only lists; keep sales (or unspecified, which MK treats as both).
-      if (str(entry.sales_purchase) === "purchase") continue;
-      const code = str(entry.count_code);
-      if (!code || byCode.has(code)) continue;
-      byCode.set(code, {
-        code,
-        title: str(entry.title) ?? code,
-        currency: str(entry.currency_code),
-      });
+  for (let page = 0; page < PRICELIST_SCAN_PAGES; page++) {
+    const res = await callMetakocka(
+      "json/product_list",
+      { sales: "true", return_pricelist: "true", limit: String(PRICELIST_PAGE_SIZE), offset: String(page * PRICELIST_PAGE_SIZE) },
+      { timeoutMs: 60_000 },
+    );
+    if (!res.ok) {
+      // Nothing read at all ⇒ keep what we had; a later page failing ⇒ use what we got.
+      if (page === 0) return pricelistCache?.value ?? [];
+      break;
     }
+    // product_list is an array (many products) or a single object — normalize.
+    const raw = res.data.product_list;
+    const products = Array.isArray(raw)
+      ? (raw as Record<string, unknown>[])
+      : raw && typeof raw === "object"
+        ? [raw as Record<string, unknown>]
+        : [];
+    for (const p of products) {
+      const pl = Array.isArray(p.pricelist) ? (p.pricelist as Record<string, unknown>[]) : [];
+      for (const entry of pl) {
+        // Skip purchase-only lists; keep sales (or unspecified, which MK treats as both).
+        if (str(entry.sales_purchase) === "purchase") continue;
+        const code = str(entry.count_code);
+        if (!code || byCode.has(code)) continue;
+        byCode.set(code, {
+          code,
+          title: str(entry.title) ?? code,
+          currency: str(entry.currency_code),
+        });
+      }
+    }
+    if (products.length < PRICELIST_PAGE_SIZE) break;
   }
   const value = Array.from(byCode.values()).sort((a, b) => a.title.localeCompare(b.title));
   pricelistCache = { at: Date.now(), value };

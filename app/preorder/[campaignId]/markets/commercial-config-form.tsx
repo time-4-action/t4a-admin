@@ -34,8 +34,9 @@ import {
   type PreorderTier,
   type VatMode,
   type VatPolicy,
+  type PriceMode,
 } from "@/types/preorder";
-import { fmtVatRate, normalizeVatRate } from "@/lib/pricing";
+import { fmtVatRate, normalizeDiscountPct, normalizeVatRate } from "@/lib/pricing";
 import type { MkPricelist } from "@/types/documents";
 
 // What the layer inherits if it sets nothing: the effective campaign WITHOUT this layer.
@@ -62,7 +63,7 @@ export type ConfigSection = "commercial" | "tiers" | "assortment";
 // How many of a layer's overrides fall into each section — for tab badges.
 export function configSectionCounts(value: CommercialConfig): Record<ConfigSection, number> {
   return {
-    commercial: (["partnerPricelist", "currency", "deadline", "minOrderAmount", "note", "vatMode", "vatRate", "vatCompanies"] as const).filter((k) => value[k] !== undefined).length,
+    commercial: (["partnerPricelist", "currency", "deadline", "minOrderAmount", "note", "vatMode", "vatRate", "vatCompanies", "priceMode", "rrpDiscountPct"] as const).filter((k) => value[k] !== undefined).length,
     tiers: value.tiersByTab?.length ?? 0,
     assortment: (value.hiddenIds?.length ?? 0) + (value.exposedIds?.length ?? 0),
   };
@@ -96,6 +97,12 @@ export function CommercialConfigForm({ value, onChange, inherited, campaign, pri
       {/* ── Pricing ── */}
       {only("commercial") && (
       <Section title="Pricing" bare={!!section}>
+        <PriceModeRow value={value} set={set} onChange={onChange} has={has} inherited={inherited} inheritedSource={src.priceMode} />
+        {(value.priceMode ?? inherited.effective.pricing.mode) === "rrp" ? (
+          <p className="text-[11px] text-muted-foreground">
+            Priced from the RRP, so the partner price list below is not used and partner prices are never shown to these customers.
+          </p>
+        ) : null}
         <FieldRow
           label="Partner price list"
           overridden={has("partnerPricelist")}
@@ -108,6 +115,9 @@ export function CommercialConfigForm({ value, onChange, inherited, campaign, pri
             <SelectTrigger size="sm" className="h-8 text-[12px] w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="__none__" className="text-[12px]">Sheet prices (campaign list)</SelectItem>
+              {value.partnerPricelist && !pricelists.some((p) => p.title === value.partnerPricelist) && (
+                <SelectItem value={value.partnerPricelist} className="text-[12px]">{value.partnerPricelist}</SelectItem>
+              )}
               {pricelists.map((p) => (
                 <SelectItem key={p.code} value={p.title} className="text-[12px]">
                   {p.title}{p.currency ? ` · ${p.currency}` : ""}
@@ -237,6 +247,87 @@ export function CommercialConfigForm({ value, onChange, inherited, campaign, pri
       </Section>
       )}
     </div>
+  );
+}
+
+// Price basis + RRP discount: one row, because the discount only means something on
+// the RRP basis. Overriding carries the inherited pair along; reset clears both.
+function PriceModeRow({
+  value,
+  set,
+  onChange,
+  has,
+  inherited,
+  inheritedSource,
+}: {
+  value: CommercialConfig;
+  set: <K extends keyof CommercialConfig>(key: K, v: CommercialConfig[K]) => void;
+  onChange: (next: CommercialConfig) => void;
+  has: (key: keyof CommercialConfig) => boolean;
+  inherited: InheritedView;
+  inheritedSource: ConfigSource | undefined;
+}) {
+  const inh = inherited.effective.pricing;
+  const overridden = has("priceMode") || has("rrpDiscountPct");
+  const mode: PriceMode = value.priceMode ?? inh.mode;
+  const [pctText, setPctText] = useState<string>(
+    value.rrpDiscountPct != null ? String(value.rrpDiscountPct) : inh.rrpDiscountPct != null ? String(inh.rrpDiscountPct) : "",
+  );
+  const pctInvalid = pctText.trim() !== "" && normalizeDiscountPct(pctText) === null;
+  return (
+    <FieldRow
+      label="Price basis"
+      overridden={overridden}
+      inheritedValue={inh.mode === "rrp" ? `RRP −${fmtVatRate(inh.rrpDiscountPct ?? 0)}` : "Partner prices"}
+      inheritedSource={inheritedSource ?? "campaign"}
+      onOverride={() => {
+        onChange({ ...value, priceMode: inh.mode, ...(inh.rrpDiscountPct != null ? { rrpDiscountPct: inh.rrpDiscountPct } : {}) });
+        setPctText(inh.rrpDiscountPct != null ? String(inh.rrpDiscountPct) : "");
+      }}
+      onReset={() => {
+        // Both keys in one change (two resets would each start from the same `value`).
+        const next = { ...value };
+        delete next.priceMode;
+        delete next.rrpDiscountPct;
+        onChange(next);
+      }}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Select
+          value={mode}
+          onValueChange={(v) => {
+            set("priceMode", v as PriceMode);
+          }}
+        >
+          <SelectTrigger size="sm" className="h-8 text-[12px] w-48"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="partner" className="text-[12px]">Partner prices</SelectItem>
+            <SelectItem value="rrp" className="text-[12px]">RRP minus a discount</SelectItem>
+          </SelectContent>
+        </Select>
+        {mode === "rrp" && (
+          <div className="relative w-28">
+            <Input
+              value={pctText}
+              inputMode="decimal"
+              placeholder="e.g. 15"
+              onChange={(e) => {
+                setPctText(e.target.value);
+                set("rrpDiscountPct", normalizeDiscountPct(e.target.value));
+              }}
+              aria-invalid={pctInvalid ? true : undefined}
+              className={cn("h-8 pr-6 text-right text-[12px] tabular-nums", pctInvalid && "border-rose-400")}
+            />
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground pointer-events-none">%</span>
+          </div>
+        )}
+        <span className="text-[11px] text-muted-foreground">
+          {mode === "rrp"
+            ? "Customers pay the RRP minus this discount (VAT included for individuals); they never see the partner price. Volume discounts still apply on top."
+            : "Customers pay the partner price (sheet or the price list below)."}
+        </span>
+      </div>
+    </FieldRow>
   );
 }
 

@@ -86,7 +86,7 @@ export interface ISnapshotLine {
   rrp?: number | null;
   partnerPrice?: number | null;
   taxCode?: string | null;
-  priceSource: "sheet" | "manual" | "book" | "fallback";
+  priceSource: "sheet" | "manual" | "book" | "fallback" | "rrp";
   fixedPrice?: boolean;
   tierPct?: number | null;
   unitNet?: number | null;
@@ -105,6 +105,7 @@ export interface ISnapshotPricing {
   vatRate: number;
   vatSource: "campaign" | "global" | "fallback" | "zero-rated" | "exempt" | "market" | "customer";
   mkTaxCode?: string | null;
+  rrpDiscountPct?: number | null;
   totals: { net: number; vat: number; gross: number };
 }
 
@@ -124,6 +125,7 @@ export interface ICommercialSnapshot {
     note: ConfigSource;
     minOrderAmount: ConfigSource;
     vat?: ConfigSource;
+    priceMode?: ConfigSource;
     tiers: Map<string, ConfigSource> | Record<string, ConfigSource>;
   };
   tabs: { tabId: string; tabName: string; tiers: IPreorderTier[] }[];
@@ -269,7 +271,7 @@ const SnapshotLineSchema = new Schema<ISnapshotLine>(
     rrp: { type: Number, default: null },
     partnerPrice: { type: Number, default: null },
     taxCode: { type: String, default: null },
-    priceSource: { type: String, enum: ["sheet", "manual", "book", "fallback"], default: "sheet" },
+    priceSource: { type: String, enum: ["sheet", "manual", "book", "fallback", "rrp"], default: "sheet" },
     fixedPrice: { type: Boolean, default: false },
     tierPct: { type: Number, default: null },
     unitNet: { type: Number, default: null },
@@ -290,6 +292,7 @@ const SnapshotPricingSchema = new Schema<ISnapshotPricing>(
     vatRate: { type: Number, required: true },
     vatSource: { type: String, enum: ["campaign", "global", "fallback", "zero-rated", "exempt", "market", "customer"], required: true },
     mkTaxCode: { type: String, default: null },
+    rrpDiscountPct: { type: Number, default: null },
     totals: {
       type: new Schema(
         {
@@ -327,6 +330,7 @@ const SnapshotSchema = new Schema<ICommercialSnapshot>(
           note: { type: String, default: "campaign" },
           minOrderAmount: { type: String, default: "campaign" },
           vat: { type: String, default: "campaign" },
+          priceMode: { type: String, default: "campaign" },
           tiers: { type: Map, of: String, default: {} },
         },
         { _id: false },

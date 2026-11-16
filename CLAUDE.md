@@ -794,6 +794,26 @@ one read).
   `partnerPrice` and clears the manual `discountedPrice`; a missing entry keeps
   the sheet price (`priceSource: "fallback"` + warning). No FX: a book currency
   ≠ effective currency is a warning.
+- **Price mode** (`priceMode` + `rrpDiscountPct`, `priceModeFor`): a layer may
+  price its customers at **RRP − %** instead of the partner price. Each row's
+  `partnerPrice` is replaced by `rrpNetUnit(rrp, pct, rate)` — the gross RRP minus
+  the discount with the VAT taken out at the customer's country rate (looked up as
+  for an individual whatever the kind; an `exempt` layer still extracts it, `fixed`
+  uses its rate) — `discountedPrice` is cleared, `priceSource: "rrp"`, and price
+  books are not used. The sheet partner price therefore never reaches the portal.
+  An individual pays the discounted RRP incl. VAT (± a cent), a zero-rated company
+  the net. Volume tiers still apply on top. No RRP ⇒ the row is `unpriced`
+  (`rrp-missing:<sku>`); no rate ⇒ every row is (`rrp-vat-missing:<iso>`) — never a
+  partner-price fallback. `PricingContext.rrpDiscountPct` (frozen as
+  `SnapshotPricing.rrpDiscountPct`) is what the UI reads to label the price column
+  "RRP −n%"; the MK order note says "Prices: RRP -n% (excl. VAT)".
+- **Price books build themselves on save**: the market / customer-rule write routes
+  call `ensurePriceBooks` (`lib/preorder-pricebooks.ts`), which refreshes the books
+  when a layer refers to a list that has none. Markets & Customers also has a
+  **Refresh prices** button (re-scans MK lists + rebuilds the books). The list
+  picker (`listSalesPricelists`) scans the whole sales catalogue in 1000-record
+  pages (cached 30 min; `GET /api/admin/preorder/pricelists?refresh=1` re-scans), so
+  a list that sits on only a few products still shows up.
 - Deadline is display-only; `minOrderAmount` is enforced at customer submit only.
 
 #### Pricing & VAT (`lib/pricing.ts` — the one money service)
@@ -805,7 +825,8 @@ excl. VAT — stored net since the VAT work; `pickMkListNetPrice` /
 `pickMkListGrossPrice` in `lib/metakocka.ts`, `json/product_list` is read with
 `show_tax_factor`). **Everyone orders at the partner price** (`discountedPrice`
 beats `partnerPrice`; the RRP is only a last-resort fallback for a row with no
-partner price). The customer's **kind** (`customerKind()`: tax id ⇒ `business`,
+partner price) — unless their layer is on the RRP − % price mode (see the
+resolver above), where the RRP-derived net takes the partner price's place. The customer's **kind** (`customerKind()`: tax id ⇒ `business`,
 else `person`) decides the VAT only:
 
 - **company → 0% VAT (zero-rated)** unless the layer's policy charges companies;
