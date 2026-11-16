@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ensurePriceBooks } from "@/lib/preorder-pricebooks";
 import { auth0 } from "@/lib/auth";
 import { connectDB, PreorderCampaign, toCampaignAdminView, toObjectId, loadEffectiveCampaignForPartner } from "@/lib/preorder";
 import { deleteCustomerRule, upsertCustomerRule } from "@/lib/preorder-markets";
@@ -50,7 +51,8 @@ export async function PUT(request: Request, { params }: RouteParams) {
   const session = await auth0.getSession();
   const res = await upsertCustomerRule(doc, pid, body, session?.user?.email ?? null);
   if ("error" in res) return NextResponse.json(res, { status: res.status });
-  return NextResponse.json({ rule: res, customer: await getCampaignCustomer(doc, pid) });
+  const priceBooksRefreshed = await ensurePriceBooks(doc);
+  return NextResponse.json({ rule: res, customer: await getCampaignCustomer(doc, pid), priceBooksRefreshed });
 }
 
 // DELETE — remove the rule (the customer falls back to market / campaign defaults).

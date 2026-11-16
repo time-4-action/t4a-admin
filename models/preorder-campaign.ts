@@ -75,6 +75,8 @@ export interface ICommercialConfig {
   vatMode?: "country" | "exempt" | "fixed" | null;
   vatRate?: number | null;
   vatCompanies?: boolean | null;
+  priceMode?: "partner" | "rrp" | null;
+  rrpDiscountPct?: number | null;
 }
 
 export interface IPreorderMarket {
@@ -220,6 +222,8 @@ const CommercialConfigSchema = new Schema<ICommercialConfig>(
     vatMode: { type: String, enum: ["country", "exempt", "fixed", null], default: undefined },
     vatRate: { type: Number, default: undefined },
     vatCompanies: { type: Boolean, default: undefined },
+    priceMode: { type: String, enum: ["partner", "rrp", null], default: undefined },
+    rrpDiscountPct: { type: Number, default: undefined },
   },
   { _id: false, minimize: false },
 );

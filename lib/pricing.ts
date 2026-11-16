@@ -96,6 +96,10 @@ export type PricingContext = {
   basis: PriceBasis;
   countryIso: string | null;
   vat: VatResolution;
+  // Present when the customer is priced at RRP minus this discount (a layer's
+  // priceMode "rrp"): their unit prices are RRP-derived and the UI labels them
+  // "Your price" instead of "Partner". Absent = partner prices.
+  rrpDiscountPct?: number | null;
 };
 
 export const VAT_SOURCE_LABELS: Record<VatSource | "missing", string> = {
@@ -156,6 +160,27 @@ export function splitGross(grossC: Cents, ratePct: number): VatSplit {
 export function addVat(netC: Cents, ratePct: number): VatSplit {
   const vat = pctOfCents(netC, ratePct);
   return { net: netC, vat, gross: netC + vat };
+}
+
+// The NET unit price of an RRP-mode row: the gross RRP minus the discount, with the VAT
+// taken out at `vatRate` (the customer's country rate). An individual then pays it back
+// with that VAT on top, i.e. the discounted RRP (± a cent of rounding); a zero-rated
+// company pays the net. Null when there is no RRP.
+export function rrpNetUnit(rrpGross: number | null | undefined, discountPct: number, vatRate: number): number | null {
+  if (rrpGross == null || !Number.isFinite(rrpGross) || rrpGross <= 0) return null;
+  const grossC = toCents(rrpGross);
+  const discountedC = grossC - pctOfCents(grossC, Math.min(100, Math.max(0, discountPct || 0)));
+  return fromCents(splitGross(discountedC, vatRate).net);
+}
+
+// A discount % as typed by an admin: 0–100, two decimals; anything else is "not set".
+export function normalizeDiscountPct(v: unknown): number | null {
+  return normalizeVatRate(v);
+}
+
+// Is this customer priced at RRP − % (rather than the partner price)?
+export function isRrpPriced(ctx: Pick<PricingContext, "rrpDiscountPct"> | null | undefined): boolean {
+  return ctx?.rrpDiscountPct != null;
 }
 
 // ── policy ───────────────────────────────────────────────────────────────────

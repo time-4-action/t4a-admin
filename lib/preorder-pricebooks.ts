@@ -58,3 +58,23 @@ export async function refreshPriceBooks(doc: IPreorderCampaign, pricelists?: str
   doc.priceBooks = books;
   return books.map((b) => ({ pricelist: b.pricelist, entries: b.entries.length, missing: b.missing, currency: b.currency }));
 }
+
+// After a market / customer rule is saved: if a layer now refers to a price list the
+// campaign holds no book for, build the books (all referenced lists — a refresh
+// replaces the whole set). Without this a newly picked list silently prices at the
+// sheet until someone ran Re-price. Best effort: an MK failure leaves the
+// `price-book-missing` warning in place for the admin to see.
+export async function ensurePriceBooks(doc: IPreorderCampaign): Promise<string[] | null> {
+  const admin = toCampaignAdminView(doc);
+  const missing = referencedPricelists(admin).filter(
+    (pl) => !admin.priceBooks.some((b) => b.pricelist.trim().toLowerCase() === pl.trim().toLowerCase()),
+  );
+  if (missing.length === 0) return null;
+  try {
+    await refreshPriceBooks(doc);
+    return missing;
+  } catch (err) {
+    console.error("[preorder] price book refresh after save failed", err);
+    return null;
+  }
+}

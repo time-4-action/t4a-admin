@@ -76,7 +76,8 @@ export type PreorderRow = {
   // Metakocka without re-reading product prices.
   taxCode?: string | null;
   // Where the effective unit price came from. Set by the resolver only — never stored.
-  priceSource?: "sheet" | "manual" | "book" | "fallback";
+  // "rrp" = the layer prices this customer at RRP minus a discount (CommercialConfig.priceMode).
+  priceSource?: "sheet" | "manual" | "book" | "fallback" | "rrp";
   // No price at all (no partner / discounted price and no RRP to fall back on):
   // shown, but cannot be ordered. Set by the resolver only — never stored.
   unpriced?: boolean;
@@ -175,7 +176,16 @@ export type CommercialConfig = {
   vatMode?: VatMode | null; // null = country rates
   vatRate?: number | null; // the rate for `fixed`
   vatCompanies?: boolean | null; // true = charge VAT to companies (default: zero-rated)
+  // What the customer's unit price is built from. "partner" (default) = the partner
+  // price (sheet or the layer's price book); "rrp" = the row's gross RRP minus
+  // `rrpDiscountPct`, VAT taken out at the customer's country rate. In "rrp" mode the
+  // partner price never reaches the customer.
+  priceMode?: PriceMode | null;
+  rrpDiscountPct?: number | null; // 0–100, used by priceMode "rrp"
 };
+
+export type PriceMode = "partner" | "rrp";
+export const PRICE_MODES: readonly PriceMode[] = ["partner", "rrp"];
 
 export const COMMERCIAL_CONFIG_KEYS = [
   "partnerPricelist",
@@ -189,6 +199,8 @@ export const COMMERCIAL_CONFIG_KEYS = [
   "vatMode",
   "vatRate",
   "vatCompanies",
+  "priceMode",
+  "rrpDiscountPct",
 ] as const satisfies readonly (keyof CommercialConfig)[];
 
 export type MarketColor = "sky" | "violet" | "amber" | "rose" | "emerald" | "indigo" | "fuchsia" | "teal";
@@ -264,6 +276,7 @@ export type EffectiveSources = {
   note: ConfigSource;
   minOrderAmount: ConfigSource;
   vat: ConfigSource; // which layer set the VAT policy
+  priceMode: ConfigSource; // which layer set the price mode (partner / RRP − %)
   tiers: Record<string, ConfigSource>; // per tabId
 };
 
@@ -283,7 +296,19 @@ export type EffectiveMeta = {
     restrictedExposed: number;
     hiddenBy: Partial<Record<ConfigSource, number>>;
   };
-  pricing: { pricelist: string | null; fromBook: number; fallback: number; manual: number; ctx: PricingContext; vatPolicy: VatPolicy };
+  pricing: {
+    pricelist: string | null;
+    fromBook: number;
+    fallback: number;
+    manual: number;
+    // RRP mode (CommercialConfig.priceMode "rrp"): rows priced from the RRP, and the
+    // discount off it. `rrpDiscountPct` is null on the partner mode.
+    mode: PriceMode;
+    rrpDiscountPct: number | null;
+    fromRrp: number;
+    ctx: PricingContext;
+    vatPolicy: VatPolicy;
+  };
   warnings: string[]; // e.g. "price-book-missing:VIP 2027", "currency-mismatch:CHF vs EUR", "vat-missing:DE"
 };
 
@@ -417,6 +442,8 @@ export type SnapshotPricing = {
   // Metakocka tax code for the rate at submit time (VAT settings → tax codes); null
   // when none was configured — registration then looks the settings up again.
   mkTaxCode?: string | null;
+  // Set when the customer was priced at RRP minus this discount (priceMode "rrp").
+  rrpDiscountPct?: number | null;
   totals: { net: number; vat: number; gross: number };
 };
 
@@ -781,6 +808,7 @@ export function campaignFromSnapshot(
           basis: snap.pricing.basis,
           countryIso: snap.pricing.countryIso,
           vat: { rate: snap.pricing.vatRate, source: snap.pricing.vatSource },
+          ...(snap.pricing.rrpDiscountPct != null ? { rrpDiscountPct: snap.pricing.rrpDiscountPct } : {}),
         }
       : null,
   };

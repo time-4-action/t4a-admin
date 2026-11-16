@@ -58,7 +58,7 @@ import {
   type PricingContext,
   type PriceBasis,
 } from "@/types/preorder";
-import { fmtVatRate, fromCents, pctOfCents, toCents, vatIsMissing, type OrderVatTotals } from "@/lib/pricing";
+import { fmtVatRate, fromCents, isRrpPriced, pctOfCents, toCents, vatIsMissing, type OrderVatTotals } from "@/lib/pricing";
 
 export function fmtMoney(amount: number, currency = "EUR"): string {
   try {
@@ -299,7 +299,7 @@ export function PreorderGridTab({
             <th className={cn(th, "text-left pl-4 min-w-[220px]")}>Product</th>
             <th className={cn(th, "text-left")}>SKU / EAN</th>
             <th className={cn(th, "text-right")}>{priceHeader("RRP", basis === "rrp" ? "incl. VAT" : "reference", basis === "rrp")}</th>
-            <th className={cn(th, "text-right")}>{priceHeader("Partner", "excl. VAT", basis === "partner")}</th>
+            <th className={cn(th, "text-right")}>{priceHeader(isRrpPriced(pricing) ? `RRP −${fmtVatRate(pricing?.rrpDiscountPct)}` : "Partner", "excl. VAT", basis === "partner")}</th>
             <th className={cn(th, "text-right w-28")}>{qtyHeader ?? "Qty"}</th>
             <th className={cn(th, "text-right pr-4 w-24")}>Total</th>
             {extraHeader}
@@ -1209,10 +1209,10 @@ export function SheetContextBar({
               {missing
                 ? `VAT rate not configured${pricing.countryIso ? ` for ${pricing.countryIso}` : ""} — cannot submit`
                 : company
-                  ? `Partner prices · ${(pricing.vat.rate ?? 0) > 0 ? `+${fmtVatRate(pricing.vat.rate)} VAT` : `${fmtVatRate(pricing.vat.rate)} VAT, ${pricing.vat.source === "exempt" ? "exempt" : "zero-rated"}`}`
+                  ? `${isRrpPriced(pricing) ? `RRP −${fmtVatRate(pricing.rrpDiscountPct)}` : "Partner prices"} · ${(pricing.vat.rate ?? 0) > 0 ? `+${fmtVatRate(pricing.vat.rate)} VAT` : `${fmtVatRate(pricing.vat.rate)} VAT, ${pricing.vat.source === "exempt" ? "exempt" : "zero-rated"}`}`
                   : pricing.basis === "rrp"
                     ? `RRP · incl. ${fmtVatRate(pricing.vat.rate)} VAT${pricing.countryIso ? ` (${pricing.countryIso})` : ""}`
-                    : `Partner prices · ${(pricing.vat.rate ?? 0) > 0 ? `+${fmtVatRate(pricing.vat.rate)} VAT${pricing.countryIso ? ` (${pricing.countryIso})` : ""}` : `${fmtVatRate(pricing.vat.rate)} VAT, ${pricing.vat.source === "exempt" ? "exempt" : "zero-rated"}`}`}
+                    : `${isRrpPriced(pricing) ? `RRP −${fmtVatRate(pricing.rrpDiscountPct)}` : "Partner prices"} · ${(pricing.vat.rate ?? 0) > 0 ? `+${fmtVatRate(pricing.vat.rate)} VAT${pricing.countryIso ? ` (${pricing.countryIso})` : ""}` : `${fmtVatRate(pricing.vat.rate)} VAT, ${pricing.vat.source === "exempt" ? "exempt" : "zero-rated"}`}`}
             </div>
           </div>
         </div>

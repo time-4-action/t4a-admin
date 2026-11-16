@@ -236,8 +236,9 @@ async function buildOrderInput(
     pricing.basis === "rrp"
       ? `VAT: ${CUSTOMER_KIND_LABELS[pricing.kind]}, RRP incl. ${fmtVatRate(pricing.vatRate)} VAT (${pricing.countryIso ?? "?"}, ${VAT_SOURCE_LABELS[pricing.vatSource].toLowerCase()})`
       : `VAT: ${CUSTOMER_KIND_LABELS[pricing.kind]}, partner prices excl. VAT, ${fmtVatRate(pricing.vatRate)} ${pricing.vatRate > 0 ? `added (${pricing.countryIso ?? "?"}, ${VAT_SOURCE_LABELS[pricing.vatSource].toLowerCase()})` : `(${VAT_SOURCE_LABELS[pricing.vatSource].toLowerCase()})`}`;
+  const rrpNote = pricing.rrpDiscountPct != null ? `Prices: RRP -${fmtVatRate(pricing.rrpDiscountPct)} (excl. VAT)` : "";
   const notes =
-    [doc.terms?.comment?.trim(), tierNotes.length ? `Volume discounts — ${tierNotes.join("; ")}` : "", vatNote].filter(Boolean).join("\n") ||
+    [doc.terms?.comment?.trim(), rrpNote, tierNotes.length ? `Volume discounts — ${tierNotes.join("; ")}` : "", vatNote].filter(Boolean).join("\n") ||
     undefined;
   const season = campaignDoc.season?.trim() || campaignDoc.title;
   const deliveryDeadline = mkDeliveryDeadline(doc.terms?.deliveryDate);

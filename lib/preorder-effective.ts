@@ -36,8 +36,9 @@ import {
   type PriceBook,
   marketMatches,
   type MarketKind,
+  type PriceMode,
 } from "@/types/preorder";
-import { basisFor, resolveVatRate, EMPTY_VAT_CONFIG, type PricingContext, type VatConfig, type VatPolicy } from "@/lib/pricing";
+import { basisFor, resolveVatRate, rrpNetUnit, EMPTY_VAT_CONFIG, type PricingContext, type VatConfig, type VatPolicy } from "@/lib/pricing";
 
 export type PartnerContext = {
   partnerMkId: string;
@@ -136,6 +137,17 @@ export function vatPolicyFor(layers: ConfigLayers): { policy: VatPolicy; source:
     },
     source,
   };
+}
+
+// The price mode of the layer a customer falls in: partner prices (default) or RRP
+// minus a discount. Both keys inherit on their own; `source` is the most specific
+// layer that set either.
+export function priceModeFor(layers: ConfigLayers): { mode: PriceMode; rrpDiscountPct: number; source: ConfigSource } {
+  const mode = pickScalar("priceMode", layers, null);
+  const pct = pickScalar("rrpDiscountPct", layers, null);
+  const rank: Record<ConfigSource, number> = { campaign: 0, market: 1, customer: 2 };
+  const source = rank[pct.source] > rank[mode.source] ? pct.source : mode.source;
+  return { mode: mode.value === "rrp" ? "rrp" : "partner", rrpDiscountPct: pct.value ?? 0, source };
 }
 
 // ── assortment ────────────────────────────────────────────────────────────────
@@ -261,7 +273,26 @@ export function resolveEffectiveCampaign(
   const vatPolicy = vatPolicyFor(layers);
   const vatRes = resolveVatRate({ kind, countryIso: ctx.countryIso, campaignOverrides: campaign.vatOverrides, global: vat, policy: vatPolicy.policy });
   if (vatRes.rate == null) warnings.push(`vat-missing:${ctx.countryIso ?? "no-country"}`);
-  const pricingCtx: PricingContext = { kind, basis: basisFor(kind), countryIso: ctx.countryIso, vat: vatRes };
+  // RRP mode: the unit is the gross RRP minus the layer's discount, with the VAT the
+  // RRP contains taken out at the customer's country rate — looked up as for an
+  // individual, whatever their kind, because a consumer price always carries VAT (an
+  // "exempt" layer still extracts it; a "fixed" one uses its rate). No rate ⇒ the rows
+  // cannot be priced and the customer cannot submit (never guessed).
+  const priceMode = priceModeFor(layers);
+  const rrpMode = priceMode.mode === "rrp";
+  let rrpVatRate: number | null = null;
+  if (rrpMode) {
+    const policy = vatPolicy.policy.mode === "exempt" ? { ...vatPolicy.policy, mode: "country" as const } : vatPolicy.policy;
+    rrpVatRate = resolveVatRate({ kind: "person", countryIso: ctx.countryIso, campaignOverrides: campaign.vatOverrides, global: vat, policy }).rate;
+    if (rrpVatRate == null) warnings.push(`rrp-vat-missing:${ctx.countryIso ?? "no-country"}`);
+  }
+  const pricingCtx: PricingContext = {
+    kind,
+    basis: basisFor(kind),
+    countryIso: ctx.countryIso,
+    vat: vatRes,
+    ...(rrpMode ? { rrpDiscountPct: priceMode.rrpDiscountPct } : {}),
+  };
 
   const pricelist = pickScalar("partnerPricelist", layers, campaign.partnerPricelist ?? null);
   const currency = pickScalar("currency", layers, campaign.currency);
@@ -274,7 +305,8 @@ export function resolveEffectiveCampaign(
 
   // Price book: only when the effective list differs from the sheet's own list (the
   // sheet's row prices ARE that list's book).
-  const usesBook = !!effectivePricelist && !samePricelist(effectivePricelist, campaign.partnerPricelist);
+  // (RRP mode never reads a price list.)
+  const usesBook = !rrpMode && !!effectivePricelist && !samePricelist(effectivePricelist, campaign.partnerPricelist);
   const book = usesBook ? findPriceBook(campaign, effectivePricelist) : null;
   if (usesBook && !book) warnings.push(`price-book-missing:${effectivePricelist}`);
   if (book?.currency && book.currency.toUpperCase() !== effectiveCurrency.toUpperCase()) {
@@ -285,7 +317,18 @@ export function resolveEffectiveCampaign(
   const assort = applyAssortment(campaign, layers);
   for (const id of assort.staleIds) warnings.push(`stale-assortment-id:${id}`);
 
-  const pricing = { pricelist: effectivePricelist, fromBook: 0, fallback: 0, manual: 0, ctx: pricingCtx, vatPolicy: vatPolicy.policy };
+  const pricing = {
+    pricelist: rrpMode ? null : effectivePricelist,
+    fromBook: 0,
+    fallback: 0,
+    manual: 0,
+    mode: priceMode.mode,
+    rrpDiscountPct: rrpMode ? priceMode.rrpDiscountPct : null,
+    fromRrp: 0,
+    ctx: pricingCtx,
+    vatPolicy: vatPolicy.policy,
+  };
+  const noRrpCodes: string[] = [];
   const tierSources: Record<string, ConfigSource> = {};
   const missingCodes: string[] = [];
   const unpricedCodes: string[] = [];
@@ -298,6 +341,20 @@ export function resolveEffectiveCampaign(
       for (const row of group.rows) {
         if (!assort.visible.has(row.id)) continue;
         let out: PreorderRow;
+        if (rrpMode) {
+          // The partner price is replaced (never kept as a fallback), so it cannot
+          // reach the customer; a row without an RRP is listed but not orderable.
+          const net = rrpVatRate != null ? rrpNetUnit(row.rrp, priceMode.rrpDiscountPct, rrpVatRate) : null;
+          out = { ...row, partnerPrice: net, discountedPrice: null, priceSource: "rrp" };
+          if (net != null) {
+            pricing.fromRrp += 1;
+          } else {
+            out = { ...out, unpriced: true };
+            if (row.rrp == null) noRrpCodes.push(row.code); // (no VAT rate ⇒ one rrp-vat-missing warning)
+          }
+          rows.push(out);
+          continue;
+        }
         if (usesBook) {
           const entry = bookByCode.get(row.code);
           if (entry && entry.net != null) {
@@ -339,6 +396,8 @@ export function resolveEffectiveCampaign(
     for (const code of missingCodes.slice(0, 20)) warnings.push(`price-missing:${code}`);
     if (missingCodes.length > 20) warnings.push(`price-missing:+${missingCodes.length - 20} more`);
   }
+  for (const code of noRrpCodes.slice(0, 20)) warnings.push(`rrp-missing:${code}`);
+  if (noRrpCodes.length > 20) warnings.push(`rrp-missing:+${noRrpCodes.length - 20} more`);
   if (unpricedCodes.length) {
     for (const code of unpricedCodes.slice(0, 20)) warnings.push(`unpriced:${code}`);
     if (unpricedCodes.length > 20) warnings.push(`unpriced:+${unpricedCodes.length - 20} more`);
@@ -351,6 +410,7 @@ export function resolveEffectiveCampaign(
     note: note.source,
     minOrderAmount: minOrder.source,
     vat: vatPolicy.source,
+    priceMode: priceMode.source,
     tiers: tierSources,
   };
 
@@ -413,11 +473,12 @@ export function resolveProvenanceOnly(
       note: note.source,
       minOrderAmount: minOrder.source,
       vat: vatPolicyFor(layers).source,
+      priceMode: priceModeFor(layers).source,
       tiers: {},
     },
     warnings: layers.warnings,
     overrides: {
-      pricing: has(cfg, "partnerPricelist"),
+      pricing: has(cfg, "partnerPricelist") || has(cfg, "priceMode") || has(cfg, "rrpDiscountPct"),
       assortment: has(cfg, "hiddenIds") || has(cfg, "exposedIds"),
       tiers: has(cfg, "tiersByTab"),
       commercial: has(cfg, "currency") || has(cfg, "deadline") || has(cfg, "note") || has(cfg, "minOrderAmount") || has(cfg, "vatMode") || has(cfg, "vatRate") || has(cfg, "vatCompanies"),

@@ -86,6 +86,7 @@ export function buildCommercialSnapshot(
           vatRate: ctx.vat.rate,
           vatSource: ctx.vat.source,
           mkTaxCode: taxCodeForRate(vat?.taxCodes, ctx.vat.rate),
+          ...(ctx.rrpDiscountPct != null ? { rrpDiscountPct: ctx.rrpDiscountPct } : {}),
           totals: { net: priced.vat.net, vat: priced.vat.vat, gross: priced.vat.gross },
         }
       : null;

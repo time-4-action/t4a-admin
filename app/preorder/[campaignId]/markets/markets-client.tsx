@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Globe2, Users, Plus, Layers, Loader2, RefreshCw, AlertTriangle, Building2, User, LockOpen } from "lucide-react";
+import { ArrowLeft, Globe2, Users, Plus, Layers, Loader2, RefreshCw, AlertTriangle, Building2, User, LockOpen, Tags } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -122,6 +122,28 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
   const toast = (msg: string) => {
     setFlash(msg);
     setTimeout(() => setFlash(null), 3500);
+  };
+
+  // Re-read the Metakocka price lists (a list created in MK just now) and rebuild the
+  // price books of every list the markets / customer overrides use.
+  const [refreshingPrices, setRefreshingPrices] = useState(false);
+  const refreshPrices = async () => {
+    setRefreshingPrices(true);
+    try {
+      const [pl, books] = await Promise.all([
+        fetch("/api/admin/preorder/pricelists?refresh=1", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
+        fetch(`/api/admin/preorder/campaigns/${campaignId}/price-books/refresh`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+      ]);
+      if (!mounted.current) return;
+      if (pl?.pricelists) setPricelists(pl.pricelists);
+      await refreshAll();
+      const n = Array.isArray(books?.result) ? (books.result as unknown[]).length : null;
+      toast(books ? `Prices refreshed${n != null ? ` · ${n} price list${n === 1 ? "" : "s"} in use` : ""}` : "Price lists reloaded — price books could not be refreshed");
+    } finally {
+      if (mounted.current) setRefreshingPrices(false);
+    }
   };
 
   // URL ↔ view.
@@ -305,6 +327,16 @@ export default function MarketsClient({ campaignId }: { campaignId: string }) {
           <>
             <Button size="sm" variant="outline" className="h-8" onClick={startSync} disabled={syncing} title={syncInfo ?? undefined}>
               {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} <span className="hidden md:inline">Sync from Metakocka</span>
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8"
+              onClick={refreshPrices}
+              disabled={refreshingPrices}
+              title="Reload the Metakocka price lists and rebuild the prices of every list a market or customer uses"
+            >
+              {refreshingPrices ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Tags className="w-3.5 h-3.5" />} <span className="hidden md:inline">Refresh prices</span>
             </Button>
             <Button size="sm" className="h-8" onClick={() => openMarket(null)}><Plus className="w-3.5 h-3.5" /> New market</Button>
           </>

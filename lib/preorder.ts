@@ -26,7 +26,7 @@ import { countryIsoFromPartner, type CountrySource } from "@/lib/countries";
 import { normalizeIso } from "@/lib/countries-client";
 import { resolveEffectiveCampaign, resolvePartnerContext, type PartnerContext } from "@/lib/preorder-effective";
 import { getVatSettings } from "@/lib/vat-settings";
-import { normalizeVatRate, VAT_MODES, type VatConfig, type VatMode } from "@/lib/pricing";
+import { normalizeDiscountPct, normalizeVatRate, VAT_MODES, type VatConfig, type VatMode } from "@/lib/pricing";
 import type { MkPartner } from "@/types/documents";
 import {
   isLegacyMkOrder,
@@ -52,6 +52,8 @@ import {
   type MarketColor,
   MARKET_KINDS,
   type MarketKind,
+  PRICE_MODES,
+  type PriceMode,
 } from "@/types/preorder";
 
 export { connectDB };
@@ -161,6 +163,8 @@ export function sanitizeCommercialConfig(raw: unknown): CommercialConfig {
   if ("vatMode" in r) out.vatMode = (VAT_MODES as readonly string[]).includes(String(r.vatMode)) ? (r.vatMode as VatMode) : null;
   if ("vatRate" in r) out.vatRate = normalizeVatRate(r.vatRate);
   if ("vatCompanies" in r) out.vatCompanies = r.vatCompanies == null ? null : !!r.vatCompanies;
+  if ("priceMode" in r) out.priceMode = (PRICE_MODES as readonly string[]).includes(String(r.priceMode)) ? (r.priceMode as PriceMode) : null;
+  if ("rrpDiscountPct" in r) out.rrpDiscountPct = normalizeDiscountPct(r.rrpDiscountPct);
   if ("tiersByTab" in r) {
     const list = Array.isArray(r.tiersByTab) ? (r.tiersByTab as Record<string, unknown>[]) : [];
     const seen = new Set<string>();
@@ -218,6 +222,8 @@ function configView(c?: ICommercialConfig | null): CommercialConfig {
   if (c.vatMode !== undefined) out.vatMode = c.vatMode ?? null;
   if (c.vatRate !== undefined) out.vatRate = c.vatRate ?? null;
   if (c.vatCompanies !== undefined) out.vatCompanies = c.vatCompanies ?? null;
+  if (c.priceMode !== undefined) out.priceMode = c.priceMode ?? null;
+  if (c.rrpDiscountPct !== undefined) out.rrpDiscountPct = c.rrpDiscountPct ?? null;
   if (c.tiersByTab !== undefined) {
     out.tiersByTab = c.tiersByTab.map((t) => ({
       tabId: t.tabId,
@@ -234,7 +240,7 @@ function rawConfig(doc: { config?: unknown }): ICommercialConfig | null {
   if (!c) return null;
   const plain = typeof c.toObject === "function" ? c.toObject() : c;
   const out: ICommercialConfig = {};
-  for (const k of ["partnerPricelist", "currency", "deadline", "note", "minOrderAmount", "hiddenIds", "exposedIds", "tiersByTab", "vatMode", "vatRate", "vatCompanies"] as const) {
+  for (const k of ["partnerPricelist", "currency", "deadline", "note", "minOrderAmount", "hiddenIds", "exposedIds", "tiersByTab", "vatMode", "vatRate", "vatCompanies", "priceMode", "rrpDiscountPct"] as const) {
     if (plain[k] !== undefined) (out as Record<string, unknown>)[k] = plain[k];
   }
   return out;
@@ -361,6 +367,7 @@ export function snapshotView(s?: ICommercialSnapshot | null): CommercialSnapshot
       note: s.sources?.note ?? "campaign",
       minOrderAmount: s.sources?.minOrderAmount ?? "campaign",
       vat: s.sources?.vat ?? "campaign",
+      priceMode: s.sources?.priceMode ?? "campaign",
       tiers,
     },
     tabs: (s.tabs ?? []).map((t) => ({
@@ -401,6 +408,7 @@ export function snapshotView(s?: ICommercialSnapshot | null): CommercialSnapshot
           vatRate: s.pricing.vatRate,
           vatSource: s.pricing.vatSource,
           mkTaxCode: s.pricing.mkTaxCode ?? null,
+          ...(s.pricing.rrpDiscountPct != null ? { rrpDiscountPct: s.pricing.rrpDiscountPct } : {}),
           totals: {
             net: s.pricing.totals?.net ?? 0,
             vat: s.pricing.totals?.vat ?? 0,

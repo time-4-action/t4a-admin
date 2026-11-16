@@ -163,7 +163,7 @@ export function describeWarnings(codes: string[]): string[] {
     const i = w.indexOf(":");
     const kind = i === -1 ? w : w.slice(0, i);
     const arg = i === -1 ? "" : w.slice(i + 1);
-    if (kind === "price-missing" || kind === "unpriced" || kind === "stale-assortment-id") {
+    if (kind === "price-missing" || kind === "unpriced" || kind === "stale-assortment-id" || kind === "rrp-missing") {
       const more = /^\+(\d+) more$/.exec(arg);
       if (more) extra = { ...extra, [kind]: Number(more[1]) };
       else (grouped[kind] ??= []).push(arg);
@@ -175,6 +175,11 @@ export function describeWarnings(codes: string[]): string[] {
           arg === "no-country"
             ? "No VAT rate: the customer's country is unknown and no fallback rate is set — an individual cannot submit."
             : `No VAT rate configured for ${arg} (and no fallback) — individuals there cannot submit. Set it under Preorder → VAT rates or override it on the campaign.`,
+        );
+        break;
+      case "rrp-vat-missing":
+        out.push(
+          `Priced at RRP − %, but no VAT rate is known for ${arg === "no-country" ? "this customer's country" : arg} to take out of the RRP — nothing can be ordered. Set it under Preorder → VAT rates.`,
         );
         break;
       case "kind-unknown":
@@ -202,6 +207,10 @@ export function describeWarnings(codes: string[]): string[] {
   if (grouped["unpriced"]) {
     const { n, tail } = list("unpriced");
     out.push(`${n} product${n === 1 ? " has" : "s have"} no price at all and cannot be ordered — fill the partner price on the sheet to offer ${n === 1 ? "it" : "them"}: ${tail}.`);
+  }
+  if (grouped["rrp-missing"]) {
+    const { n, tail } = list("rrp-missing");
+    out.push(`${n} product${n === 1 ? " has" : "s have"} no RRP and cannot be ordered at RRP − % — fill the RRP on the sheet: ${tail}.`);
   }
   if (grouped["price-missing"]) {
     const { n, tail } = list("price-missing");
