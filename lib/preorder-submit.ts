@@ -7,14 +7,31 @@ import "server-only";
 // picked by the admin). One implementation so validation, snapshotting and the MK
 // registration cannot drift apart.
 //
+// Which preorder a write goes to: the one named by `submissionId`, else the partner's
+// open draft, else a new one — preorder 1, or (campaign `allowMultiplePreorders`) the
+// next number after the partner's last. Without that flag a partner whose preorder is
+// submitted gets 409 `locked`, exactly as before.
+//
 // Race safety without optimistic concurrency: every write is ONE atomic
-// findOneAndUpdate whose filter includes `status: "draft"`, upserting into the unique
-// (campaignId, partnerMkId) slot. A locked (submitted) document makes the filter miss,
-// the upsert then tries to insert a second document and the unique index rejects it
-// (E11000) ⇒ 409 `locked`. Two browser tabs submitting at once therefore produce exactly
-// one transition; the loser never reaches Metakocka.
+// findOneAndUpdate whose filter includes `status: "draft"`. A new preorder upserts into
+// the unique (campaignId, partnerMkId, seq) slot: when another tab submitted that slot
+// first, the filter misses, the upsert tries to insert a second document and the unique
+// index rejects it (E11000) ⇒ 409 `locked`. An existing draft is updated by _id without
+// upsert; a miss means it was submitted meanwhile ⇒ 409 `locked`. Two browser tabs
+// submitting at once therefore produce exactly one transition; the loser never reaches
+// Metakocka.
 
-import { connectDB, PreorderCampaign, PreorderSubmission, loadEffectiveCampaignForPartner, toObjectId, type PartnerFacts } from "@/lib/preorder";
+import {
+  connectDB,
+  PreorderCampaign,
+  PreorderSubmission,
+  loadEffectiveCampaignForPartner,
+  toObjectId,
+  ensureSubmissionSlots,
+  partnerSubmissions,
+  defaultSubmission,
+  type PartnerFacts,
+} from "@/lib/preorder";
 import { getMkCustomer, effectiveCountryIso, customerKind } from "@/lib/mk-customers";
 import { getPartnerById } from "@/lib/metakocka";
 import { getVatSettings } from "@/lib/vat-settings";
@@ -35,6 +52,9 @@ export type SubmitInput = {
   terms: PreorderTerms | undefined;
   action: "save" | "submit";
   actor: SubmitActor;
+  // The preorder to write (one of this partner's in this campaign). Absent = the open
+  // draft, else a new preorder.
+  submissionId?: string | null;
   // Tests inject a fake Metakocka port.
   port?: MkOrderPort;
   now?: Date;
@@ -138,8 +158,37 @@ export async function saveOrSubmitPreorder(input: SubmitInput): Promise<SubmitRe
     comment: terms.comment,
   };
 
+  // Which preorder this write goes to (see the header comment).
+  await ensureSubmissionSlots();
+  const subs = await partnerSubmissions(campaignId, partner.mkId);
+  const lockedResult = (doc: IPreorderSubmission | null): SubmitResult => ({
+    ok: false,
+    status: 409,
+    error: "locked",
+    message: "This preorder has already been submitted and is locked.",
+    doc,
+  });
+  let existing: IPreorderSubmission | null;
+  if (input.submissionId) {
+    existing = subs.find((s) => String(s._id) === input.submissionId) ?? null;
+    if (!existing) return { ok: false, status: 404, error: "invalid", message: "Preorder not found." };
+  } else {
+    existing = subs.find((s) => s.status === "draft") ?? null;
+  }
+  let slot: Record<string, unknown>;
+  if (existing) {
+    if (existing.status !== "draft") return lockedResult(existing);
+    slot = { _id: existing._id };
+  } else if (subs.length === 0) {
+    slot = { campaignId, partnerMkId: partner.mkId, seq: 1 };
+  } else if (campaignDoc.allowMultiplePreorders) {
+    slot = { campaignId, partnerMkId: partner.mkId, seq: Math.max(...subs.map((s) => s.seq ?? 1)) + 1 };
+  } else {
+    return lockedResult(defaultSubmission(subs));
+  }
+  const upsert = !existing;
+
   // Line fulfilment fields are legacy; carry them over unchanged for surviving rows.
-  const existing = await PreorderSubmission.findOne({ campaignId, partnerMkId: partner.mkId }).exec();
   const prevByRow = new Map((existing?.lines ?? []).map((l) => [l.rowId, l]));
   const lines: ISubmissionLine[] = Object.entries(cleanQty).map(([rowId, qty]) => {
     const prev = prevByRow.get(rowId);
@@ -168,14 +217,14 @@ export async function saveOrSubmitPreorder(input: SubmitInput): Promise<SubmitRe
   try {
     if (!submit) {
       doc = await PreorderSubmission.findOneAndUpdate(
-        { campaignId, partnerMkId: partner.mkId, status: "draft" },
+        { ...slot, status: "draft" },
         { $set: { lines, totals, terms: termsDoc, ...identity } },
-        { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
+        { upsert, returnDocument: "after", setDefaultsOnInsert: true },
       ).exec();
     } else {
       const snapshot = buildCommercialSnapshot(effective, cleanQty, now, vat);
       doc = await PreorderSubmission.findOneAndUpdate(
-        { campaignId, partnerMkId: partner.mkId, status: "draft" },
+        { ...slot, status: "draft" },
         {
           $set: {
             status: "submitted",
@@ -198,7 +247,7 @@ export async function saveOrSubmitPreorder(input: SubmitInput): Promise<SubmitRe
           $inc: { submitRevision: 1 },
           $setOnInsert: { firstSubmittedAt: now },
         },
-        { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
+        { upsert, returnDocument: "after", setDefaultsOnInsert: true },
       ).exec();
       if (doc) {
         // Deterministic key; also recomputable from _id + revision by the retry path.
@@ -210,11 +259,13 @@ export async function saveOrSubmitPreorder(input: SubmitInput): Promise<SubmitRe
     }
   } catch (err) {
     if (isDuplicateKey(err)) {
-      const locked = await PreorderSubmission.findOne({ campaignId, partnerMkId: partner.mkId }).exec();
-      return { ok: false, status: 409, error: "locked", message: "This preorder has already been submitted and is locked.", doc: locked };
+      const taken = await PreorderSubmission.findOne(slot).exec();
+      return lockedResult(taken);
     }
     throw err;
   }
+  // Updating an existing draft by _id: a miss means it was submitted meanwhile.
+  if (!doc && existing) return lockedResult(await PreorderSubmission.findById(existing._id).exec());
   if (!doc) return { ok: false, status: 500, error: "invalid", message: "could not save the submission" };
 
   // 3. Immediate Metakocka registration (the transition above holds the lock).

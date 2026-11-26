@@ -87,7 +87,7 @@ MongoDB connection is cached on `global._mongooseConn` to survive Next.js hot-re
 | `Conversation` | `conversations` | One document per conversation; used only to count `convToday` on the dashboard. |
 | `BuilderPreset` | `builderpresets` | A saved Section Builder configuration, **shared** across everyone with builder access. `config` is the builder's own state blob (opaque to the server); carries creator/last-editor stamps, a `versionLabel`, a notes thread, and a capped version history. Index on `(builder, updatedAt)`. |
 | `PreorderCampaign` | `preordercampaigns` | One master order sheet (`tabs` → groups → rows) + embedded `markets[]`, `customerRules[]`, `priceBooks[]`, `vatOverrides[]`, invite `shareToken`. See the Preorder module. |
-| `PreorderSubmission` | `preordersubmissions` | One partner's response per campaign (unique `(campaignId, partnerMkId)`): lines, totals, frozen `snapshot`, MK order reference `mkSalesOrder` + sync state `mkOrder`, publication flags, detached-order history. Indexes on `partnerMkId + mkOrder.state`, `mkSalesOrder.mkId`, `mkOrder.buyerOrder`. |
+| `PreorderSubmission` | `preordersubmissions` | One partner's preorder in a campaign (unique `(campaignId, partnerMkId, seq)`; `seq` 1 = first, more only when the campaign has `allowMultiplePreorders`): lines, totals, frozen `snapshot`, MK order reference `mkSalesOrder` + sync state `mkOrder`, publication flags, detached-order history. Indexes on `partnerMkId + mkOrder.state`, `mkSalesOrder.mkId`, `mkOrder.buyerOrder`. |
 | `PreorderAccess` | `preorderaccesses` | The invite grant (`(campaignId, partnerMkId)` unique) — the campaign access boundary. |
 | `MkCustomer` | `mkcustomers` | Directory of Metakocka partners (address, tax id, resolved country, manual country, stale flag) feeding Markets & Customers; `MkCustomerSyncState` (singleton) tracks the full sync. |
 | `PortalAgent` | `portalagents` | A portal **agent** (unique `partnerMkId` = the agent's own Metakocka partner) + the `clients[]` partners they may see and order for. See Portal agents in the B2B Customer Portal module. |
@@ -913,10 +913,23 @@ else `person`) decides the VAT only:
 `saveOrSubmitPreorder()` is the one service behind
 `POST /api/portal/preorder/submissions` (an admin "viewing as" a customer goes
 through it too — there is no separate admin submit route).
+**Multiple preorders per customer** (campaign `allowMultiplePreorders`, the
+"Allow multiple preorders per customer" checkbox in the Sheet's Campaign settings,
+off by default): a write goes to `submissionId` if given, else the partner's open
+draft, else a new preorder — `seq` 1, or the next `seq` when the flag is on (flag
+off + a submitted preorder ⇒ 409 `locked`, the old behaviour). Each preorder is
+priced on its own (own tier, own minimum order) and gets its own MK order (the
+`buyer_order` key is per submission id). The portal fill page takes
+`?submission=<id>` / `?new=1` (campaign GET answers `preorders[]` for the switcher
+and a "New preorder" button), the portal list shows one row per preorder, admin
+tables label `Preorder n`. `ensureSubmissionSlots()` (`lib/preorder.ts`, once per
+process before the first write) backfills `seq: 1` and drops the old
+`campaignId_1_partnerMkId_1` unique index on existing databases.
 Race safety without optimistic concurrency: each write is a single
-`findOneAndUpdate` upsert whose filter includes `status: "draft"` on the unique
-`(campaignId, partnerMkId)` slot — a locked document makes the filter miss, the
-upsert hits the unique index (E11000) ⇒ 409 `locked`. Submit stores the
+`findOneAndUpdate` whose filter includes `status: "draft"` — a new preorder
+upserts into the unique `(campaignId, partnerMkId, seq)` slot (a slot submitted
+by another tab makes the filter miss, the upsert hits the unique index (E11000)
+⇒ 409 `locked`), an existing draft is updated by `_id` (a miss ⇒ 409 `locked`). Submit stores the
 **commercial snapshot** (`snapshot`: resolved lines with the used unit price,
 `rrp` + `partnerPrice`, the frozen per-line `unitNet/unitVat/unitGross` +
 `lineNet/lineVat/lineGross`, tiers, market, list, currency, sources — only

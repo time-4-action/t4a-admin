@@ -120,7 +120,10 @@ export function PreordersTable({
           <TableRow key={s.id} className="border-b border-border/60 hover:bg-muted/30 group">
             <TableCell className="pl-5 py-2.5">
               <Link href={`/preorder/${campaignId}/submissions/${s.id}`} className="block min-w-0 focus-visible:outline-none">
-                <div className="text-[13px] font-medium text-foreground group-hover:underline truncate">{s.partnerName}</div>
+                <div className="text-[13px] font-medium text-foreground group-hover:underline truncate">
+                  {s.partnerName}
+                  {(s.seq ?? 1) > 1 && <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">· Preorder {s.seq}</span>}
+                </div>
                 {s.partnerEmail && <div className="text-[11px] text-muted-foreground truncate">{s.partnerEmail}</div>}
               </Link>
             </TableCell>

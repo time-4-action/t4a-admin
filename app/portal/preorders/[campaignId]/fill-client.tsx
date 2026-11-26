@@ -35,6 +35,7 @@ import {
   ImageIcon,
   Percent,
   HelpCircle,
+  Plus,
 } from "lucide-react";
 import { GuidedTour, type TourStep } from "@/components/guided-tour";
 import { fmtMoney } from "@/app/preorder/preorder-shared";
@@ -66,6 +67,7 @@ import {
   type PreorderTerms,
   type LineStatus,
   type PricingContext,
+  type PortalPreorderRef,
 } from "@/types/preorder";
 
 type Mode = FillMode;
@@ -90,14 +92,43 @@ type LoadData = {
   allocation?: AllocationResult;
   orderMkId?: string | null;
   partner?: { name: string };
+  preorders?: PortalPreorderRef[];
 };
+
+// The fill page URL of one of the customer's preorders in this campaign.
+function fillHref(campaignId: string, account: string, opts: { submission?: string | null; isNew?: boolean }): string {
+  const qs = new URLSearchParams();
+  if (account) qs.set("account", account);
+  if (opts.submission) qs.set("submission", opts.submission);
+  if (opts.isNew) qs.set("new", "1");
+  const q = qs.toString();
+  return `/portal/preorders/${campaignId}${q ? `?${q}` : ""}`;
+}
 
 const TOUR_KEY = "t4a.portal.preorder-guide.v1";
 
 // `account` — a portal agent filling for one of their clients (validated server-side
 // against the agent's accounts; absent = the user's own partner).
-export default function FillClient({ campaignId, account = "" }: { campaignId: string; account?: string }) {
+// `initialSubmission` / `startNew` — which of the customer's preorders to open when the
+// campaign allows several (`?submission=<id>` / `?new=1`); neither = the open draft,
+// else the latest.
+export default function FillClient({
+  campaignId,
+  account = "",
+  initialSubmission = "",
+  startNew = false,
+}: {
+  campaignId: string;
+  account?: string;
+  initialSubmission?: string;
+  startNew?: boolean;
+}) {
   const accountQs = account ? `?account=${encodeURIComponent(account)}` : "";
+  // The preorder this page is on. Empty until a new preorder is first saved; then the
+  // URL is pointed at it so a reload stays on the same preorder.
+  const [subId, setSubId] = useState(initialSubmission);
+  const subIdRef = useRef(initialSubmission);
+  const [preorders, setPreorders] = useState<PortalPreorderRef[]>([]);
   const [campaign, setCampaign] = useState<PortalCampaign | null>(null);
   const [frozen, setFrozen] = useState<PreorderCampaign | null>(null);
   const [allocation, setAllocation] = useState<AllocationResult | null>(null);
@@ -127,6 +158,7 @@ export default function FillClient({ campaignId, account = "" }: { campaignId: s
     setAllocation(data.allocation ?? null);
     setOrderMkId(data.orderMkId ?? null);
     setSubmission(data.submission);
+    setPreorders(data.preorders ?? []);
     setPartnerName(data.partner?.name ?? data.submission?.partnerName ?? "");
     setStatus(data.submission.status);
     setTerms(data.submission.terms ?? {});
@@ -136,11 +168,31 @@ export default function FillClient({ campaignId, account = "" }: { campaignId: s
   }, []);
 
   const load = useCallback(async () => {
-    const r = await fetch(`/api/portal/preorder/campaigns/${campaignId}${accountQs}`, { cache: "no-store" });
+    const qs = new URLSearchParams();
+    if (account) qs.set("account", account);
+    if (subIdRef.current) qs.set("submission", subIdRef.current);
+    else if (startNew) qs.set("new", "1");
+    const q = qs.toString();
+    const r = await fetch(`/api/portal/preorder/campaigns/${campaignId}${q ? `?${q}` : ""}`, { cache: "no-store" });
     const data = await r.json();
     if (!r.ok) throw new Error(data?.error === "no-account" ? "no-account" : "not-found");
     return data as LoadData;
-  }, [campaignId, accountQs]);
+  }, [campaignId, account, startNew]);
+
+  // Remember which preorder this page is on once the server has given it an id.
+  const multiple = !!campaign?.allowMultiplePreorders;
+  useEffect(() => {
+    const id = submission?.id ?? "";
+    if (!id || id === subId) return;
+    subIdRef.current = id;
+    setSubId(id);
+    if (!multiple) return;
+    try {
+      window.history.replaceState(null, "", fillHref(campaignId, account, { submission: id }));
+    } catch {
+      /* ignore */
+    }
+  }, [submission?.id, subId, multiple, campaignId, account]);
 
   useEffect(() => {
     mounted.current = true;
@@ -254,11 +306,12 @@ export default function FillClient({ campaignId, account = "" }: { campaignId: s
         const r = await fetch(`/api/portal/preorder/submissions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ campaignId, account: account || undefined, quantities, terms, action }),
+          body: JSON.stringify({ campaignId, submissionId: subIdRef.current || undefined, account: account || undefined, quantities, terms, action }),
         });
         const data = await r.json();
         if (r.status === 409 && data?.error === "locked") throw new Error("This preorder is locked. Please contact us to make changes.");
         if (!r.ok) throw new Error(data?.message ?? data?.error ?? "Save failed");
+        if (data.submission?.id) subIdRef.current = data.submission.id;
         const dropped: string[] = data.dropped ?? [];
         if (action === "submit") {
           // Reload everything: the frozen sheet and registration state come from the server.
@@ -314,11 +367,12 @@ export default function FillClient({ campaignId, account = "" }: { campaignId: s
         const r = await fetch(`/api/portal/preorder/submissions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ campaignId, account: account || undefined, quantities, terms, action: "save" }),
+          body: JSON.stringify({ campaignId, submissionId: subIdRef.current || undefined, account: account || undefined, quantities, terms, action: "save" }),
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(data?.message ?? data?.error ?? "Autosave failed");
         if (data.submission) {
+          if (data.submission.id) subIdRef.current = data.submission.id;
           setSubmission(data.submission);
           setStatus(data.submission.status);
         }
@@ -356,7 +410,7 @@ export default function FillClient({ campaignId, account = "" }: { campaignId: s
       const r = await fetch(`/api/portal/preorder/unlock-request`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ campaignId, account: account || undefined, note: requestNote }),
+        body: JSON.stringify({ campaignId, submissionId: subIdRef.current || undefined, account: account || undefined, note: requestNote }),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data?.error ?? "Failed");
@@ -690,9 +744,27 @@ export default function FillClient({ campaignId, account = "" }: { campaignId: s
                   <Lock className="w-3 h-3" /> Locked
                 </span>
               )}
+              {multiple && (
+                <PreorderSwitcher
+                  current={submission}
+                  preorders={preorders}
+                  onPick={(id) => { window.location.href = fillHref(campaignId, account, { submission: id }); }}
+                />
+              )}
             </div>
           </div>
           <div className="flex-1" />
+          {multiple && campaign.status === "open" && status !== "draft" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => { window.location.href = fillHref(campaignId, account, { isNew: true }); }}
+              className="h-8 text-[12px] shrink-0"
+              title="Start another preorder in this campaign"
+            >
+              <Plus className="w-3.5 h-3.5" /> New preorder
+            </Button>
+          )}
           {!locked && (
             <DiscountStatus tab={activeTab} tabs={sheet.tabs} quantities={quantities} currency={currency} pricing={sheet.pricing} className="shrink-0" />
           )}
@@ -1231,5 +1303,38 @@ function ViewRow({ label, value, className }: { label: string; value?: string | 
       <dt className="text-[11px] font-medium text-muted-foreground">{label}</dt>
       <dd className="text-[13px] text-foreground break-words">{value || "—"}</dd>
     </div>
+  );
+}
+
+// Which of the customer's preorders in this campaign is open, and a way to jump to the
+// others (only on campaigns that allow several).
+function PreorderSwitcher({
+  current,
+  preorders,
+  onPick,
+}: {
+  current: PortalSubmission | null;
+  preorders: PortalPreorderRef[];
+  onPick: (id: string) => void;
+}) {
+  const seq = current?.seq ?? 1;
+  const isNew = !current?.id;
+  if (preorders.length === 0 || (preorders.length === 1 && !isNew)) {
+    return <span className="inline-flex items-center gap-1 font-medium text-foreground">Preorder {seq}</span>;
+  }
+  const label = (p: PortalPreorderRef) =>
+    `Preorder ${p.seq} · ${p.status === "draft" ? "draft" : p.submittedAt ? `submitted ${fmtDate(p.submittedAt)}` : "submitted"}`;
+  return (
+    <select
+      value={current?.id ?? ""}
+      onChange={(e) => e.target.value && onPick(e.target.value)}
+      aria-label="Your preorders in this campaign"
+      className="h-5 rounded border border-border bg-background px-1 text-[11px] font-medium text-foreground"
+    >
+      {isNew && <option value="">Preorder {seq} · new</option>}
+      {preorders.map((p) => (
+        <option key={p.id} value={p.id}>{label(p)}</option>
+      ))}
+    </select>
   );
 }

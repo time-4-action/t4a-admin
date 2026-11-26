@@ -525,6 +525,7 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
             deadline: campaign.deadline,
             rrpPricelist: campaign.rrpPricelist ?? null,
             partnerPricelist: campaign.partnerPricelist ?? null,
+            allowMultiplePreorders: !!campaign.allowMultiplePreorders,
             ...(statusOverride ? { status: statusOverride } : {}),
             tabs,
           }),
@@ -1097,6 +1098,20 @@ export default function BuilderClient({ campaignId }: { campaignId: string }) {
                 </div>
                 <p className="mt-1 text-[11px] text-muted-foreground">Shown to customers on their preorder page. Display only — it does not lock the sheet.</p>
               </div>
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!campaign.allowMultiplePreorders}
+                  onChange={(e) => mutate((c) => ({ ...c, allowMultiplePreorders: e.target.checked }))}
+                  className="mt-0.5 h-4 w-4 accent-lime-600"
+                />
+                <span>
+                  <span className="block text-[12px] font-medium text-foreground">Allow multiple preorders per customer</span>
+                  <span className="block mt-0.5 text-[11px] text-muted-foreground">
+                    After submitting, a customer can start another preorder. Each one is priced on its own (its own volume discount and minimum order) and becomes its own Metakocka order.
+                  </span>
+                </span>
+              </label>
             </div>
             <div className="flex justify-end pt-1"><Button size="sm" onClick={() => setSettingsOpen(false)}>Done</Button></div>
           </DialogContent>

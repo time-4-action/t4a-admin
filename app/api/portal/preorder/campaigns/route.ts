@@ -39,7 +39,12 @@ export async function GET(req: NextRequest) {
     PreorderAccess.find({ partnerMkId: { $in: ids } }).exec(),
   ]);
   const key = (campaignId: unknown, partnerMkId: string) => `${String(campaignId)}|${partnerMkId}`;
-  const subByKey = new Map(subs.map((s) => [key(s.campaignId, s.partnerMkId), s]));
+  // A (campaign, account) may hold several preorders (`allowMultiplePreorders`).
+  const subsByKey = new Map<string, typeof subs>();
+  for (const s of [...subs].sort((a, b) => (a.seq ?? 1) - (b.seq ?? 1))) {
+    const k = key(s.campaignId, s.partnerMkId);
+    subsByKey.set(k, [...(subsByKey.get(k) ?? []), s]);
+  }
 
   // Union of (campaign, account) pairs granted (unlocked) and already submitted to.
   const pairs = new Map<string, { campaignId: string; partnerMkId: string }>();
@@ -61,8 +66,11 @@ export async function GET(req: NextRequest) {
     .flatMap((d) =>
       accounts
         .filter((a) => pairs.has(key(d._id, a.mkId)))
-        .map((a) => {
-          const s = subByKey.get(key(d._id, a.mkId));
+        .flatMap((a) => {
+          const mine = subsByKey.get(key(d._id, a.mkId));
+          return (mine?.length ? mine : [null]).map((s) => ({ a, s }));
+        })
+        .map(({ a, s }) => {
           // Customer-facing stage: never leaks MK identifiers, only whether the order
           // was registered / shown to them.
           const myStage: SubmissionStage | null = s
@@ -81,6 +89,9 @@ export async function GET(req: NextRequest) {
             myTotal: s ? totalsNet({ qty: s.totals?.qty ?? 0, amount: s.totals?.amount ?? 0, discount: s.totals?.discount ?? 0 }) : 0,
             mySubmittedAt: s?.submittedAt ? new Date(s.submittedAt).toISOString() : null,
             myUpdatedAt: s?.updatedAt ? new Date(s.updatedAt).toISOString() : null,
+            mySubmissionId: s ? String(s._id) : null,
+            mySeq: s?.seq ?? 1,
+            myPreorderCount: subsByKey.get(key(d._id, a.mkId))?.length ?? 0,
             ...(annotate ? { account: accountById.get(a.mkId)! } : {}),
           };
         }),

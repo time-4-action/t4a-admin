@@ -133,6 +133,8 @@ export interface IPreorderCampaign extends Document {
   customerRules: ICustomerRule[];
   priceBooks: IPriceBook[];
   vatOverrides: IVatOverride[];
+  // A customer may place another preorder after submitting one (each priced on its own).
+  allowMultiplePreorders?: boolean;
   createdBy?: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -309,6 +311,7 @@ const PreorderCampaignSchema = new Schema<IPreorderCampaign>(
     customerRules: { type: [CustomerRuleSchema], default: [] },
     priceBooks: { type: [PriceBookSchema], default: [] },
     vatOverrides: { type: [VatOverrideSchema], default: [] },
+    allowMultiplePreorders: { type: Boolean, default: false },
     createdBy: { type: String, default: null },
   },
   { timestamps: true, minimize: false },
