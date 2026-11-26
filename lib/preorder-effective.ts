@@ -236,6 +236,7 @@ function lean(campaign: PreorderCampaignAdmin): PreorderCampaign {
     currency: campaign.currency,
     status: campaign.status,
     deadline: campaign.deadline ?? null,
+    allowMultiplePreorders: !!campaign.allowMultiplePreorders,
     rrpPricelist: campaign.rrpPricelist ?? null,
     partnerPricelist: campaign.partnerPricelist ?? null,
     tabs: campaign.tabs,

@@ -1,7 +1,8 @@
 // models/preorder-submission.ts
 //
-// One partner's response to a campaign. Keyed uniquely by (campaignId, partnerMkId) so
-// a partner has exactly one submission per campaign (draft → submitted). The partner is
+// One partner's preorder in a campaign. Keyed uniquely by (campaignId, partnerMkId, seq):
+// seq 1 is the first preorder; a campaign with `allowMultiplePreorders` lets the partner
+// start preorder 2, 3, … once the previous one is submitted. The partner is
 // always resolved from the session email server-side (never trusted from the client).
 // Wire view is PreorderSubmission / PortalSubmission in types/preorder.ts.
 //
@@ -148,6 +149,8 @@ export interface IPreorderSubmission extends Document {
   submittedAt?: Date | null;
   firstSubmittedAt?: Date | null;
   submitRevision: number;
+  // Which of this partner's preorders in the campaign (1 = the first).
+  seq: number;
   submitSource?: "customer" | "admin" | null;
   submittedBy?: string | null;
   // Customer-initiated request to unlock a submitted preorder for further edits.
@@ -389,6 +392,7 @@ const PreorderSubmissionSchema = new Schema<IPreorderSubmission>(
     submittedAt: { type: Date, default: null },
     firstSubmittedAt: { type: Date, default: null },
     submitRevision: { type: Number, default: 0 },
+    seq: { type: Number, default: 1 },
     submitSource: { type: String, default: null },
     submittedBy: { type: String, default: null },
     unlockRequestNote: { type: String, default: null },
@@ -405,8 +409,10 @@ const PreorderSubmissionSchema = new Schema<IPreorderSubmission>(
   { timestamps: true },
 );
 
-// One submission per partner per campaign — also the lock for the submit transition.
-PreorderSubmissionSchema.index({ campaignId: 1, partnerMkId: 1 }, { unique: true });
+// One document per preorder slot — also the lock for the submit transition. Replaced
+// the old unique (campaignId, partnerMkId) index; ensureSubmissionSlots() in
+// lib/preorder.ts backfills `seq` and drops the old index on existing databases.
+PreorderSubmissionSchema.index({ campaignId: 1, partnerMkId: 1, seq: 1 }, { unique: true });
 // Documents/Orders exclusion: a partner's registered-but-unpublished orders.
 PreorderSubmissionSchema.index({ partnerMkId: 1, "mkOrder.state": 1 });
 PreorderSubmissionSchema.index({ "mkSalesOrder.mkId": 1 }, { sparse: true });

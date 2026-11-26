@@ -328,7 +328,7 @@ export default function SubmissionClient({
         active="preorders"
         hideNav
         backHref={`/preorder/${campaignId}/submissions`}
-        title={submission.partnerName}
+        title={(submission.seq ?? 1) > 1 ? `${submission.partnerName} · Preorder ${submission.seq}` : submission.partnerName}
         meta={
           <>
             <span className="truncate">{campaign.title}</span>

@@ -21,14 +21,21 @@ type MyCampaign = PreorderCampaignSummary & {
   myTotal: number;
   mySubmittedAt: string | null;
   myUpdatedAt: string | null;
+  // One row per preorder: a campaign that allows several gives a row each.
+  mySubmissionId?: string | null;
+  mySeq?: number;
+  myPreorderCount?: number;
   // Portal agents: the account this row is for (one row per campaign per account).
   account?: PortalAccount;
 };
 
 // The fill page of a row — an agent's client row carries its account explicitly.
-export function preorderHref(campaignId: string, account?: PortalAccount | null): string {
-  const base = `/portal/preorders/${campaignId}`;
-  return account && !account.own ? `${base}?account=${encodeURIComponent(account.mkId)}` : base;
+export function preorderHref(campaignId: string, account?: PortalAccount | null, submissionId?: string | null): string {
+  const qs = new URLSearchParams();
+  if (account && !account.own) qs.set("account", account.mkId);
+  if (submissionId) qs.set("submission", submissionId);
+  const q = qs.toString();
+  return `/portal/preorders/${campaignId}${q ? `?${q}` : ""}`;
 }
 
 // Customer-facing wording for the stage — never Metakocka terminology.
@@ -169,13 +176,16 @@ export function PreordersList({ scope = "", multiAccount = false }: { scope?: st
               const pill = stagePill(c.myStage, c.mySubmissionStatus, c.status === "open");
               const hasAmount = !!c.mySubmissionStatus && c.myItems > 0;
               return (
-                <Link key={`${c.id}:${c.account?.mkId ?? ""}`} href={preorderHref(c.id, c.account)} className={cn(GRID, "group px-4 py-3 hover:bg-muted/30 transition-colors")}>
+                <Link key={`${c.id}:${c.account?.mkId ?? ""}:${c.mySubmissionId ?? ""}`} href={preorderHref(c.id, c.account, (c.myPreorderCount ?? 0) > 1 ? c.mySubmissionId : null)} className={cn(GRID, "group px-4 py-3 hover:bg-muted/30 transition-colors")}>
                   <div className="min-w-0 flex items-center gap-3">
                     <span className="w-9 h-9 rounded-lg bg-lime-600/10 flex items-center justify-center shrink-0">
                       <ShoppingCart className="w-4 h-4 text-lime-600 dark:text-lime-500" />
                     </span>
                     <div className="min-w-0">
-                      <p className="text-[13px] font-semibold text-foreground truncate">{c.title}</p>
+                      <p className="text-[13px] font-semibold text-foreground truncate">
+                        {c.title}
+                        {(c.myPreorderCount ?? 0) > 1 && <span className="ml-1.5 font-medium text-muted-foreground">· Preorder {c.mySeq ?? 1}</span>}
+                      </p>
                       {multiAccount && c.account && (
                         <p className="text-[11px] font-medium text-teal-700 dark:text-teal-300 truncate">
                           {c.account.name}

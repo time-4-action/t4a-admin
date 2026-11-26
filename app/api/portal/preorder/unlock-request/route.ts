@@ -12,9 +12,9 @@ export const dynamic = "force-dynamic";
 
 // POST /api/portal/preorder/unlock-request — a customer asks an admin to unlock their
 // submitted preorder so they can edit it, with an optional note explaining why.
-// Body: { campaignId, note }.
+// Body: { campaignId, submissionId?, note } — absent submissionId = the latest locked one.
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => ({}))) as { account?: string; campaignId?: string; note?: string };
+  const body = (await request.json().catch(() => ({}))) as { account?: string; campaignId?: string; submissionId?: string; note?: string };
   const resolved = await resolvePortalAccount(body.account);
   if (!resolved) return NextResponse.json({ error: "no-account" }, { status: 404 });
   const { partner } = resolved;
@@ -22,10 +22,12 @@ export async function POST(request: Request) {
   if (!toObjectId(campaignId)) return NextResponse.json({ error: "invalid campaign" }, { status: 400 });
 
   await connectDB();
-  const doc = await PreorderSubmission.findOne({
-    campaignId,
-    partnerMkId: partner.mkId,
-  }).exec();
+  const subId = body.submissionId && toObjectId(body.submissionId) ? body.submissionId : null;
+  const doc = await PreorderSubmission.findOne(
+    subId ? { _id: subId, campaignId, partnerMkId: partner.mkId } : { campaignId, partnerMkId: partner.mkId },
+  )
+    .sort({ seq: -1 })
+    .exec();
   if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   // Only a locked (submitted/confirmed) preorder can be requested to unlock.

@@ -9,7 +9,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // POST /api/portal/preorder/submissions — save draft or submit a partner's preorder.
-// Body: { campaignId, quantities: {rowId: qty}, terms, action: "save" | "submit" }.
+// Body: { campaignId, submissionId?, quantities: {rowId: qty}, terms, action: "save" | "submit" }.
+// `submissionId` names which of the partner's preorders (absent = the open draft, else
+// a new one — see lib/preorder-submit.ts).
 // The partner is resolved from the session; quantities are validated against the
 // partner's EFFECTIVE campaign; on submit the Metakocka sales order is registered
 // immediately (lib/preorder-submit.ts). The response never carries MK identifiers.
@@ -17,6 +19,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as {
     account?: string;
     campaignId?: string;
+    submissionId?: string;
     quantities?: Record<string, number>;
     terms?: PreorderTerms;
     action?: "save" | "submit";
@@ -45,6 +48,7 @@ export async function POST(request: Request) {
 
   const result = await saveOrSubmitPreorder({
     campaignDoc,
+    submissionId: typeof body.submissionId === "string" && toObjectId(body.submissionId) ? body.submissionId : null,
     partner: { mkId: partner.mkId, name: partner.name, email: partner.emails?.[0], mk: partner },
     quantities: body.quantities ?? {},
     // Identity + addresses are Metakocka's, never the browser's: only the requested

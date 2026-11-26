@@ -146,6 +146,9 @@ export type PreorderCampaign = {
   rrpPricelist?: string | null;
   partnerPricelist?: string | null;
   tabs: PreorderTab[];
+  // Customers may place more than one preorder in this campaign (each one on its own:
+  // own volume-discount tier, own minimum order, own Metakocka order).
+  allowMultiplePreorders?: boolean;
   // How THIS customer is priced (kind, VAT; the basis is always the partner price —
   // "rrp" only on a legacy snapshot). Set by the effective-campaign resolver and
   // restored from a submission's snapshot — never stored on the campaign. Absent on
@@ -537,6 +540,8 @@ export type PreorderSubmission = {
   // Frozen commercial configuration + priced lines as of submit.
   snapshot?: CommercialSnapshot | null;
   submitRevision?: number;
+  // Which of this customer's preorders in the campaign (1 = the first).
+  seq?: number;
   firstSubmittedAt?: string | null;
   submitSource?: "customer" | "admin" | null;
   submittedBy?: string | null;
@@ -551,6 +556,18 @@ export type PortalSubmission = Omit<
 > & {
   registration: PortalRegistration;
   published: boolean;
+};
+
+// One of the customer's preorders in a campaign (the fill page's preorder switcher).
+export type PortalPreorderRef = {
+  id: string;
+  seq: number;
+  status: SubmissionStatus;
+  stage: SubmissionStage;
+  items: number;
+  total: number;
+  submittedAt: string | null;
+  updatedAt: string | null;
 };
 
 export function submissionStage(
@@ -595,6 +612,7 @@ export type PreorderAccessSummary = {
 // Admin overview list row (per partner response).
 export type PreorderSubmissionSummary = {
   id: string;
+  seq?: number;
   partnerMkId: string;
   partnerName: string;
   partnerEmail?: string;

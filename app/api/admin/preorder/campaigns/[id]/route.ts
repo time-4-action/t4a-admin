@@ -42,6 +42,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     partnerPricelist?: string | null;
     tabs?: PreorderTab[];
     vatOverrides?: unknown;
+    allowMultiplePreorders?: boolean;
   };
   await connectDB();
   const doc = await PreorderCampaign.findById(id).exec();
@@ -64,6 +65,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       tiers: sanitizeTiers(t?.tiers),
     })) as unknown as typeof doc.tabs;
   }
+  if (typeof body.allowMultiplePreorders === "boolean") doc.allowMultiplePreorders = body.allowMultiplePreorders;
   // Per-country VAT overrides: replaced wholesale, invalid entries dropped.
   if (Array.isArray(body.vatOverrides)) doc.vatOverrides = normalizeVatOverrides(body.vatOverrides);
   await doc.save();

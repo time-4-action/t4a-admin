@@ -88,6 +88,40 @@ export async function partnerHasCampaignAccess(
   return !!(access || sub);
 }
 
+// One-time migration for databases made before multiple preorders: every existing
+// submission becomes preorder 1 (`seq: 1`), the (campaignId, partnerMkId, seq) unique
+// index is created, and the old (campaignId, partnerMkId) unique index — which would
+// refuse a second preorder — is dropped. Idempotent; runs once per process before the
+// first write that creates a preorder. A failure is logged and retried next time.
+const OLD_SLOT_INDEX = "campaignId_1_partnerMkId_1";
+let slotsReady: Promise<void> | null = null;
+export function ensureSubmissionSlots(opts: { force?: boolean } = {}): Promise<void> {
+  if (opts.force) slotsReady = null;
+  slotsReady ??= (async () => {
+    const col = PreorderSubmission.collection;
+    await col.updateMany({ seq: { $exists: false } }, { $set: { seq: 1 } });
+    await col.createIndex({ campaignId: 1, partnerMkId: 1, seq: 1 }, { unique: true });
+    const indexes = await col.indexes().catch(() => [] as { name?: string }[]);
+    if (indexes.some((i) => i.name === OLD_SLOT_INDEX)) await col.dropIndex(OLD_SLOT_INDEX);
+  })().catch((err) => {
+    slotsReady = null;
+    console.error("[preorder] could not migrate submission slots:", err);
+    throw err;
+  });
+  return slotsReady;
+}
+
+// The preorders a partner has in one campaign, oldest first.
+export async function partnerSubmissions(campaignId: Types.ObjectId, partnerMkId: string): Promise<IPreorderSubmission[]> {
+  return PreorderSubmission.find({ campaignId, partnerMkId }).sort({ seq: 1, createdAt: 1 }).exec();
+}
+
+// Which preorder the fill page opens when none is named: the open draft, else the
+// latest one.
+export function defaultSubmission(subs: IPreorderSubmission[]): IPreorderSubmission | null {
+  return subs.find((s) => s.status === "draft") ?? subs[subs.length - 1] ?? null;
+}
+
 export function toAccessSummary(doc: IPreorderAccess, countryIso?: string | null): PreorderAccessSummary {
   return {
     partnerMkId: doc.partnerMkId,
@@ -288,6 +322,7 @@ export function toCampaignView(doc: IPreorderCampaign): CampaignView {
     deadline: iso(doc.deadline),
     rrpPricelist: doc.rrpPricelist ?? null,
     partnerPricelist: doc.partnerPricelist ?? null,
+    allowMultiplePreorders: !!doc.allowMultiplePreorders,
     tabs: (typeof (doc.tabs as unknown as { toObject?: () => unknown }).toObject === "function"
       ? (doc.tabs as unknown as { toObject: () => PreorderTab[] }).toObject()
       : doc.tabs) as unknown as PreorderTab[],
@@ -494,6 +529,7 @@ export function toSubmissionView(doc: IPreorderSubmission): SubmissionView {
     publishedHash: doc.publishedHash ?? null,
     snapshot: snapshotView(doc.snapshot),
     submitRevision: doc.submitRevision ?? 0,
+    seq: doc.seq ?? 1,
     firstSubmittedAt: iso(doc.firstSubmittedAt),
     submitSource: doc.submitSource ?? null,
     submittedBy: doc.submittedBy ?? null,
@@ -546,6 +582,7 @@ export function toSubmissionSummary(doc: IPreorderSubmission, countryIso?: strin
   const view = toSubmissionView(doc);
   return {
     id: view.id,
+    seq: view.seq ?? 1,
     partnerMkId: view.partnerMkId,
     partnerName: view.partnerName,
     partnerEmail: view.partnerEmail,
