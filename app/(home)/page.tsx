@@ -3,7 +3,8 @@ import { auth0 } from "@/lib/auth";
 import { canSee } from "@/lib/access";
 import { getCurrentRoles } from "@/lib/current-user";
 import { readImpersonation } from "@/lib/portal-impersonation";
-import { ChevronRight } from "lucide-react";
+import { hasOwnPortal } from "@/lib/portal";
+import { ChevronRight, ShoppingCart, ReceiptText } from "lucide-react";
 import { sections } from "./sections";
 
 export default async function WelcomePage() {
@@ -15,8 +16,24 @@ export default async function WelcomePage() {
     .map((s) => ({ ...s, cards: s.cards.filter((c) => canSee(roles, c.section ?? s.section)) }))
     .filter((s) => s.cards.length > 0);
 
-  // Greet the person whose home this is — the viewed user while "viewing as" one.
+  // An admin who is also a customer (say, a partner given the builder) has a portal
+  // of their own; /portal sends admins here, so this is their way in.
   const imp = await readImpersonation();
+  if (!imp && (await hasOwnPortal(session?.user?.email))) {
+    visibleSections.unshift({
+      label: "My customer account",
+      section: "customers",
+      icon: ShoppingCart,
+      color: "text-teal-500",
+      bg: "bg-teal-500/10",
+      cards: [
+        { href: "/portal/preorders", icon: ShoppingCart, title: "Preorders", desc: "Your preorder campaigns and orders" },
+        { href: "/portal/invoices", icon: ReceiptText, title: "Invoices and documents", desc: "Your invoices, sales orders and credit notes" },
+      ],
+    });
+  }
+
+  // Greet the person whose home this is — the viewed user while "viewing as" one.
   const whose = imp?.kind === "user" ? imp.name || imp.email : session?.user?.name || session?.user?.email || "";
   const firstName = whose.toString().split(/[\s@]+/)[0];
 

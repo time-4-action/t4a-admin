@@ -5,12 +5,12 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { viewingAsName, type ViewingAs } from "@/components/viewing-as";
-import { ReceiptText, FileMinus, ClipboardList, Building2, LogOut, Menu, X, ShoppingCart } from "lucide-react";
+import { ReceiptText, FileMinus, ClipboardList, Building2, LogOut, Menu, X, ShoppingCart, LayoutGrid } from "lucide-react";
 import { PLATFORM_NAME } from "@/lib/brand";
 import { PortalAccountSwitcher } from "@/components/portal-account-switcher";
 
-// The B2B customer portal shell. Shown to any authenticated non-admin (they hold
-// no role; their documents are matched by email inside the portal). Deliberately
+// The B2B customer portal shell. Shown on /portal to any signed-in user (a customer
+// holds no role, though an admin can be a customer too; their documents are matched by email inside the portal). Deliberately
 // stripped down: brand + document links, no admin sections. Offers are
 // deliberately not exposed to customers (see PORTAL_DOC_KINDS in lib/portal.ts).
 
@@ -44,7 +44,7 @@ function Avatar({ user }: { user?: PortalUser }) {
   );
 }
 
-export default function PortalNav({ user, viewingAs }: { user?: PortalUser; viewingAs?: ViewingAs | null }) {
+export default function PortalNav({ user, viewingAs, adminHome = false }: { user?: PortalUser; viewingAs?: ViewingAs | null; adminHome?: boolean }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -113,6 +113,16 @@ export default function PortalNav({ user, viewingAs }: { user?: PortalUser; view
 
       {/* Theme + user */}
       <div className="px-2 pb-2 pt-1 border-t border-border shrink-0 space-y-1.5">
+        {/* An admin who is also a customer: back to their admin tools. */}
+        {adminHome && (
+          <Link
+            href="/"
+            className="flex items-center gap-2.5 w-full rounded-xl px-3 py-2 text-[13px] transition-all duration-150 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <LayoutGrid className="h-[17px] w-[17px] shrink-0 text-muted-foreground/70" />
+            <span className="truncate">Admin</span>
+          </Link>
+        )}
         <div className="px-1">
           <ThemeToggle />
         </div>

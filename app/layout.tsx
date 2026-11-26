@@ -10,6 +10,7 @@ import { auth0 } from "@/lib/auth";
 import { effectiveRoles, readImpersonation } from "@/lib/portal-impersonation";
 import { hasAnyAccess, rolesFromIdToken } from "@/lib/access";
 import { PLATFORM_NAME } from "@/lib/brand";
+import { hasOwnPortal } from "@/lib/portal";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -45,6 +46,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       ? { kind: "user", userId: imp.userId, email: imp.email, name: imp.name, roles: imp.roles, admin: hasAnyAccess(imp.roles) }
       : { kind: "customer", partnerMkId: imp.partnerMkId, partnerName: imp.partnerName };
 
+  // An admin who is also a customer gets links between the admin app and their own
+  // portal. Not while viewing as someone: the impersonation banner handles that.
+  const admin = hasAnyAccess(roles);
+  const ownPortal = admin && !imp ? await hasOwnPortal(user?.email) : false;
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -55,7 +61,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       >
         <ThemeProvider>
           <CurrencyProvider>
-            <AppShell user={user} roles={roles} viewingAs={viewingAs}>
+            <AppShell user={user} roles={roles} viewingAs={viewingAs} ownPortal={ownPortal} adminHome={admin && !imp}>
               {children}
             </AppShell>
           </CurrencyProvider>

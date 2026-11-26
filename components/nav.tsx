@@ -256,7 +256,7 @@ type NavUser = { name?: string | null; email?: string | null; picture?: string |
 // `roles` are the EFFECTIVE roles (app/layout.tsx): while a super-admin views the
 // app as another user they are that user's, so the sections listed are exactly
 // the ones that user can open; `viewingAs` then names them in the user block.
-export default function Nav({ user, roles = [], viewingAs }: { user?: NavUser; roles?: string[]; viewingAs?: ViewingAs | null }) {
+export default function Nav({ user, roles = [], viewingAs, ownPortal = false }: { user?: NavUser; roles?: string[]; viewingAs?: ViewingAs | null; ownPortal?: boolean }) {
   const [open, setOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
@@ -433,6 +433,23 @@ export default function Nav({ user, roles = [], viewingAs }: { user?: NavUser; r
           <div className={cn("px-1", !isOpen && "flex justify-center")}>
             {isOpen ? <ThemeToggle /> : <ThemeToggle collapsed />}
           </div>
+
+          {/* An admin who is also a customer: their own preorders and documents. */}
+          {ownPortal && (
+            <Link
+              href="/portal/preorders"
+              title={!isOpen ? "My customer portal" : undefined}
+              className={cn(
+                "flex items-center gap-2.5 w-full rounded-xl py-2 text-[13px] transition-all duration-150",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                isOpen ? "px-3" : "justify-center px-2",
+                "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              <ShoppingCart className="h-[15px] w-[15px] shrink-0 text-muted-foreground/70" />
+              {isOpen && <span>My customer portal</span>}
+            </Link>
+          )}
 
           {canSeeSettings && (
             <Link
