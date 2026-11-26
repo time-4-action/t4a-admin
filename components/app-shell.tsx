@@ -7,9 +7,9 @@ import { MaintenanceBanner } from "@/components/maintenance-banner";
 import type { ViewingAs } from "@/components/viewing-as";
 
 // Chooses the chrome by route: the stripped-down B2B portal shell under /portal,
-// the full admin sidebar everywhere else. Middleware (lib/proxy.ts) already
-// guarantees only customers reach /portal and only admins reach admin routes, so
-// a path-based split is correct and lets both shells live under one root layout.
+// the full admin sidebar everywhere else. Middleware (lib/proxy.ts) lets any
+// signed-in user into /portal (an admin can be a customer too) and only admins
+// into admin routes, so a path-based split is correct and lets both shells live under one root layout.
 
 type ShellUser = { name?: string | null; email?: string | null; picture?: string | null };
 
@@ -19,6 +19,8 @@ export default function AppShell({
   user,
   roles,
   viewingAs,
+  ownPortal = false,
+  adminHome = false,
   children,
 }: {
   user?: ShellUser;
@@ -26,6 +28,10 @@ export default function AppShell({
   // Set when an admin is viewing the portal as a customer, or the whole app as
   // another user (lib/portal-impersonation.ts).
   viewingAs?: ViewingAs | null;
+  // The signed-in admin is also a customer: link the admin nav to their portal.
+  ownPortal?: boolean;
+  // The signed-in user is an admin: link the portal nav back to the admin home.
+  adminHome?: boolean;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -50,7 +56,7 @@ export default function AppShell({
   // Strips (maintenance, viewing as) stack above the page, which fills what is left.
   return (
     <>
-      {isPortal ? <PortalNav user={user} viewingAs={viewingAs} /> : <Nav user={user} roles={roles} viewingAs={viewingAs} />}
+      {isPortal ? <PortalNav user={user} viewingAs={viewingAs} adminHome={adminHome} /> : <Nav user={user} roles={roles} viewingAs={viewingAs} ownPortal={ownPortal} />}
       <main className="flex-1 min-w-0 overflow-hidden bg-background pt-12 md:pt-0 flex flex-col">
         <MaintenanceBanner />
         {banner && <ViewingAsBanner viewingAs={viewingAs} />}

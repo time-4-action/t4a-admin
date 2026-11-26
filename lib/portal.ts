@@ -87,6 +87,14 @@ export async function getPortalViewer(): Promise<PortalViewer> {
 
 // The email the portal identity is derived from: the impersonated user's while a
 // super-admin views as them, otherwise the session's. For the no-account page.
+// Whether a login email is also a Metakocka customer. An admin login can be one too
+// (a partner given the builder, say): they then have a portal of their own, which
+// the admin chrome must link to, since /portal sends admins to the admin home.
+export async function hasOwnPortal(email: string | null | undefined): Promise<boolean> {
+  if (!email) return false;
+  return !!(await resolvePartnerByEmail(email).catch(() => null));
+}
+
 export async function getPortalIdentityEmail(): Promise<string | null> {
   const imp = await readImpersonation();
   if (imp?.kind === "user") return imp.email;
