@@ -10,7 +10,8 @@ import { auth0 } from "@/lib/auth";
 import { effectiveRoles, readImpersonation } from "@/lib/portal-impersonation";
 import { hasAnyAccess, rolesFromIdToken } from "@/lib/access";
 import { PLATFORM_NAME } from "@/lib/brand";
-import { hasOwnPortal } from "@/lib/portal";
+import { adminLoginsForPartner, hasOwnPortal, linkSubjectEmail, type AdminLogin } from "@/lib/portal";
+import { canImpersonateUser } from "@/lib/portal-impersonation-codec";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -47,9 +48,17 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       : { kind: "customer", partnerMkId: imp.partnerMkId, partnerName: imp.partnerName };
 
   // An admin who is also a customer gets links between the admin app and their own
-  // portal. Not while viewing as someone: the impersonation banner handles that.
+  // portal. Viewing as a user shows that user's links, like their own login would.
+  // Viewing as a customer: if an admin login sits behind it, a super-admin may jump
+  // to viewing as that login (what the person sees from the portal's Admin link).
   const admin = hasAnyAccess(roles);
-  const ownPortal = admin && !imp ? await hasOwnPortal(user?.email) : false;
+  const subjectEmail = linkSubjectEmail(user?.email, imp);
+  const ownPortal = admin && subjectEmail ? await hasOwnPortal(subjectEmail) : false;
+  const adminHome = admin && imp?.kind !== "customer";
+  let adminAs: AdminLogin | null = null;
+  if (imp?.kind === "customer" && canImpersonateUser(rolesFromIdToken(session?.tokenSet?.idToken))) {
+    adminAs = (await adminLoginsForPartner(imp.partnerMkId).catch(() => []))[0] ?? null;
+  }
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -61,7 +70,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       >
         <ThemeProvider>
           <CurrencyProvider>
-            <AppShell user={user} roles={roles} viewingAs={viewingAs} ownPortal={ownPortal} adminHome={admin && !imp}>
+            <AppShell user={user} roles={roles} viewingAs={viewingAs} ownPortal={ownPortal} adminHome={adminHome} adminAs={adminAs}>
               {children}
             </AppShell>
           </CurrencyProvider>

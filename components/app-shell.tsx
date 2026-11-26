@@ -21,6 +21,7 @@ export default function AppShell({
   viewingAs,
   ownPortal = false,
   adminHome = false,
+  adminAs = null,
   children,
 }: {
   user?: ShellUser;
@@ -32,6 +33,8 @@ export default function AppShell({
   ownPortal?: boolean;
   // The signed-in user is an admin: link the portal nav back to the admin home.
   adminHome?: boolean;
+  // Viewing as a customer whose login is also an admin: offer to view as that login.
+  adminAs?: { userId: string; name: string } | null;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -56,7 +59,7 @@ export default function AppShell({
   // Strips (maintenance, viewing as) stack above the page, which fills what is left.
   return (
     <>
-      {isPortal ? <PortalNav user={user} viewingAs={viewingAs} adminHome={adminHome} /> : <Nav user={user} roles={roles} viewingAs={viewingAs} ownPortal={ownPortal} />}
+      {isPortal ? <PortalNav user={user} viewingAs={viewingAs} adminHome={adminHome} adminAs={adminAs} /> : <Nav user={user} roles={roles} viewingAs={viewingAs} ownPortal={ownPortal} />}
       <main className="flex-1 min-w-0 overflow-hidden bg-background pt-12 md:pt-0 flex flex-col">
         <MaintenanceBanner />
         {banner && <ViewingAsBanner viewingAs={viewingAs} />}

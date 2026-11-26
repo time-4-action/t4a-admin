@@ -609,6 +609,15 @@ card on the user detail sidebar (`/users/[id]`, `ViewAsUserButton` in
 is a super-admin). `ViewingAs` (`components/viewing-as.ts`, the user kind carries
 `roles` + `admin`) is the discriminated union the banner (shown on admin pages
 too while viewing as a user) and both navs render.
+**An admin login can also be a customer** (its email matches a Metakocka partner,
+e.g. a partner given `builder-admin`). `/portal` sends admins to `/`, so the
+admin home shows a "My customer account" panel and the admin nav a "My customer
+portal" link (`hasOwnPortal` in `lib/portal.ts`), and the portal nav an "Admin"
+link back. The links follow the subject (`linkSubjectEmail`): the session, or
+the user being viewed as, exactly as that login sees them. Viewing as a
+**customer** whose partner emails belong to an admin login
+(`adminLoginsForPartner`, cached Auth0 lists) shows a super-admin an "Admin"
+entry in the portal nav that switches to viewing as that login.
 | Customer picker (admin) | `/documents` | Search a partner by name/email/tax. |
 | Customer docs (admin) | `/documents/{offers,orders,invoices,credit-notes}` | Per-family lists for the picked customer (customer kept in localStorage via `use-customer.ts`). |
 | Detail (admin) | `/documents/{offers,orders,invoices,credit-notes}/[mkId]` | Same detail view, any partner. |
