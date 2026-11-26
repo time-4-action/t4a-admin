@@ -3,7 +3,7 @@ import { auth0 } from "@/lib/auth";
 import { canSee } from "@/lib/access";
 import { getCurrentRoles } from "@/lib/current-user";
 import { readImpersonation } from "@/lib/portal-impersonation";
-import { hasOwnPortal } from "@/lib/portal";
+import { hasOwnPortal, linkSubjectEmail } from "@/lib/portal";
 import { ChevronRight, ShoppingCart, ReceiptText } from "lucide-react";
 import { sections } from "./sections";
 
@@ -19,7 +19,9 @@ export default async function WelcomePage() {
   // An admin who is also a customer (say, a partner given the builder) has a portal
   // of their own; /portal sends admins here, so this is their way in.
   const imp = await readImpersonation();
-  if (!imp && (await hasOwnPortal(session?.user?.email))) {
+  // Viewing as a user shows the panel exactly when their own login would.
+  const subjectEmail = linkSubjectEmail(session?.user?.email, imp);
+  if (subjectEmail && (await hasOwnPortal(subjectEmail))) {
     visibleSections.unshift({
       label: "My customer account",
       section: "customers",

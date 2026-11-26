@@ -14,6 +14,8 @@ import { readImpersonation } from "@/lib/portal-impersonation";
 import { cached } from "@/lib/auth0-cache";
 import { getMkCustomer, partnerFromDirectory } from "@/lib/mk-customers";
 import { getAgentClients } from "@/lib/portal-agents";
+import { listAllUsers, getRolesByUserId } from "@/lib/auth0-mgmt";
+import { hasAnyAccess } from "@/lib/access";
 import type { DocKind, MkPartner } from "@/types/documents";
 import {
   ALL_ACCOUNTS,
@@ -93,6 +95,34 @@ export async function getPortalViewer(): Promise<PortalViewer> {
 export async function hasOwnPortal(email: string | null | undefined): Promise<boolean> {
   if (!email) return false;
   return !!(await resolvePartnerByEmail(email).catch(() => null));
+}
+
+// The login whose admin + portal links the chrome shows: the session's own, or the
+// user a super-admin views as (exactly what that user's login shows). Null while
+// viewing as a customer, which is a partner rather than a login.
+export function linkSubjectEmail(
+  sessionEmail: string | null | undefined,
+  imp: { kind: "user"; email: string } | { kind: "customer" } | null,
+): string | null {
+  if (!imp) return sessionEmail ?? null;
+  return imp.kind === "user" ? imp.email : null;
+}
+
+export type AdminLogin = { userId: string; name: string; email: string };
+
+// The admin logins behind a customer: Auth0 users whose email is one of the
+// partner's contact emails and who hold an admin role. While viewing as that
+// customer, the portal offers to switch to "view as" that login, since the person
+// themselves sees an Admin link there. Cached Auth0 lists, so no per-request cost.
+export async function adminLoginsForPartner(partnerMkId: string): Promise<AdminLogin[]> {
+  const partner = await loadPartner(partnerMkId);
+  const emails = new Set((partner?.emails ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean));
+  if (!emails.size) return [];
+  const [users, { rolesByUser }] = await Promise.all([listAllUsers(), getRolesByUserId()]);
+  return users
+    .filter((u) => typeof u.email === "string" && emails.has(u.email.toLowerCase()))
+    .filter((u) => hasAnyAccess(rolesByUser.get(u.user_id) ?? []))
+    .map((u) => ({ userId: u.user_id as string, name: (u.name as string) || u.email, email: u.email as string }));
 }
 
 export async function getPortalIdentityEmail(): Promise<string | null> {

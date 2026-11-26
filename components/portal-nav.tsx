@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { viewingAsName, type ViewingAs } from "@/components/viewing-as";
@@ -44,7 +44,53 @@ function Avatar({ user }: { user?: PortalUser }) {
   );
 }
 
-export default function PortalNav({ user, viewingAs, adminHome = false }: { user?: PortalUser; viewingAs?: ViewingAs | null; adminHome?: boolean }) {
+const adminLinkClass =
+  "flex items-center gap-2.5 w-full rounded-xl px-3 py-2 text-[13px] text-left transition-all duration-150 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60";
+
+// Viewing as a customer whose login is also an admin: switch to viewing as that
+// login, which lands on their admin home (what their own Admin link opens).
+function ViewAsAdminLogin({ login }: { login: { userId: string; name: string } }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function go() {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/admin/portal/impersonate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: login.userId, returnTo: pathname }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { error?: string; redirect?: string };
+      if (!r.ok) throw new Error(j.error ?? `Could not switch (${r.status})`);
+      router.push(j.redirect || "/");
+      router.refresh();
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+  return (
+    <button type="button" onClick={go} disabled={busy} className={adminLinkClass} title={error ?? `${login.name} also has admin access: view the app as their login`}>
+      <LayoutGrid className="h-[17px] w-[17px] shrink-0 text-muted-foreground/70" />
+      <span className="truncate">{error ? "Failed, retry" : "Admin"}</span>
+    </button>
+  );
+}
+
+export default function PortalNav({
+  user,
+  viewingAs,
+  adminHome = false,
+  adminAs = null,
+}: {
+  user?: PortalUser;
+  viewingAs?: ViewingAs | null;
+  adminHome?: boolean;
+  adminAs?: { userId: string; name: string } | null;
+}) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -114,11 +160,9 @@ export default function PortalNav({ user, viewingAs, adminHome = false }: { user
       {/* Theme + user */}
       <div className="px-2 pb-2 pt-1 border-t border-border shrink-0 space-y-1.5">
         {/* An admin who is also a customer: back to their admin tools. */}
+        {adminAs && <ViewAsAdminLogin login={adminAs} />}
         {adminHome && (
-          <Link
-            href="/"
-            className="flex items-center gap-2.5 w-full rounded-xl px-3 py-2 text-[13px] transition-all duration-150 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
+          <Link href="/" className={adminLinkClass}>
             <LayoutGrid className="h-[17px] w-[17px] shrink-0 text-muted-foreground/70" />
             <span className="truncate">Admin</span>
           </Link>
