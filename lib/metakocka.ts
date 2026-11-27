@@ -140,10 +140,21 @@ function num(v: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-// Derive a payment state from sum_paid vs sum_all + due date. Bills are always
-// fetched WITH payment flags, so a missing sum_paid means zero paid (MK omits it
-// for fully-unpaid invoices) — treat it as 0, not unknown. "na" is only for a
-// missing total (a data problem).
+// What has settled a bill: money paid plus any credit note ("dobropis") issued
+// against it. MK keeps the two apart — a refund moved onto a credit note shows
+// up as a negative "Returns" payment in sum_paid and the credited amount only in
+// sum_creditnote — so sum_paid alone leaves a credited invoice looking open.
+function settledAmount(raw: Record<string, unknown>): string | undefined {
+  const paid = num(raw.sum_paid);
+  const credit = num(raw.sum_creditnote);
+  if (paid === undefined && credit === undefined) return undefined;
+  return ((paid ?? 0) + (credit ?? 0)).toFixed(2);
+}
+
+// Derive a payment state from the settled amount vs sum_all + due date. Bills
+// are always fetched WITH payment flags, so a missing sum_paid means zero paid
+// (MK omits it for fully-unpaid invoices) — treat it as 0, not unknown. "na" is
+// only for a missing total (a data problem).
 function derivePayment(
   sumAll: unknown,
   sumPaid: unknown,
@@ -443,8 +454,8 @@ function mapSummary(raw: Record<string, unknown>): DocSummary {
     statusCode: str(raw.status_code),
     statusDesc: str(raw.status_desc),
     dueDate: bill ? dueDate : undefined,
-    payment: bill ? derivePayment(raw.sum_all, raw.sum_paid, dueDate) : undefined,
-    sumPaid: bill ? str(raw.sum_paid) : undefined,
+    payment: bill ? derivePayment(raw.sum_all, settledAmount(raw), dueDate) : undefined,
+    sumPaid: bill ? settledAmount(raw) : undefined,
     itemCount: products,
     buyerOrder: str(raw.buyer_order),
     extraColumns: Array.isArray(raw.extra_column)
@@ -472,7 +483,7 @@ function mapDetail(raw: Record<string, unknown>): DocDetail {
       .filter((n): n is number => n !== undefined)
       .reduce((a, b) => a + b, 0)
       .toFixed(2),
-    sumPaid: str(raw.sum_paid),
+    sumPaid: settledAmount(raw),
     lastPaidDate: mkDate(raw.last_paid_date),
     validTo: mkDate(raw.valid_to),
     lines: mapLines(raw.product_list),
